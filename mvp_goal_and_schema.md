@@ -450,7 +450,49 @@ CREATE TABLE prompt_version (
 
 ---
 
-## 8. Open Items Before Prompt Design
+## 8. Post-First-Run Checkpoint: Raw T1 Source Review
+
+Before any v2 scope decision on securities-level consideration extraction (per-security capture from Exhibit 2.1, acquirer share price at announcement, calculated equity value), the operator performs a manual review of the raw SEC source texts captured during the first 100-PR run.
+
+**Purpose.** Ground the v2 decision in evidence rather than design assumptions. The questions to answer: for the subset of MVP deals that triggered SEC enrichment, what fraction have extractable securities-level detail in the Exhibit 2.1 text? Is the per-security model actually achievable from these texts, or do most exhibits lack the structured tables the schema assumes?
+
+**Mechanics.**
+
+1. After first run completes, query the database:
+   ```sql
+   SELECT source_raw_id, source_type, title, length(clean_text) AS char_count
+   FROM source_raw
+   WHERE source_type IN ('SEC_8K_ITEM_101', 'SEC_EXHIBIT_21')
+   ORDER BY source_type, length(clean_text) DESC;
+   ```
+
+2. Dump 5–10 Exhibit 2.1 texts to individual files for review:
+   ```sql
+   SELECT clean_text FROM source_raw WHERE source_raw_id = <id>;
+   ```
+
+3. Review each exhibit for:
+   - Presence of a clear consideration table (security type × shares × price × exchange ratio).
+   - Presence of acquirer stock pricing language (if stock consideration is involved).
+   - Structural consistency across exhibits (are the fields we'd want to extract in similar places across filings?).
+
+4. Document findings in a brief markdown note (`/notes/t1_source_review_<date>.md`) with:
+   - Total exhibits reviewed
+   - Count with extractable securities tables
+   - Count with acquirer pricing language
+   - Examples of ambiguous or non-standard formats
+   - Recommendation on v2 scope feasibility
+
+**Outcome.** The review informs whether v2 securities extraction is:
+- **Feasible as designed** — proceed with schema-aligned per-security extraction.
+- **Feasible with modifications** — adjust schema or prompt approach based on what real exhibits look like.
+- **Deferred** — T1 source quality doesn't support the per-security model; continue with as-reported deal value as the canonical extraction.
+
+This review is a prerequisite for any v2 securities extraction scoping conversation.
+
+---
+
+## 9. Open Items Before Prompt Design
 
 1. **PR Newswire robots.txt posture.** Confirm acceptable scrape rate and that the M&A category page is not disallowed. Adjust throttle accordingly.
 2. **sec-api.io rate limit on $55 tier.** Needed to set parallelism ceiling on the SEC adapter. Pull from account dashboard.
@@ -460,7 +502,7 @@ CREATE TABLE prompt_version (
 
 ---
 
-## 9. Document Control
+## 10. Document Control
 
 | Version | Date | Change |
 | :--- | :--- | :--- |
