@@ -194,6 +194,8 @@ Output:
 
 **Example 2 — Semantic conflict (EV vs equity value):**
 
+Note: deal_type is ACQUISITION. Take-Private context is inferred downstream from target_status = PUBLIC + acquirer_type = PRIVATE_EQUITY; TAKE_PRIVATE was removed as a top-level type in v0.2.
+
 Input:
 ```
 FIELD: value_amount
@@ -202,7 +204,7 @@ FIELD TYPE: number
 DEAL CONTEXT:
 - Target: Acme Corp
 - Acquirer: Zenith Capital Partners
-- Deal Type: TAKE_PRIVATE
+- Deal Type: ACQUISITION
 - Announced: 2026-04-10
 
 CONFLICTING OBSERVATIONS:

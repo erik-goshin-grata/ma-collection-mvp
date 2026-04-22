@@ -193,9 +193,11 @@ Output:
 
 **Example 3 — Take-private with PE acquirer, default to financial:**
 
+Note: deal_type is ACQUISITION. Take-Private context is inferred downstream from target_status = PUBLIC + acquirer_type = PRIVATE_EQUITY; TAKE_PRIVATE was removed as a top-level type in v0.2.
+
 Input:
 ```
-DEAL TYPE: TAKE_PRIVATE
+DEAL TYPE: ACQUISITION
 TARGET: Acme Corp
 ACQUIRER: Zenith Capital Partners
 

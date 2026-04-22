@@ -114,9 +114,17 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
     acquirer_fee_amount         REAL,
     acquirer_fee_percentage     REAL,
 
-    -- Metadata
+    -- SEC enrichment status (set by stages 5 and 6)
+    sec_lookup_status           TEXT,        -- NOT_TRIGGERED | TRIGGERED | NO_MATCH | ERROR
+                                             -- NULL until stage 5 runs.
+                                             -- Stage 5 sets NOT_TRIGGERED or TRIGGERED.
+                                             -- Stage 6 leaves TRIGGERED on success, or sets NO_MATCH / ERROR.
+
+    -- Metadata — one version column per prompt stage
     model_confidence            TEXT,        -- HIGH | MEDIUM | LOW
-    prompt_version              TEXT,        -- e.g., "high_confidence_extraction:0.2"
+    dt_prompt_version           TEXT,        -- deal_type_classifier version, e.g., "0.2"
+    hc_prompt_version           TEXT,        -- high_confidence_extraction version
+    lc_prompt_version           TEXT,        -- low_confidence_extraction version
     transaction_cluster_id      TEXT,        -- assigned at clustering stage
     notes                       TEXT,
     created_at                  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
