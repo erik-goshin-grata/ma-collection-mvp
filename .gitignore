@@ -1,0 +1,83 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Database — runtime-generated, never commit
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs & generated outputs
+logs/
+exports/
+notes/
+eval/scorecard_*.md
+eval/baseline_*.csv
+eval/gold_set_20*.csv
+
+# Exception: keep the empty template
+!eval/gold_set_template.csv
+
+# Prompt failure dumps
+prompt_failures/
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Package caches
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Type checkers
+.dmypy.json
+dmypy.json
