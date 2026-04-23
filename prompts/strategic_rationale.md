@@ -1,6 +1,6 @@
 # Strategic Rationale Prompt
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (revised)
 **Repo path:** `prompts/strategic_rationale.md`
 
 ---
@@ -91,7 +91,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -126,7 +126,7 @@ Classify the primary strategic rationale.
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 ```
 
@@ -172,7 +172,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 ```
 
@@ -200,7 +200,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": "Primary rationale is capability addition (ML to industrial automation); team scale is a secondary signal",
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 ```
 
@@ -230,7 +230,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": "PE take-private with standard shareholder-value framing; no specific strategic rationale beyond the financial thesis",
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 ```
 
@@ -258,7 +258,7 @@ Output:
   "supporting_excerpt_index": null,
   "model_confidence": "LOW",
   "notes": "Excerpts contain only generic value-creation language; no specific strategic rationale can be identified",
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 ```
 
@@ -286,7 +286,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": "Downstream integration into distribution",
-  "prompt_version": "strategic_rationale:0.2"
+  "prompt_version": "strategic_rationale:0.3"
 }
 ```
 
@@ -311,3 +311,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
+| 0.3 | 2026-04-23 | Audited and removed any incorrect use of "carve-out" to describe private business unit sales. Schema reserves "carve-out" for subsidiary IPOs only. No substantive content changes required — audit found no misuse in §4 or examples. Version bumped for consistency with deal_summary.md taxonomy alignment patch. |

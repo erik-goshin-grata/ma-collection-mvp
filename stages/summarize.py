@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.3"
+_VERSION = "0.4"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0

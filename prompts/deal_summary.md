@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.3 (revised)
+**Version:** 0.4 (revised)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -110,7 +110,7 @@ REQUIREMENTS:
 
 8. Deal type specifics:
    - ACQUISITION where target_status = PUBLIC and acquirer_type = PRIVATE_EQUITY: describe as a take-private transaction.
-   - ACQUISITION where target_type = BUSINESS_UNIT or SUBSIDIARY: describe as a divestiture or carve-out sale, mention parent_seller_name as the seller.
+   - ACQUISITION where target_type = BUSINESS_UNIT or SUBSIDIARY: describe as a divestiture of parent_seller_name's business unit/subsidiary. Mention parent_seller_name as the seller. Do NOT use the term "carve-out" — in our schema, "carve-out" refers specifically to IPOs of subsidiaries (out of MVP scope), not to private sales of business units. Acceptable phrasing: "divestiture," "sale of [parent]'s [business unit name]," "acquisition of [parent]'s [business unit/subsidiary name]."
    - SPIN_SPLIT: describe as "Parent announced the spin-off / split of SpinCo." Mention spin_split_type (spin-off retains residual stake; split distributes fully) and distribution_mechanism (pro-rata vs exchange offer / split-off) when non-standard.
    - JOINT_VENTURE: describe as "forming a joint venture." Target is the new JV entity.
 
@@ -129,7 +129,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "word_count": 65,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -182,7 +182,7 @@ Generate the summary.
   "word_count": 65,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 ```
 
@@ -228,7 +228,7 @@ Output:
   "word_count": 80,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 ```
 
@@ -260,11 +260,11 @@ Output:
   "word_count": 100,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 ```
 
-**Example 3 — Business unit divestiture (carve-out sale to PE):**
+**Example 3 — Business unit divestiture (sale to PE):**
 
 Input:
 ```
@@ -292,7 +292,7 @@ Output:
   "word_count": 81,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 ```
 
@@ -320,7 +320,7 @@ Output:
   "word_count": 49,
   "model_confidence": "MEDIUM",
   "notes": "Closing announcement with no financial terms; summary kept short by necessity",
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 ```
 
@@ -350,7 +350,7 @@ Output:
   "word_count": 78,
   "model_confidence": "MEDIUM",
   "notes": "SPIN_OFF with residual stake inferred from prompt context; transaction details sparse in input",
-  "prompt_version": "deal_summary:0.3"
+  "prompt_version": "deal_summary:0.4"
 }
 ```
 
@@ -378,3 +378,4 @@ Output:
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-22 | Input schema updated to match Drop 2.1 field names: `consideration_components` array with derived `consideration_type`, `termination_fees` object (target/acquirer × amount/percentage), `go_shop` object, `acquirer_type`, `target_type`, SPIN_SPLIT discriminators. System prompt updated with value_type phrasing rules and deal-type-specific handling (take-private, business unit divestiture, spin-split). New few-shot examples added for spin-split and business unit cases. |
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
+| 0.4 | 2026-04-23 | Removed "carve-out sale" as acceptable terminology for private business unit sales. Per schema taxonomy, "carve-out" is reserved for subsidiary IPOs (out of MVP scope). Private subsidiary sales are divestitures. Updated style rule 8 with explicit prohibition and acceptable alternatives. |
