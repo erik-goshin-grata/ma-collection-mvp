@@ -1,42 +1,102 @@
 """
-Stage 12: export — NOT YET IMPLEMENTED.
+Stage 12: export
 
 Exports all transaction_record rows where is_current = 1, joined with their
 current summary and rationale_tag rows, to a CSV file at
 exports/transactions_<run_id>.csv. Rows are sorted by announced_date DESC.
-The consideration_components and secondary_rationales JSON arrays are
-serialized as strings in the CSV (not exploded). See specs/pipeline.md §2
-(Stage 12) and the operator-approved column list for the full field order.
+
+consideration_components and secondary_rationales are serialized as JSON
+strings in the CSV (not exploded). Columns follow the operator-approved order.
 
 Spec references: specs/pipeline.md §2 (Stage 12)
 """
 
 from __future__ import annotations
 
+import csv
+import os
 import sqlite3
 
 from config import Config
 from logger import get_logger
 
+_COLUMNS = [
+    "transaction_id",
+    "deal_type", "event_type", "spin_split_type", "distribution_mechanism",
+    "target_name", "target_domain", "target_ticker", "target_type", "target_status",
+    "acquirer_name", "acquirer_domain", "acquirer_ticker", "acquirer_type",
+    "parent_seller_name", "parent_seller_ticker",
+    "announced_date", "signing_date", "closed_date",
+    "value_amount", "value_currency", "value_type", "per_share_price",
+    "target_revenue", "target_revenue_period_type", "target_revenue_period_end",
+    "target_ebitda", "target_ebitda_period_type", "target_ebitda_period_end",
+    "consideration_type", "consideration_components_json",
+    "includes_earnout", "hostile", "competing_bid", "regulatory_approvals_required",
+    "has_go_shop", "go_shop_period_days",
+    "target_fee_amount", "target_fee_percentage", "acquirer_fee_amount", "acquirer_fee_percentage",
+    "is_take_private", "is_add_on", "is_divestiture",
+    "summary_text", "primary_rationale", "secondary_rationales_json",
+    "created_at", "updated_at",
+]
+
 
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
-    """Export current transactions to CSV. NOT YET IMPLEMENTED.
-
-    Parameters
-    ----------
-    conn:
-        Open database connection.
-    cfg:
-        Loaded pipeline configuration.
-    run_id:
-        Current run identifier used for logging.
+    """Export current transactions to CSV.
 
     Returns
     -------
     dict
-        Stage result counts keyed for the run summary, including
-        ``export_path`` with the output file path.
+        Keys: transactions_total, rows_exported, export_path
     """
     log = get_logger("export", run_id, level=cfg.log_level)
-    log.warning("Stage 12 (export) is not yet implemented — skipping")
-    return {"export_path": ""}
+
+    rows = conn.execute(
+        """
+        SELECT
+            tr.transaction_id,
+            tr.deal_type, tr.event_type, tr.spin_split_type, tr.distribution_mechanism,
+            tr.target_name, tr.target_domain, tr.target_ticker, tr.target_type, tr.target_status,
+            tr.acquirer_name, tr.acquirer_domain, tr.acquirer_ticker, tr.acquirer_type,
+            tr.parent_seller_name, tr.parent_seller_ticker,
+            tr.announced_date, tr.signing_date, tr.closed_date,
+            tr.value_amount, tr.value_currency, tr.value_type, tr.per_share_price,
+            tr.target_revenue, tr.target_revenue_period_type, tr.target_revenue_period_end,
+            tr.target_ebitda, tr.target_ebitda_period_type, tr.target_ebitda_period_end,
+            tr.consideration_type,
+            tr.consideration_components       AS consideration_components_json,
+            tr.includes_earnout, tr.hostile, tr.competing_bid,
+            tr.regulatory_approvals_required,
+            tr.has_go_shop, tr.go_shop_period_days,
+            tr.target_fee_amount, tr.target_fee_percentage,
+            tr.acquirer_fee_amount, tr.acquirer_fee_percentage,
+            tr.is_take_private, tr.is_add_on, tr.is_divestiture,
+            s.summary_text,
+            rt.primary_rationale,
+            rt.secondary_rationales           AS secondary_rationales_json,
+            tr.created_at, tr.updated_at
+        FROM transaction_record tr
+        LEFT JOIN summary s
+            ON s.transaction_id = tr.transaction_id AND s.is_current = 1
+        LEFT JOIN rationale_tag rt
+            ON rt.transaction_id = tr.transaction_id AND rt.is_current = 1
+        WHERE tr.is_current = 1
+        ORDER BY tr.announced_date DESC
+        """
+    ).fetchall()
+
+    total = len(rows)
+    log.info("Stage 12: %d transactions to export", total)
+
+    exports_dir = os.path.join(os.path.dirname(cfg.db_path), "..", "exports")
+    os.makedirs(exports_dir, exist_ok=True)
+    csv_path = os.path.join(exports_dir, f"transactions_{run_id}.csv")
+    csv_path = os.path.normpath(csv_path)
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=_COLUMNS, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(dict(row))
+
+    log.info("Stage 12 done  rows=%d  path=%s", total, csv_path)
+    return {"transactions_total": total, "rows_exported": total, "export_path": csv_path}
