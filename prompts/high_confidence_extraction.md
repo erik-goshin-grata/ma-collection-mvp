@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.3 (revised)
+**Version:** 0.4 (revised)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -86,8 +86,20 @@ For SPIN_SPLIT transactions:
 
 DATES:
 - announced_date — the date the deal was first announced (ISO 8601, YYYY-MM-DD)
-- closed_date — the date the deal closed or is expected to close. Use a specific date if given; otherwise null. Do not convert phrases like "expected to close in Q3 2026" to a specific date — leave closed_date null and note the quarter in notes.
+- closed_date — the date the deal closed. See rule below.
 - signing_date — the date a definitive agreement was signed, if distinct from announced_date
+
+announced_date rules:
+- For ANNOUNCEMENT event_type, announced_date is typically the release's own date (published_date input). If the text explicitly states a different announcement date, use that.
+- For CLOSE, AMENDMENT, or TERMINATION event_type, extract the ORIGINAL announcement date from the text if referenced (e.g., "previously announced on January 15, 2026"). If not referenced in the text, leave announced_date null.
+
+closed_date rules:
+- For ANNOUNCEMENT event_type, closed_date is null unless the release explicitly states a past close date (rare).
+- For CLOSE event_type, the rule depends on whether the text states a specific close date:
+  • If the text states an explicit close date (e.g., "closed on April 2, 2026", "the transaction was completed on April 2, 2026"), extract that date.
+  • If the text describes the transaction as completed but does not state a separate close date (e.g., "XYZ Capital announced today it has acquired ABC Widgets", "today closed the acquisition of"), set closed_date equal to announced_date. This is the common private-to-private pattern where announce and close are simultaneous.
+- For AMENDMENT or TERMINATION event_type, closed_date is null (the deal is not closed).
+- Do NOT convert prospective phrases like "expected to close in Q3 2026" to a specific date. Leave closed_date null and note the quarter in notes.
 
 DEAL VALUE:
 - value_amount — the total transaction value as a number (no currency symbols, no commas). Null if not stated.
@@ -173,7 +185,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.3"
+  "prompt_version": "high_confidence_extraction:0.4"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -253,7 +265,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.3"
+  "prompt_version": "high_confidence_extraction:0.4"
 }
 ```
 
@@ -318,7 +330,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given",
-  "prompt_version": "high_confidence_extraction:0.3"
+  "prompt_version": "high_confidence_extraction:0.4"
 }
 ```
 
@@ -371,7 +383,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag",
-  "prompt_version": "high_confidence_extraction:0.3"
+  "prompt_version": "high_confidence_extraction:0.4"
 }
 ```
 
@@ -424,7 +436,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'.",
-  "prompt_version": "high_confidence_extraction:0.3"
+  "prompt_version": "high_confidence_extraction:0.4"
 }
 ```
 
@@ -475,7 +487,64 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated.",
-  "prompt_version": "high_confidence_extraction:0.3"
+  "prompt_version": "high_confidence_extraction:0.4"
+}
+```
+
+**Example 5 — Simultaneous announce-and-close, private-to-private:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: STANDALONE_COMPANY
+EVENT TYPE: CLOSE
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-04-15
+
+TITLE: XYZ Capital Acquires ABC Widgets
+BODY: XYZ Capital, a private equity firm based in Chicago, announced today it has acquired ABC Widgets, a privately held manufacturer of industrial fasteners headquartered in Ohio. Terms of the transaction were not disclosed. ABC Widgets will continue to operate under its existing management team.
+```
+
+Output:
+```json
+{
+  "target": {"name": "ABC Widgets", "domain": null, "ticker": null},
+  "acquirer": {"name": "XYZ Capital", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY"},
+  "parent_seller": {"name": null, "ticker": null},
+  "dates": {
+    "announced_date": "2026-04-15",
+    "closed_date": "2026-04-15",
+    "signing_date": null
+  },
+  "value": {
+    "amount": null,
+    "currency": null,
+    "type": "UNDISCLOSED",
+    "type_confidence": "HIGH",
+    "per_share_price": null,
+    "qualifier": null
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date.",
+  "prompt_version": "high_confidence_extraction:0.4"
 }
 ```
 
@@ -503,3 +572,4 @@ Output:
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-22 | Revised. value_type enum aligned with schema (EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED) with TRANSACTION_VALUE as default. value_type_confidence added. acquirer_type added as output (drives Take-Private and Add-On derivation downstream). PE_PORTFOLIO added to acquirer_type enum to support Add-On recognition. SPIN_SPLIT handling added (acquirer_name = null, parent_seller populated). |
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
+| 0.4 | 2026-04-23 | Added simultaneous announce-and-close date rule for CLOSE event_type when no separate close date is stated. Applies to the common private-to-private pattern where past-tense completive language is used without a distinct close date. Added Example 5 to illustrate. |
