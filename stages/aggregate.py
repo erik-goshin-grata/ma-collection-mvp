@@ -364,6 +364,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             field_values: dict[str, Any] = {}
             llm_count_this_cluster = 0
             flag_count_this_cluster = 0
+            # Defer conflict log writes until after transaction_record exists (FK constraint)
+            pending_conflicts: list[tuple[str, list, Any]] = []
 
             for field_name, field_type in _FIELDS:
                 observations = []
@@ -392,7 +394,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         field_name, field_type, deal_ctx, conflict_obs,
                         prompt, cfg, conn, run_id, cluster_id, log,
                     )
-                    _log_conflict(conn, cluster_id, field_name, conflict_obs, result)
+                    pending_conflicts.append((field_name, conflict_obs, result))
                     llm_count_this_cluster += 1
                     if result:
                         chosen = result.get("chosen_value")
@@ -498,6 +500,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     now,
                 ),
             )
+
+            # Flush deferred conflict logs (must follow transaction_record INSERT for FK)
+            for f_name, c_obs, c_result in pending_conflicts:
+                _log_conflict(conn, cluster_id, f_name, c_obs, c_result)
 
             # Insert transaction_source rows for each cluster member's source
             for m in members:
