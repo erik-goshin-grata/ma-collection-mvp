@@ -270,17 +270,61 @@ Tradeoff: per-source extraction is more auditable (field → source provenance);
 
 Gated on §5.2 (sources must be collected before pool extraction becomes relevant).
 
-### 5.4 PE Deal Hierarchy Schema
+### 5.4 PE Deal Structure Classification
 
-Observed in `tc_182e231b4059` (Bridge Industries → TransTech → CTR → Allcryo). Today the three-level PE structure (sponsor → platform → acquiring portfolio company) collapses to a single `acquirer_name` field + `acquirer_type = PE_PORTFOLIO`.
+Current schema cannot distinguish between a sponsor's first investment in a target (often described as a platform investment), a sponsor-to-sponsor sale (secondary buyout), an add-on acquisition by a portfolio company, a take-private, a carve-out buyout, a management buyout, or various PE exit structures. For a PE-heavy private-deals dataset, this is a material gap.
 
-V2 additions:
-- `acquirer_parent_platform_name` — intermediate entity when acquirer is a portfolio company
-- `acquirer_ultimate_sponsor_name` — PE fund / sponsor at top of chain
+The proposed v2 taxonomy is descriptive — based on observable deal structure — rather than strategic. We deliberately avoid using "platform" as a schema value because whether a deal functions as a platform depends on the sponsor's post-close strategy, not on the announcement-time structure. Platform status is a derived analytical concept built on top of the schema, not a field within it.
 
-Both null for strategic acquirers. Enables tracking PE activity at the sponsor level (add-on velocity per platform, sponsor portfolio composition).
+**Proposed additions:**
 
-Priority: medium. Information-rich but MVP's `acquirer_type = PE_PORTFOLIO` captures the core signal.
+`pe_deal_structure` ENUM on `transaction_record`:
+
+| Value | Meaning |
+| :--- | :--- |
+| `SPONSOR_TO_SPONSOR` | PE-to-PE sale (secondary buyout) |
+| `SPONSOR_ACQUIRES_PRIVATE` | Sponsor buys privately-held target, no exiting sponsor |
+| `SPONSOR_ACQUIRES_PUBLIC` | Take-private |
+| `SPONSOR_ACQUIRES_CARVE_OUT` | Sponsor buys business unit from corporate parent |
+| `PORTFOLIO_ACQUIRES` | Existing portfolio company acquires (add-on) |
+| `MANAGEMENT_BUYOUT` | Management-led acquisition, may include PE backing |
+| `PE_EXIT_TO_STRATEGIC` | PE-owned target sold to strategic acquirer |
+| `PE_EXIT_TO_PUBLIC` | PE-owned target goes public (IPO exit) |
+| `GP_LED_SECONDARY` | Same GP, new fund vehicle (continuation fund, strip sale) |
+| `NOT_PE` | Deal has no PE involvement |
+
+Supporting fields:
+- `exiting_sponsor_name TEXT` — populated when target was previously PE-owned
+- `acquiring_sponsor_name TEXT` — the sponsor acquiring; may equal `acquirer_name` when `acquirer_type = PRIVATE_EQUITY`, or the sponsor behind a portfolio company when `acquirer_type = PE_PORTFOLIO`
+- `acquirer_parent_platform_name TEXT` — for `PORTFOLIO_ACQUIRES`, the intermediate platform company
+
+Derivation runs in `aggregate.py`. Most values derive from existing fields (`acquirer_type`, `target_status`, `target_type`, `parent_seller_name`) plus the new `exiting_sponsor_name`. The LC extraction prompt needs a new parse target: `exiting_sponsor_name` from text signals like "portfolio company of X since 2019" or "X Capital, which acquired the company in 2020, today announced the sale...".
+
+MBO handling: when a management team is the visible acquirer but a PE sponsor provides equity, set `acquirer_type = PRIVATE_EQUITY` (capital source) and `pe_deal_structure = MANAGEMENT_BUYOUT` (structure flag). Management team names captured in `notes`. This keeps "show me all PE deals" queries simple while preserving the MBO distinction.
+
+**User Filter Derivability**
+
+The descriptive taxonomy supports common user filters without additional schema fields:
+
+| Filter | Query |
+| :--- | :--- |
+| Add-On | `pe_deal_structure = PORTFOLIO_ACQUIRES` |
+| Platform | `pe_deal_structure IN (SPONSOR_ACQUIRES_PRIVATE, SPONSOR_ACQUIRES_CARVE_OUT)` |
+| Buyout (broad) | `pe_deal_structure IN (SPONSOR_ACQUIRES_PRIVATE, SPONSOR_ACQUIRES_PUBLIC, SPONSOR_ACQUIRES_CARVE_OUT, MANAGEMENT_BUYOUT, SPONSOR_TO_SPONSOR)` |
+| Take-Private | `pe_deal_structure = SPONSOR_ACQUIRES_PUBLIC` (equivalent to existing `is_take_private = 1`) |
+| Secondary Buyout | `pe_deal_structure = SPONSOR_TO_SPONSOR` |
+| Carve-Out Buyout | `pe_deal_structure = SPONSOR_ACQUIRES_CARVE_OUT` |
+| Management Buyout | `pe_deal_structure = MANAGEMENT_BUYOUT` |
+| Sponsor Exit | `exiting_sponsor_name IS NOT NULL OR pe_deal_structure IN (PE_EXIT_TO_STRATEGIC, PE_EXIT_TO_PUBLIC, SPONSOR_TO_SPONSOR)` |
+| GP-Led Secondary | `pe_deal_structure = GP_LED_SECONDARY` |
+
+**Roll-Up / Consolidation** is not a schema field. It is a strategy pattern observable only across multiple deals over time (e.g., same platform making 3+ add-ons in a rolling 12-month window). Derive at query time or via a periodic job that counts add-ons per platform. This keeps the schema focused on per-deal structural observations; downstream applications can define their own roll-up criteria without schema changes.
+
+**Recapitalization:** minority recaps captured via `deal_type = MINORITY_INVESTMENT`. Majority recaps (existing-sponsor dividend recaps or partial secondaries to LPs) are rare in PR-sourced data and not covered by MVP or v2 taxonomy; add a dedicated value only if coverage becomes needed.
+
+**Growth Equity:** treated as `MINORITY_INVESTMENT` with `acquirer_type = PRIVATE_EQUITY` or `VENTURE_CAPITAL`. If MVP expands to growth equity as a first-class tracking concern, growth-specific taxonomy belongs in the VC / growth equity schema (see `vc_transaction_schema.md` in project files), not in the M&A schema.
+
+Priority: high. Subsumes the previously-flagged PE hierarchy work. Ships in approximately 1-2 days of spec + implementation after MVP lands.
 
 ### 5.5 GlobeNewswire Adapter
 
