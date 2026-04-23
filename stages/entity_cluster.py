@@ -160,25 +160,32 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     uf = _UF(n)
     for i in range(n):
-        if not has_date[i]:
-            continue
         for j in range(i + 1, n):
-            if not has_date[j]:
+            t_match = fuzz.token_set_ratio(norm_t[i], norm_t[j]) >= 90
+            a_match = fuzz.token_set_ratio(norm_a[i], norm_a[j]) >= 90
+            if not (t_match and a_match):
                 continue
-            diff = _date_diff_days(eligible[i]["announced_date"], eligible[j]["announced_date"])
-            if diff is None or diff > 3:
-                continue
-            if fuzz.token_set_ratio(norm_t[i], norm_t[j]) < 90:
-                continue
-            if fuzz.token_set_ratio(norm_a[i], norm_a[j]) < 90:
-                continue
-            uf.union(i, j)
-            log.info(
-                "Matched eid=%d (%r/%r)  eid=%d (%r/%r)  date_diff=%d",
-                eligible[i]["extraction_id"], norm_t[i], norm_a[i],
-                eligible[j]["extraction_id"], norm_t[j], norm_a[j],
-                diff,
-            )
+
+            if has_date[i] and has_date[j]:
+                # Both dated: require ±3-day window (original behaviour).
+                diff = _date_diff_days(eligible[i]["announced_date"], eligible[j]["announced_date"])
+                if diff is None or diff > 3:
+                    continue
+                uf.union(i, j)
+                log.info(
+                    "Matched eid=%d (%r/%r)  eid=%d (%r/%r)  date_diff=%d",
+                    eligible[i]["extraction_id"], norm_t[i], norm_a[i],
+                    eligible[j]["extraction_id"], norm_t[j], norm_a[j],
+                    diff,
+                )
+            else:
+                # At least one row lacks a date: name-only match.
+                uf.union(i, j)
+                log.info(
+                    "Matched (name-only, null date) eid=%d (%r/%r)  eid=%d (%r/%r)",
+                    eligible[i]["extraction_id"], norm_t[i], norm_a[i],
+                    eligible[j]["extraction_id"], norm_t[j], norm_a[j],
+                )
 
     groups: dict[int, list[int]] = {}
     for i in range(n):
@@ -194,6 +201,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         dates = [r["announced_date"] for r in member_rows if r["announced_date"]]
         earliest = min(dates) if dates else ""
         all_names = [norm_t[i] for i in member_indices] + [norm_a[i] for i in member_indices]
+        # When no member has a date, use the lowest extraction_id as a tiebreaker
+        # so two different null-date groups with identical names get distinct IDs.
+        if not earliest:
+            earliest = f"ext_{min(r['extraction_id'] for r in member_rows)}"
         cid = _make_cluster_id(all_names, earliest)
 
         for row in member_rows:
