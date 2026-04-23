@@ -43,7 +43,7 @@ from prompts.base import (
 )
 
 _PROMPT_NAME = "relevancy_filter"
-_VERSION = "0.3"
+_VERSION = "0.4"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _VALID_CLASSIFICATIONS = frozenset({"RELEVANT", "NOT_RELEVANT"})
 _VALID_REASON_CODES = frozenset({

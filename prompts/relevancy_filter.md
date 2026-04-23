@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.3 (revised)
+**Version:** 0.4 (revised)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -91,6 +91,10 @@ Examples of invented values that must NOT be produced:
 - PRODUCT_PARTNERSHIP → use PRODUCT_OR_COMMERCIAL
 - ADVISORY_ENGAGEMENT_NO_DEFINITIVE_TRANSACTION → use OTHER_NOT_RELEVANT
 - MERGER_REGULATORY_APPROVAL → use DEAL_AMENDMENT_OR_TERMINATION
+- TAKE_PRIVATE_ANNOUNCEMENT → use TAKE_PRIVATE
+- MINORITY_INVESTMENT_ANNOUNCEMENT → use MINORITY_INVESTMENT
+
+Note on suffixes: Do NOT append _ANNOUNCEMENT, _CLOSING, _COMPLETION, _AMENDMENT, or _TERMINATION suffixes to any enum value. Event-type distinctions belong in the deal_type_classifier output, not in reason_code. Use the base enum value only.
 
 Precision is not the goal — enum discipline is. The reason_code is for categorical filtering, not descriptive tagging.
 
@@ -103,7 +107,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.3"
+  "prompt_version": "relevancy_filter:0.4"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -132,7 +136,7 @@ Classify this release.
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.3"
+  "prompt_version": "relevancy_filter:0.4"
 }
 ```
 
@@ -190,7 +194,7 @@ Output:
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.3"
+  "prompt_version": "relevancy_filter:0.4"
 }
 ```
 
@@ -209,7 +213,7 @@ Output:
   "reason_code": "PRODUCT_OR_COMMERCIAL",
   "model_confidence": "HIGH",
   "notes": "Commercial partnership, no equity or M&A component mentioned",
-  "prompt_version": "relevancy_filter:0.3"
+  "prompt_version": "relevancy_filter:0.4"
 }
 ```
 
@@ -228,7 +232,7 @@ Output:
   "reason_code": "RUMOR_OR_SPECULATION",
   "model_confidence": "HIGH",
   "notes": "No definitive agreement; rumor coverage is out of scope",
-  "prompt_version": "relevancy_filter:0.3"
+  "prompt_version": "relevancy_filter:0.4"
 }
 ```
 
@@ -247,7 +251,7 @@ Output:
   "reason_code": "DEAL_AMENDMENT_OR_TERMINATION",
   "model_confidence": "HIGH",
   "notes": "Termination of a previously announced deal — in scope for completeness",
-  "prompt_version": "relevancy_filter:0.3"
+  "prompt_version": "relevancy_filter:0.4"
 }
 ```
 
@@ -272,3 +276,4 @@ Output:
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.3 | 2026-04-23 | Tightened enum discipline: added explicit CRITICAL block before RESPONSE FORMAT listing invented values observed in validation runs and mapping each to the correct enum value. Strengthened RESPONSE FORMAT preamble with no-exceptions language. Addresses 30-47% failure rate from model inventing reason_codes like SHARE_BUYBACK, ACQUISITION_COMPLETION, etc. instead of using listed enum values. |
+| 0.4 | 2026-04-23 | Added suffix-pattern warning and two concrete examples. Addresses residual 13% failure rate from v0.3. |
