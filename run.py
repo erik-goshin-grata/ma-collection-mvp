@@ -123,6 +123,37 @@ def _merge(base: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+def _run_rerun_prompt(
+    conn: Any,
+    cfg: Any,
+    run_id: str,
+    prompt: str,
+    version: str,
+    log: Any,
+) -> dict[str, Any]:
+    """Reset is_current flags for the given prompt and re-run the relevant stage."""
+    _RERUN_MAP = {
+        "deal_summary": ("summary", "is_current", _stage_10),
+        "strategic_rationale": ("rationale_tag", "is_current", _stage_11),
+    }
+    if prompt not in _RERUN_MAP:
+        log.warning(
+            "rerun-prompt: prompt=%s is not supported — no work performed", prompt
+        )
+        return {}
+
+    table, flag_col, stage_mod = _RERUN_MAP[prompt]
+    rows_reset = conn.execute(
+        f"UPDATE {table} SET {flag_col} = 0 WHERE {flag_col} = 1"
+    ).rowcount
+    conn.commit()
+    log.info(
+        "rerun-prompt: reset %d %s rows to is_current=0  prompt=%s version=%s",
+        rows_reset, table, prompt, version,
+    )
+    return _run_stage_list([stage_mod], conn, cfg, run_id, log)
+
+
 def _run_stage_list(
     stage_list: list[types.ModuleType],
     conn: Any,
@@ -197,14 +228,7 @@ def main() -> None:
 
     try:
         if args.mode == "rerun-prompt":
-            # rerun-prompt wires into the prompt infrastructure built in Layer 3.
-            log.warning(
-                "rerun-prompt mode is not yet implemented "
-                "(prompt=%s, version=%s) — no work performed",
-                args.prompt,
-                args.version,
-            )
-            summary: dict[str, Any] = {}
+            summary = _run_rerun_prompt(conn, cfg, run_id, args.prompt, args.version, log)
         else:
             stage_list = _MODE_STAGES[args.mode]
             summary = _run_stage_list(stage_list, conn, cfg, run_id, log)
