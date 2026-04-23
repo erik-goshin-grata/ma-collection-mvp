@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (revised)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -73,16 +73,37 @@ EDGE CASES:
 - If a release is about a rumored deal without a definitive agreement, classify as NOT_RELEVANT (rumor coverage is out of MVP scope).
 - If a release is about a company being added to an index, going IPO, or completing a direct listing, classify as NOT_RELEVANT (IPOs are not in MVP scope).
 
+CRITICAL — reason_code MUST be chosen from the enum list
+
+The reason_code field must be exactly one of the 21 values listed in the in-scope and out-of-scope enumerations above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
+
+If no listed value fits perfectly:
+- For RELEVANT classifications, use AMBIGUOUS_BUT_LIKELY_DEAL
+- For NOT_RELEVANT classifications, use OTHER_NOT_RELEVANT
+
+Examples of invented values that must NOT be produced:
+- SHARE_BUYBACK → use BUYBACK_OR_DIVIDEND
+- DEBT_RESTRUCTURING_AMENDMENT → use DEBT_OR_NON_DEAL_FINANCING
+- ACQUISITION_COMPLETION → use DEAL_CLOSE_OR_COMPLETION
+- ACQUISITION_CLOSING → use DEAL_CLOSE_OR_COMPLETION
+- MINORITY_INVESTMENT_CLOSING → use DEAL_CLOSE_OR_COMPLETION
+- ASSET_SALE → use CARVE_OUT_OR_DIVESTITURE
+- PRODUCT_PARTNERSHIP → use PRODUCT_OR_COMMERCIAL
+- ADVISORY_ENGAGEMENT_NO_DEFINITIVE_TRANSACTION → use OTHER_NOT_RELEVANT
+- MERGER_REGULATORY_APPROVAL → use DEAL_AMENDMENT_OR_TERMINATION
+
+Precision is not the goal — enum discipline is. The reason_code is for categorical filtering, not descriptive tagging.
+
 RESPONSE FORMAT
 
-Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 21 enum values listed above — no exceptions.
 
 {
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.2"
+  "prompt_version": "relevancy_filter:0.3"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -111,7 +132,7 @@ Classify this release.
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.2"
+  "prompt_version": "relevancy_filter:0.3"
 }
 ```
 
@@ -169,7 +190,7 @@ Output:
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.2"
+  "prompt_version": "relevancy_filter:0.3"
 }
 ```
 
@@ -188,7 +209,7 @@ Output:
   "reason_code": "PRODUCT_OR_COMMERCIAL",
   "model_confidence": "HIGH",
   "notes": "Commercial partnership, no equity or M&A component mentioned",
-  "prompt_version": "relevancy_filter:0.2"
+  "prompt_version": "relevancy_filter:0.3"
 }
 ```
 
@@ -207,7 +228,7 @@ Output:
   "reason_code": "RUMOR_OR_SPECULATION",
   "model_confidence": "HIGH",
   "notes": "No definitive agreement; rumor coverage is out of scope",
-  "prompt_version": "relevancy_filter:0.2"
+  "prompt_version": "relevancy_filter:0.3"
 }
 ```
 
@@ -226,7 +247,7 @@ Output:
   "reason_code": "DEAL_AMENDMENT_OR_TERMINATION",
   "model_confidence": "HIGH",
   "notes": "Termination of a previously announced deal — in scope for completeness",
-  "prompt_version": "relevancy_filter:0.2"
+  "prompt_version": "relevancy_filter:0.3"
 }
 ```
 
@@ -250,3 +271,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
+| 0.3 | 2026-04-23 | Tightened enum discipline: added explicit CRITICAL block before RESPONSE FORMAT listing invented values observed in validation runs and mapping each to the correct enum value. Strengthened RESPONSE FORMAT preamble with no-exceptions language. Addresses 30-47% failure rate from model inventing reason_codes like SHARE_BUYBACK, ACQUISITION_COMPLETION, etc. instead of using listed enum values. |
