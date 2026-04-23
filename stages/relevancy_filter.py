@@ -37,12 +37,27 @@ from datetime import datetime, timezone
 
 from config import Config
 from logger import get_logger
-from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
+from prompts.base import (
+    PromptFailure, call_prompt, load_prompt_file, log_prompt_failure,
+    register_prompt_version,
+)
 
 _PROMPT_NAME = "relevancy_filter"
 _VERSION = "0.2"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _VALID_CLASSIFICATIONS = frozenset({"RELEVANT", "NOT_RELEVANT"})
+_VALID_REASON_CODES = frozenset({
+    # RELEVANT side
+    "ACQUISITION_ANNOUNCEMENT", "MERGER_ANNOUNCEMENT", "CARVE_OUT_OR_DIVESTITURE",
+    "SPIN_OFF_OR_SPLIT", "TAKE_PRIVATE", "REVERSE_MERGER", "JOINT_VENTURE",
+    "MINORITY_INVESTMENT", "DEAL_CLOSE_OR_COMPLETION", "DEAL_AMENDMENT_OR_TERMINATION",
+    "AMBIGUOUS_BUT_LIKELY_DEAL",
+    # NOT_RELEVANT side
+    "PRODUCT_OR_COMMERCIAL", "PERSONNEL", "EARNINGS_OR_FINANCIAL_REPORTING",
+    "BUYBACK_OR_DIVIDEND", "DEBT_OR_NON_DEAL_FINANCING", "REGULATORY_OR_COMPLIANCE",
+    "MARKETING_OR_COMMENTARY", "RUMOR_OR_SPECULATION", "IPO_OR_DIRECT_LISTING",
+    "OTHER_NOT_RELEVANT",
+})
 _SLEEP = 0.3  # conservative Haiku throttle
 
 
@@ -110,6 +125,29 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             log.warning(
                 "source_raw_id=%d unexpected classification %r — RELEVANCY_FAILED",
                 sid, classification,
+            )
+            log_prompt_failure(
+                conn, source_raw_id=sid, extraction_id=None, stage=_PROMPT_NAME,
+                failure_type="SCHEMA_VIOLATION", raw_response=json.dumps(result),
+                error_message=f"unexpected classification: {classification!r}",
+                prompt_version=_FULL_VERSION, run_id=run_id,
+            )
+            _write(conn, sid, "RELEVANCY_FAILED", row["notes"], result)
+            failed += 1
+            time.sleep(_SLEEP)
+            continue
+
+        reason_code = result.get("reason_code")
+        if reason_code not in _VALID_REASON_CODES:
+            log.warning(
+                "source_raw_id=%d invalid reason_code %r — RELEVANCY_FAILED",
+                sid, reason_code,
+            )
+            log_prompt_failure(
+                conn, source_raw_id=sid, extraction_id=None, stage=_PROMPT_NAME,
+                failure_type="SCHEMA_VIOLATION", raw_response=json.dumps(result),
+                error_message=f"invalid reason_code: {reason_code!r}",
+                prompt_version=_FULL_VERSION, run_id=run_id,
             )
             _write(conn, sid, "RELEVANCY_FAILED", row["notes"], result)
             failed += 1
