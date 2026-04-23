@@ -40,6 +40,8 @@ class Config:
     # --- sec-api.io adapter ---
     sec_api_request_delay_seconds: float
     sec_date_window_days: int
+    sec_extractor_max_retries: int
+    sec_extractor_retry_delay_ms: int
 
     # --- Database & logging ---
     db_path: str
@@ -117,6 +119,8 @@ def load_config() -> Config:
 
     sec_api_request_delay_seconds = _opt_float("SEC_API_REQUEST_DELAY_SECONDS", 0.2)
     sec_date_window_days = _opt_int("SEC_DATE_WINDOW_DAYS", 7)
+    sec_extractor_max_retries = _opt_int("SEC_EXTRACTOR_MAX_RETRIES", 3)
+    sec_extractor_retry_delay_ms = _opt_int("SEC_EXTRACTOR_RETRY_DELAY_MS", 750)
 
     db_path = _opt_str("DB_PATH", "data/ma_mvp.db")
     log_level = _opt_str("LOG_LEVEL", "INFO").upper()
@@ -140,6 +144,8 @@ def load_config() -> Config:
         user_agent_string=user_agent_string,
         sec_api_request_delay_seconds=sec_api_request_delay_seconds,
         sec_date_window_days=sec_date_window_days,
+        sec_extractor_max_retries=sec_extractor_max_retries,
+        sec_extractor_retry_delay_ms=sec_extractor_retry_delay_ms,
         db_path=db_path,
         log_level=log_level,
         run_id_prefix=run_id_prefix,

@@ -6,10 +6,10 @@ a PR source mentions a publicly traded party, then sets sec_lookup_status on
 the staging_extraction row.
 
 Stage 6 (sec_enrich) calls run_per_transaction() for each TRIGGERED row to
-fetch the corresponding 8-K Item 1.01 text and, where present, Exhibit 2.1.
-Both are inserted into source_raw as T1 sources.
+fetch the corresponding 8-K item text and, where present, Exhibit 2.1 and
+Exhibit 99.x.  All are inserted into source_raw as T1 sources.
 
-Spec: specs/adapter_sec_api.md
+Spec: specs/adapter_sec_api.md (v0.2)
 """
 
 from __future__ import annotations
@@ -28,9 +28,10 @@ from utils import content_hash as _content_hash
 
 _FILING_QUERY_URL = "https://api.sec-api.io"
 _EXTRACTOR_URL = "https://api.sec-api.io/extractor"
+_ARCHIVE_HOST = "archive.sec-api.io"
 
 _EXCHANGE_TICKER_RE = re.compile(
-    r"\b(NYSE|NASDAQ|NYSE American|OTCQB|OTCQX)\s*[:]\s*([A-Z]{1,5})\b"
+    r"\b(NYSE|NASDAQ|NYSE American|OTCQB|OTCQX|AMEX)\s*[:]\s*([A-Z]{1,5})\b"
 )
 _SEC_LANGUAGE = frozenset([
     "Form 8-K",
@@ -41,7 +42,35 @@ _SEC_LANGUAGE = frozenset([
 ])
 _PUBLIC_BOILERPLATE = frozenset(["publicly traded", "common stock"])
 
-_EX_21_RE = re.compile(r"(EX-?2[-_.]?1|EXHIBIT\s*2\.?1|^2\.1)", re.IGNORECASE)
+# Exhibit matching — prefix-only, case-insensitive
+_EX_21_RE = re.compile(r"^(EX-?2[-_.]?1|EXHIBIT\s+2\.?1|2\.1)\b", re.IGNORECASE)
+_EX_99_RE = re.compile(
+    r"^(EX-?99[-_.]?[1-9]|EXHIBIT\s+99\.[1-9]|99\.[1-9])\b", re.IGNORECASE
+)
+
+# Item code mappings: Query API dot syntax → Extractor dash syntax
+_ITEM_EXTRACTOR_CODE: dict[str, str] = {
+    "1.01": "1-1",
+    "1.02": "1-2",
+    "2.01": "2-1",
+    "8.01": "8-1",
+}
+_ITEM_SOURCE_TYPE: dict[str, str] = {
+    "1.01": "SEC_8K_ITEM_101",
+    "1.02": "SEC_8K_ITEM_102",
+    "2.01": "SEC_8K_ITEM_201",
+    "8.01": "SEC_8K_ITEM_801",
+}
+# event_type → (primary_item, [fallback_items in priority order])
+_EVENT_ITEM_PRIORITY: dict[str, tuple[str, list[str]]] = {
+    "ANNOUNCEMENT": ("1.01", ["8.01"]),
+    "CLOSE":        ("2.01", ["8.01"]),
+    "TERMINATION":  ("1.02", ["8.01"]),
+    "AMENDMENT":    ("1.01", ["2.01", "8.01"]),
+}
+
+# Extracts the numeric item code from full strings like "Item 1.01: Entry into ..."
+_ITEM_CODE_RE = re.compile(r"\b(\d+\.\d+)\b")
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +144,66 @@ def detect_public_party(
 # Filing query helpers
 # ---------------------------------------------------------------------------
 
+def _parse_filing_items(filing: dict) -> list[str]:
+    """Extract normalized item codes from a Filing Query response dict.
+
+    The API returns items as full strings like
+    "Item 1.01: Entry into a Material Definitive Agreement".
+    This function extracts just the numeric code ("1.01") from each entry,
+    deduplicating while preserving order.
+    """
+    raw = filing.get("items", "")
+    candidates: list[str] = []
+    if isinstance(raw, list):
+        candidates = [str(i).strip() for i in raw if str(i).strip()]
+    elif isinstance(raw, str):
+        candidates = [i.strip() for i in raw.split(",") if i.strip()]
+
+    result: list[str] = []
+    seen: set[str] = set()
+    for c in candidates:
+        m = _ITEM_CODE_RE.search(c)
+        if m:
+            code = m.group(1)
+            if code not in seen:
+                seen.add(code)
+                result.append(code)
+    return result
+
+
+def _select_item(filing_items: list[str], event_type: str | None) -> str | None:
+    """Select the best item to extract given available items and event_type.
+
+    Returns the item code (e.g., '1.01') or None if no suitable item is present.
+    """
+    primary, fallbacks = _EVENT_ITEM_PRIORITY.get(event_type, ("1.01", ["8.01"]))
+    for candidate in [primary] + fallbacks:
+        if candidate in filing_items:
+            return candidate
+    return None
+
+
+def _find_exhibits(filing: dict, pattern: re.Pattern) -> list[tuple[str, str]]:
+    """Return [(label, url)] for exhibits whose label matches pattern (prefix match).
+
+    Deduplicates by URL — same document will not appear twice even if
+    both 'type' and 'description' fields match.
+    """
+    seen_urls: set[str] = set()
+    results: list[tuple[str, str]] = []
+    for doc in (filing.get("documentFormatFiles") or []):
+        url = (doc.get("documentUrl") or doc.get("url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        for field in ("type", "description"):
+            label = (doc.get(field) or "").strip()
+            if pattern.match(label):
+                seen_urls.add(url)
+                results.append((label, url))
+                break
+    return results
+
+
 def _build_query_string(
     ticker: str | None,
     company_name: str | None,
@@ -133,7 +222,8 @@ def _build_query_string(
     start = (anchor - timedelta(days=window_days)).strftime("%Y-%m-%d")
     end = (anchor + timedelta(days=window_days)).strftime("%Y-%m-%d")
 
-    parts = ['formType:"8-K"', 'items:"1.01"']
+    items_clause = '(items:"1.01" OR items:"2.01" OR items:"8.01" OR items:"1.02")'
+    parts = ['formType:"8-K"', items_clause]
     if ticker:
         parts.append(f'ticker:"{ticker}"')
     elif company_name:
@@ -173,7 +263,7 @@ def query_filings(
             resp = session.post(
                 _FILING_QUERY_URL,
                 json=payload,
-                headers={"Authorization": cfg.sec_api_key},
+                params={"token": cfg.sec_api_key},
                 timeout=30,
             )
         except requests.RequestException as exc:
@@ -245,107 +335,137 @@ def _pick_closest_filing(filings: list[dict], announced_date: str) -> dict | Non
 
 
 # ---------------------------------------------------------------------------
-# Item 1.01 extraction
+# Item text extraction
 # ---------------------------------------------------------------------------
 
-def fetch_item_101_text(
+def fetch_item_text(
     cfg: Config,
     session: requests.Session,
     filing_url: str,
+    item_code: str,
     log,
 ) -> str | None:
-    """Call the Item Extractor API and return clean text for Item 1.01, or None."""
-    params = {"url": filing_url, "item": "1-1", "type": "text"}
-    time.sleep(cfg.sec_api_request_delay_seconds)
-    for attempt in range(2):
-        try:
-            resp = session.get(
-                _EXTRACTOR_URL,
-                params=params,
-                headers={"Authorization": cfg.sec_api_key},
-                timeout=60,
-            )
-        except requests.RequestException as exc:
-            if attempt == 0:
-                log.warning("Network error on Item Extractor: %s — retry in 10s", exc)
+    """Call the Item Extractor API and return text for the given item.
+
+    Returns None on failure or when 'processing' persists past the retry budget.
+    Returns an empty string when the Extractor returned an empty body (caller
+    should insert a row with clean_text=NULL per spec §6).
+    """
+    params = {
+        "url": filing_url,
+        "item": _ITEM_EXTRACTOR_CODE[item_code],
+        "type": "text",
+        "token": cfg.sec_api_key,
+    }
+
+    def _one_call() -> str | None:
+        time.sleep(cfg.sec_api_request_delay_seconds)
+        for attempt in range(2):
+            try:
+                resp = session.get(_EXTRACTOR_URL, params=params, timeout=60)
+            except requests.RequestException as exc:
+                if attempt == 0:
+                    log.warning("Network error on Item Extractor: %s — retry in 10s", exc)
+                    time.sleep(10)
+                    continue
+                log.error("Item Extractor failed after retry: %s", exc)
+                return None
+            if resp.status_code in (401, 403):
+                raise RuntimeError(
+                    f"sec-api.io auth failure ({resp.status_code}) on Item Extractor"
+                )
+            if resp.status_code == 429 and attempt == 0:
+                log.warning("429 from Item Extractor — sleeping 30s, retry once")
+                time.sleep(30)
+                continue
+            if resp.status_code >= 500 and attempt == 0:
+                log.warning("5xx (%s) from Item Extractor — retry in 10s", resp.status_code)
                 time.sleep(10)
                 continue
-            log.error("Item Extractor failed after retry: %s", exc)
+            if resp.status_code != 200:
+                log.error("Item Extractor status %s — skipping", resp.status_code)
+                return None
+            return resp.text
+        return None
+
+    raw = _one_call()
+    if raw is None:
+        return None
+
+    delay_s = cfg.sec_extractor_retry_delay_ms / 1000.0
+    retries_used = 0
+    while raw.strip().lower() == "processing" and retries_used < cfg.sec_extractor_max_retries:
+        log.warning(
+            "Item Extractor 'processing' for item %s (retry %d/%d) — retrying in %.2fs",
+            item_code, retries_used + 1, cfg.sec_extractor_max_retries, delay_s,
+        )
+        time.sleep(delay_s)
+        raw = _one_call()
+        if raw is None:
             return None
+        retries_used += 1
 
-        if resp.status_code in (401, 403):
-            raise RuntimeError(
-                f"sec-api.io auth failure ({resp.status_code}) on Item Extractor"
-            )
-        if resp.status_code == 429 and attempt == 0:
-            log.warning("429 from Item Extractor — sleeping 30s, retry once")
-            time.sleep(30)
-            continue
-        if resp.status_code >= 500 and attempt == 0:
-            log.warning("5xx (%s) from Item Extractor — retry in 10s", resp.status_code)
-            time.sleep(10)
-            continue
-        if resp.status_code != 200:
-            log.error("Item Extractor status %s — skipping", resp.status_code)
-            return None
+    if raw.strip().lower() == "processing":
+        log.warning(
+            "Item Extractor still 'processing' after %d retries for item %s — skipping",
+            cfg.sec_extractor_max_retries, item_code,
+        )
+        return None
 
-        text = resp.text.strip()
-        return text if text else None
-
-    return None
+    return raw.strip()  # may be empty string; None means failure
 
 
 # ---------------------------------------------------------------------------
-# Exhibit 2.1 retrieval
+# Exhibit retrieval
 # ---------------------------------------------------------------------------
 
-def _find_exhibit_21_url(filing: dict) -> str | None:
-    """Return the URL of Exhibit 2.1 from a filing dict, or None."""
-    doc_files = filing.get("documentFormatFiles") or []
-    for doc in doc_files:
-        label = (doc.get("type") or "") + " " + (doc.get("description") or "")
-        if _EX_21_RE.search(label):
-            return doc.get("documentUrl") or doc.get("url")
-    return None
-
-
-def fetch_exhibit_21(
+def fetch_exhibit(
     cfg: Config,
     session: requests.Session,
     exhibit_url: str,
     log,
-) -> tuple[str | None, str | None]:
-    """Fetch Exhibit 2.1.  Returns (raw_html, clean_text).
+) -> tuple[str | None, str | None, str]:
+    """Fetch an exhibit document.
 
-    raw_html is populated for HTML responses; clean_text is always the final text.
+    Returns (raw_html, clean_text, source_status) where source_status is:
+      "FETCHED"    — normal content; insert the row
+      "UNREADABLE" — PDF exhibit; insert with clean_text=NULL, source_status=UNREADABLE
+      "SKIP"       — network/HTTP error; caller skips insert entirely
     """
-    import trafilatura  # local import avoids circular at module load time
+    import trafilatura  # local import avoids startup cost when adapter is not used
+
+    extra_params = {"token": cfg.sec_api_key} if _ARCHIVE_HOST in exhibit_url else {}
 
     time.sleep(cfg.sec_api_request_delay_seconds)
     try:
         resp = session.get(
             exhibit_url,
-            headers={"Authorization": cfg.sec_api_key},
+            params=extra_params if extra_params else None,
             timeout=60,
         )
     except requests.RequestException as exc:
         log.warning("Network error fetching exhibit %s: %s", exhibit_url, exc)
-        return None, None
+        return None, None, "SKIP"
 
     if resp.status_code == 404:
         log.warning("404 for exhibit %s — skipping", exhibit_url)
-        return None, None
+        return None, None, "SKIP"
     if resp.status_code != 200:
         log.warning("Status %s for exhibit %s — skipping", resp.status_code, exhibit_url)
-        return None, None
+        return None, None, "SKIP"
 
-    content_type = resp.headers.get("Content-Type", "")
-    if "html" in content_type.lower():
+    content_type = resp.headers.get("Content-Type", "").lower()
+    if "pdf" in content_type or exhibit_url.lower().endswith(".pdf"):
+        log.info("PDF exhibit %s — marking UNREADABLE", exhibit_url)
+        return None, None, "UNREADABLE"
+
+    if "html" in content_type:
         raw_html = resp.text
         clean = trafilatura.extract(raw_html)
-        return raw_html, clean or None
-    else:
-        return None, resp.text.strip() or None
+        return raw_html, clean or None, "FETCHED"
+
+    text = resp.text.strip()
+    return None, text or None, "FETCHED"
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +484,7 @@ def insert_source_raw(
     c_hash: str | None,
     notes: str | None,
     fetched_at: str,
+    source_status: str = "FETCHED",
 ) -> int:
     """Insert a SEC row into source_raw.  Returns the new source_raw_id."""
     cur = conn.execute(
@@ -373,11 +494,11 @@ def insert_source_raw(
              raw_html, clean_text, content_hash, source_status, notes, fetched_at)
         VALUES
             (?, 'T1', ?, ?, ?,
-             ?, ?, ?, 'FETCHED', ?, ?)
+             ?, ?, ?, ?, ?, ?)
         """,
         (
             source_type, url, title, published_date,
-            raw_html, clean_text, c_hash, notes, fetched_at,
+            raw_html, clean_text, c_hash, source_status, notes, fetched_at,
         ),
     )
     conn.commit()
@@ -411,17 +532,20 @@ def run_per_transaction(
         "trigger_signal": "",
         "filings_found": 0,
         "filing_accession": None,
-        "item_101_fetched": False,
+        "items_available": [],
+        "item_extracted": None,
         "exhibit_21_fetched": False,
+        "exhibit_99_fetched_count": 0,
+        "exhibits_unreadable_count": 0,
         "rows_inserted": 0,
         "errors": [],
     }
 
-    # Load extraction row
     row = conn.execute(
         """
         SELECT se.extraction_id, se.target_name, se.acquirer_name,
                se.announced_date, se.target_ticker, se.acquirer_ticker,
+               se.event_type,
                sr.clean_text
         FROM staging_extraction se
         JOIN source_raw sr ON sr.source_raw_id = se.source_raw_id
@@ -436,6 +560,7 @@ def run_per_transaction(
     target_name = row["target_name"]
     acquirer_name = row["acquirer_name"]
     announced_date = row["announced_date"] or ""
+    event_type = row["event_type"]  # may be None; _select_item handles None gracefully
     clean_text = row["clean_text"] or ""
     ticker = row["target_ticker"] or row["acquirer_ticker"]
 
@@ -448,12 +573,10 @@ def run_per_transaction(
     result["triggered"] = True
     result["trigger_signal"] = trigger_info.get("trigger_signal", "")
 
-    # Prefer the ticker from detect_public_party if present
     if trigger_info.get("ticker"):
         ticker = trigger_info["ticker"]
 
     side = trigger_info.get("side", "BOTH")
-    lookup_name: str | None = None
     if side == "TARGET":
         lookup_name = target_name
     elif side == "ACQUIRER":
@@ -486,74 +609,121 @@ def run_per_transaction(
     filing_url = filing.get("linkToFilingDetails", "")
     cik = filing.get("cik", "")
 
+    filing_items = _parse_filing_items(filing)
     result["filing_accession"] = accession
+    result["items_available"] = filing_items
     log.info(
-        "Selected filing %s (filer=%s filed=%s) for extraction_id=%d",
-        accession, filer_name, filed_at, extraction_id,
+        "Selected filing %s (filer=%s filed=%s items=%s) for extraction_id=%d",
+        accession, filer_name, filed_at, filing_items, extraction_id,
     )
 
     fetched_at = datetime.now(timezone.utc).isoformat()
-    notes_base = json.dumps({
-        "triggered_by_extraction_id": extraction_id,
-        "trigger_signal": trigger_info.get("trigger_signal", ""),
-        "filing_accession": accession,
-        "filer_cik": cik,
-    })
 
-    # Item 1.01 text
-    try:
-        item_text = fetch_item_101_text(cfg, session, filing_url, log)
-    except RuntimeError as exc:
-        result["errors"].append(str(exc))
-        return result
+    def _make_notes(item_extracted: str | None, exhibit_label: str | None, extra: dict | None = None) -> str:
+        d: dict = {
+            "triggered_by_extraction_id": extraction_id,
+            "trigger_signal": trigger_info.get("trigger_signal", ""),
+            "filing_accession": accession,
+            "filer_cik": cik,
+            "filer_name": filer_name,
+            "filing_url": filing_url,
+            "item_extracted": item_extracted,
+            "exhibit_label": exhibit_label,
+        }
+        if extra:
+            d.update(extra)
+        return json.dumps(d)
 
-    if item_text:
-        c_hash = _content_hash(item_text)
-        if not conn.execute(
-            "SELECT 1 FROM source_raw WHERE content_hash=?", (c_hash,)
-        ).fetchone():
+    # Item text extraction (event_type-conditional with pre-check)
+    selected_item = _select_item(filing_items, event_type)
+    if selected_item is None:
+        log.info(
+            "No matching item in filing %s for event_type=%s — skipping item extraction",
+            accession, event_type,
+        )
+    else:
+        try:
+            item_text = fetch_item_text(cfg, session, filing_url, selected_item, log)
+        except RuntimeError as exc:
+            result["errors"].append(str(exc))
+            log.error("Item Extractor auth error for extraction_id=%d: %s", extraction_id, exc)
+            item_text = None
+
+        if item_text is None:
+            log.warning(
+                "Item %s unavailable for filing %s (processing timeout or HTTP error)",
+                selected_item, accession,
+            )
+        elif item_text:
+            c_hash = _content_hash(item_text)
+            if not conn.execute(
+                "SELECT 1 FROM source_raw WHERE content_hash=?", (c_hash,)
+            ).fetchone():
+                insert_source_raw(
+                    conn,
+                    source_type=_ITEM_SOURCE_TYPE[selected_item],
+                    url=f"{filing_url}#item={selected_item}",
+                    title=f"8-K Item {selected_item} - {filer_name} - {filed_at}",
+                    published_date=filed_at or None,
+                    raw_html=None,
+                    clean_text=item_text,
+                    c_hash=c_hash,
+                    notes=_make_notes(selected_item, None),
+                    fetched_at=fetched_at,
+                )
+                result["rows_inserted"] += 1
+                log.info(
+                    "Inserted %s for extraction_id=%d",
+                    _ITEM_SOURCE_TYPE[selected_item], extraction_id,
+                )
+            else:
+                log.debug("Duplicate item content_hash for %s — skipping insert", selected_item)
+            result["item_extracted"] = selected_item
+        else:
+            # Extractor returned empty body — insert row with clean_text=NULL per spec §6
+            log.warning(
+                "Item Extractor returned empty text for item %s in filing %s",
+                selected_item, accession,
+            )
             insert_source_raw(
                 conn,
-                source_type="SEC_8K_ITEM_101",
-                url=filing_url,
-                title=f"8-K Item 1.01 - {filer_name} - {filed_at}",
+                source_type=_ITEM_SOURCE_TYPE[selected_item],
+                url=f"{filing_url}#item={selected_item}",
+                title=f"8-K Item {selected_item} - {filer_name} - {filed_at}",
                 published_date=filed_at or None,
                 raw_html=None,
-                clean_text=item_text,
-                c_hash=c_hash,
-                notes=notes_base,
+                clean_text=None,
+                c_hash=None,
+                notes=_make_notes(selected_item, None, {"empty_reason": "Item Extractor returned empty text"}),
                 fetched_at=fetched_at,
             )
             result["rows_inserted"] += 1
-            result["item_101_fetched"] = True
-            log.info("Inserted SEC_8K_ITEM_101 for extraction_id=%d", extraction_id)
-        else:
-            log.debug("Duplicate Item 1.01 content_hash — skipping insert")
-            result["item_101_fetched"] = True
-    else:
-        log.warning("Item Extractor returned no text for filing %s", accession)
-        # Still insert the row with clean_text=NULL per spec §4.2
-        insert_source_raw(
-            conn,
-            source_type="SEC_8K_ITEM_101",
-            url=filing_url,
-            title=f"8-K Item 1.01 - {filer_name} - {filed_at}",
-            published_date=filed_at or None,
-            raw_html=None,
-            clean_text=None,
-            c_hash=None,
-            notes=json.dumps({
-                **json.loads(notes_base),
-                "empty_reason": "Item Extractor returned no text",
-            }),
-            fetched_at=fetched_at,
-        )
-        result["rows_inserted"] += 1
+            result["item_extracted"] = selected_item
 
     # Exhibit 2.1
-    exhibit_url = _find_exhibit_21_url(filing)
-    if exhibit_url:
-        raw_html, ex_text = fetch_exhibit_21(cfg, session, exhibit_url, log)
+    for label, ex_url in _find_exhibits(filing, _EX_21_RE):
+        log.debug("Exhibit 2.1 candidate: label=%r url=%s", label, ex_url)
+        raw_html, ex_text, ex_status = fetch_exhibit(cfg, session, ex_url, log)
+        if ex_status == "SKIP":
+            continue
+        if ex_status == "UNREADABLE":
+            insert_source_raw(
+                conn,
+                source_type="SEC_EXHIBIT_21",
+                url=ex_url,
+                title=f"Exhibit 2.1 - {filer_name} - {filed_at}",
+                published_date=filed_at or None,
+                raw_html=None,
+                clean_text=None,
+                c_hash=None,
+                notes=_make_notes(None, label),
+                fetched_at=fetched_at,
+                source_status="UNREADABLE",
+            )
+            result["rows_inserted"] += 1
+            result["exhibits_unreadable_count"] += 1
+            log.info("Inserted UNREADABLE Exhibit 2.1 (label=%r) for extraction_id=%d", label, extraction_id)
+            continue
         if ex_text:
             c_hash = _content_hash(ex_text)
             if not conn.execute(
@@ -562,23 +732,73 @@ def run_per_transaction(
                 insert_source_raw(
                     conn,
                     source_type="SEC_EXHIBIT_21",
-                    url=exhibit_url,
+                    url=ex_url,
                     title=f"Exhibit 2.1 - {filer_name} - {filed_at}",
                     published_date=filed_at or None,
                     raw_html=raw_html,
                     clean_text=ex_text,
                     c_hash=c_hash,
-                    notes=notes_base,
+                    notes=_make_notes(None, label),
                     fetched_at=fetched_at,
                 )
                 result["rows_inserted"] += 1
                 result["exhibit_21_fetched"] = True
-                log.info("Inserted SEC_EXHIBIT_21 for extraction_id=%d", extraction_id)
+                log.info("Inserted SEC_EXHIBIT_21 (label=%r) for extraction_id=%d", label, extraction_id)
             else:
-                log.debug("Duplicate Exhibit 2.1 content_hash — skipping insert")
+                log.debug("Duplicate Exhibit 2.1 content_hash — skipping")
                 result["exhibit_21_fetched"] = True
         else:
-            log.warning("Exhibit 2.1 fetch returned no text for %s", exhibit_url)
+            log.warning("Exhibit 2.1 fetch returned no text for %s", ex_url)
+
+    # Exhibit 99.x (retrieve all matching exhibits)
+    for label, ex_url in _find_exhibits(filing, _EX_99_RE):
+        log.debug("Exhibit 99.x candidate: label=%r url=%s", label, ex_url)
+        raw_html, ex_text, ex_status = fetch_exhibit(cfg, session, ex_url, log)
+        if ex_status == "SKIP":
+            continue
+        if ex_status == "UNREADABLE":
+            insert_source_raw(
+                conn,
+                source_type="SEC_EXHIBIT_99",
+                url=ex_url,
+                title=f"Exhibit {label} - {filer_name} - {filed_at}",
+                published_date=filed_at or None,
+                raw_html=None,
+                clean_text=None,
+                c_hash=None,
+                notes=_make_notes(None, label),
+                fetched_at=fetched_at,
+                source_status="UNREADABLE",
+            )
+            result["rows_inserted"] += 1
+            result["exhibits_unreadable_count"] += 1
+            log.info("Inserted UNREADABLE Exhibit 99.x (label=%r) for extraction_id=%d", label, extraction_id)
+            continue
+        if ex_text:
+            c_hash = _content_hash(ex_text)
+            if not conn.execute(
+                "SELECT 1 FROM source_raw WHERE content_hash=?", (c_hash,)
+            ).fetchone():
+                insert_source_raw(
+                    conn,
+                    source_type="SEC_EXHIBIT_99",
+                    url=ex_url,
+                    title=f"Exhibit {label} - {filer_name} - {filed_at}",
+                    published_date=filed_at or None,
+                    raw_html=raw_html,
+                    clean_text=ex_text,
+                    c_hash=c_hash,
+                    notes=_make_notes(None, label),
+                    fetched_at=fetched_at,
+                )
+                result["rows_inserted"] += 1
+                result["exhibit_99_fetched_count"] += 1
+                log.info("Inserted SEC_EXHIBIT_99 (label=%r) for extraction_id=%d", label, extraction_id)
+            else:
+                log.debug("Duplicate Exhibit 99.x content_hash — skipping")
+                result["exhibit_99_fetched_count"] += 1
+        else:
+            log.warning("Exhibit 99.x fetch returned no text for %s (label=%r)", ex_url, label)
 
     conn.execute(
         "UPDATE staging_extraction SET sec_lookup_status='TRIGGERED' WHERE extraction_id=?",
