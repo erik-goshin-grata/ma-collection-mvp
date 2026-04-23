@@ -16,3 +16,6 @@ rapidfuzz>=3.0.0
 
 # .env file loader
 python-dotenv>=1.0.0
+
+# HTML parsing for PR Newswire listing scrape
+beautifulsoup4>=4.12.0
