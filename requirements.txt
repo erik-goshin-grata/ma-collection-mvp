@@ -1,0 +1,18 @@
+# M&A Collection MVP — Python dependencies
+# Python 3.11+ required.
+# Install: pip install -r requirements.txt
+
+# Claude API client (Opus 4.7 for extraction/generation, Haiku 4.5 for relevancy filter)
+anthropic>=0.40.0
+
+# HTTP client for PR Newswire scraping and sec-api.io calls
+requests>=2.31.0
+
+# HTML-to-clean-text extraction (PR Newswire body pages, SEC exhibit HTML)
+trafilatura>=1.8.0
+
+# Fuzzy string matching for entity resolution (name normalization + clustering)
+rapidfuzz>=3.0.0
+
+# .env file loader
+python-dotenv>=1.0.0
