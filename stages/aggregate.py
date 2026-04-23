@@ -413,6 +413,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             conflicts_llm += llm_count_this_cluster
             flagged += flag_count_this_cluster
 
+            # Re-serialize any json-type fields that the LLM returned as Python objects
+            for _fname, _ftype in _FIELDS:
+                if _ftype == "json" and isinstance(field_values.get(_fname), (list, dict)):
+                    field_values[_fname] = json.dumps(field_values[_fname])
+
             # Derive additional fields
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
             derived = _derive_flags(field_values)
