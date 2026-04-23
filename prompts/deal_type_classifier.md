@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.2 (revised)
+**Version:** 0.3 (revised)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -122,7 +122,24 @@ CLASSIFICATION RULES:
 - If the release describes a termination, classify as the original deal type so the downstream pipeline can link the termination to the original record.
 - If multiple events are announced in one release, classify based on the primary event.
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences. Do not include comments.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "deal_type": "ACQUISITION",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "target_type": "STANDALONE_COMPANY",
+  "event_type": "ANNOUNCEMENT",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": null,
+  "prompt_version": "deal_type_classifier:0.3"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -155,7 +172,7 @@ Classify the deal type, discriminators, target type, event type, and target stat
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -197,7 +214,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -221,7 +238,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Take-Private context: public target, PE acquirer. Downstream derives Take-Private flag from target_status + acquirer_type.",
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -245,7 +262,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Business unit divestiture; parent_seller is MegaCorp (extracted downstream)",
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -269,7 +286,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Parent retains 15% residual stake, consistent with SPIN_OFF tax-free treatment",
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -293,7 +310,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Practitioner term 'Split-Off' = SPLIT + EXCHANGE_OFFER in schema",
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -317,7 +334,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "New entity formed; no existing company acquired",
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -341,7 +358,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "LOW",
   "notes": "Release lacks structural detail to distinguish between acquisition, merger, JV, or asset combination",
-  "prompt_version": "deal_type_classifier:0.2"
+  "prompt_version": "deal_type_classifier:0.3"
 }
 ```
 
@@ -366,3 +383,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft — 10-type taxonomy including TAKE_PRIVATE, CARVE_OUT, ASSET_SALE, SPIN_OFF as top-level types. |
 | 0.2 | 2026-04-22 | Revised to align with agreed schema. 7-type taxonomy. SPIN_SPLIT with spin_split_type + distribution_mechanism discriminators. target_type added as output. TAKE_PRIVATE and CARVE_OUT removed as top-level (derived downstream or out of scope). Target_status enum expanded to include SUBSIDIARY_OF_PUBLIC / SUBSIDIARY_OF_PRIVATE. |
+| 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |

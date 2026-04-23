@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.2 (revised)
+**Version:** 0.3 (revised)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -120,7 +120,19 @@ REQUIREMENTS:
 
 11. Advisors: include the advisors_summary sentence verbatim if present, at the end of the paragraph.
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "summary_text": "On April 15, 2026, Acme Corp announced a definitive agreement to acquire Beta Industries, a privately held manufacturer of specialty valves, for $500 million in cash. Beta Industries generated approximately $120 million in revenue in fiscal 2025. Goldman Sachs served as financial advisor and Wachtell, Lipton, Rosen & Katz served as legal counsel to Acme Corp, while Morgan Stanley served as financial advisor and Kirkland & Ellis served as legal counsel to Beta Industries.",
+  "word_count": 65,
+  "model_confidence": "HIGH",
+  "notes": null,
+  "prompt_version": "deal_summary:0.3"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -170,7 +182,7 @@ Generate the summary.
   "word_count": 65,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.2"
+  "prompt_version": "deal_summary:0.3"
 }
 ```
 
@@ -216,7 +228,7 @@ Output:
   "word_count": 80,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.2"
+  "prompt_version": "deal_summary:0.3"
 }
 ```
 
@@ -248,7 +260,7 @@ Output:
   "word_count": 100,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.2"
+  "prompt_version": "deal_summary:0.3"
 }
 ```
 
@@ -280,7 +292,7 @@ Output:
   "word_count": 81,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.2"
+  "prompt_version": "deal_summary:0.3"
 }
 ```
 
@@ -308,7 +320,7 @@ Output:
   "word_count": 49,
   "model_confidence": "MEDIUM",
   "notes": "Closing announcement with no financial terms; summary kept short by necessity",
-  "prompt_version": "deal_summary:0.2"
+  "prompt_version": "deal_summary:0.3"
 }
 ```
 
@@ -338,7 +350,7 @@ Output:
   "word_count": 78,
   "model_confidence": "MEDIUM",
   "notes": "SPIN_OFF with residual stake inferred from prompt context; transaction details sparse in input",
-  "prompt_version": "deal_summary:0.2"
+  "prompt_version": "deal_summary:0.3"
 }
 ```
 
@@ -365,3 +377,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-22 | Input schema updated to match Drop 2.1 field names: `consideration_components` array with derived `consideration_type`, `termination_fees` object (target/acquirer × amount/percentage), `go_shop` object, `acquirer_type`, `target_type`, SPIN_SPLIT discriminators. System prompt updated with value_type phrasing rules and deal-type-specific handling (take-private, business unit divestiture, spin-split). New few-shot examples added for spin-split and business unit cases. |
+| 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |

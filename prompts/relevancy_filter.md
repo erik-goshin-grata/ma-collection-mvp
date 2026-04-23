@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -73,7 +73,19 @@ EDGE CASES:
 - If a release is about a rumored deal without a definitive agreement, classify as NOT_RELEVANT (rumor coverage is out of MVP scope).
 - If a release is about a company being added to an index, going IPO, or completing a direct listing, classify as NOT_RELEVANT (IPOs are not in MVP scope).
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences. Do not include comments.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "classification": "RELEVANT",
+  "reason_code": "ACQUISITION_ANNOUNCEMENT",
+  "model_confidence": "HIGH",
+  "notes": null,
+  "prompt_version": "relevancy_filter:0.2"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -99,7 +111,7 @@ Classify this release.
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.1"
+  "prompt_version": "relevancy_filter:0.2"
 }
 ```
 
@@ -157,7 +169,7 @@ Output:
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "relevancy_filter:0.1"
+  "prompt_version": "relevancy_filter:0.2"
 }
 ```
 
@@ -176,7 +188,7 @@ Output:
   "reason_code": "PRODUCT_OR_COMMERCIAL",
   "model_confidence": "HIGH",
   "notes": "Commercial partnership, no equity or M&A component mentioned",
-  "prompt_version": "relevancy_filter:0.1"
+  "prompt_version": "relevancy_filter:0.2"
 }
 ```
 
@@ -195,7 +207,7 @@ Output:
   "reason_code": "RUMOR_OR_SPECULATION",
   "model_confidence": "HIGH",
   "notes": "No definitive agreement; rumor coverage is out of scope",
-  "prompt_version": "relevancy_filter:0.1"
+  "prompt_version": "relevancy_filter:0.2"
 }
 ```
 
@@ -214,7 +226,7 @@ Output:
   "reason_code": "DEAL_AMENDMENT_OR_TERMINATION",
   "model_confidence": "HIGH",
   "notes": "Termination of a previously announced deal — in scope for completeness",
-  "prompt_version": "relevancy_filter:0.1"
+  "prompt_version": "relevancy_filter:0.2"
 }
 ```
 
@@ -237,3 +249,4 @@ Output:
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
+| 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |

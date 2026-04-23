@@ -1,6 +1,6 @@
 # Aggregation Prompt (Conflict Resolution)
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Repo path:** `prompts/aggregation.md`
 
 ---
@@ -92,7 +92,22 @@ CORE PRINCIPLES:
 
 7. If you detect that the observations are describing fundamentally different things (e.g., one is enterprise value and another is equity value for the same deal), return the observation_id of the one that matches the intended field semantics, and note the issue prominently.
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences. Do not include comments.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "chosen_observation_id": 2,
+  "chosen_value": 485000000,
+  "aggregation_confidence": "HIGH",
+  "reasoning": "T1 SEC 8-K states $485M as the aggregate purchase price, published one day after the PR. The PR's $500M is a rounded or pre-adjustment figure. The definitive agreement value governs.",
+  "flagged_for_review": false,
+  "conflict_severity": "MINOR",
+  "notes": null,
+  "prompt_version": "aggregation:0.2"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -130,7 +145,7 @@ The orchestrator formats `observations_formatted` as a numbered list, one block 
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.1"
+  "prompt_version": "aggregation:0.2"
 }
 ```
 
@@ -188,7 +203,7 @@ Output:
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.1"
+  "prompt_version": "aggregation:0.2"
 }
 ```
 
@@ -224,7 +239,7 @@ Output:
   "flagged_for_review": true,
   "conflict_severity": "SEMANTIC",
   "notes": "Orchestrator should populate both value_amount (equity) and enterprise_value (from T2) rather than treating this as a conflict.",
-  "prompt_version": "aggregation:0.1"
+  "prompt_version": "aggregation:0.2"
 }
 ```
 
@@ -258,7 +273,7 @@ Output:
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.1"
+  "prompt_version": "aggregation:0.2"
 }
 ```
 
@@ -281,3 +296,4 @@ Output:
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
+| 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |

@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.2 (revised)
+**Version:** 0.3 (revised)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -122,7 +122,61 @@ EXTRACTION RULES:
 - If multiple conflicting values appear, use the most recently stated or most specific figure, and note the conflict.
 - For tickers, use exchange:symbol format. If only a symbol is given without an exchange, use UNKNOWN:SYMBOL.
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences. Do not include comments.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "target": {
+    "name": "Beta Industries",
+    "domain": "beta-industries.com",
+    "ticker": null
+  },
+  "acquirer": {
+    "name": "Acme Corp",
+    "domain": "acme.com",
+    "ticker": "NASDAQ:ACME",
+    "type": "STRATEGIC_CORPORATE"
+  },
+  "parent_seller": {
+    "name": null,
+    "ticker": null
+  },
+  "dates": {
+    "announced_date": "2026-04-15",
+    "closed_date": null,
+    "signing_date": null
+  },
+  "value": {
+    "amount": 500000000,
+    "currency": "USD",
+    "type": "TRANSACTION_VALUE",
+    "type_confidence": "MEDIUM",
+    "per_share_price": null,
+    "qualifier": null
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": null,
+  "prompt_version": "high_confidence_extraction:0.3"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -199,7 +253,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.2"
+  "prompt_version": "high_confidence_extraction:0.3"
 }
 ```
 
@@ -264,7 +318,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given",
-  "prompt_version": "high_confidence_extraction:0.2"
+  "prompt_version": "high_confidence_extraction:0.3"
 }
 ```
 
@@ -317,7 +371,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag",
-  "prompt_version": "high_confidence_extraction:0.2"
+  "prompt_version": "high_confidence_extraction:0.3"
 }
 ```
 
@@ -370,7 +424,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'.",
-  "prompt_version": "high_confidence_extraction:0.2"
+  "prompt_version": "high_confidence_extraction:0.3"
 }
 ```
 
@@ -421,7 +475,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated.",
-  "prompt_version": "high_confidence_extraction:0.2"
+  "prompt_version": "high_confidence_extraction:0.3"
 }
 ```
 
@@ -448,3 +502,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-22 | Revised. value_type enum aligned with schema (EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED) with TRANSACTION_VALUE as default. value_type_confidence added. acquirer_type added as output (drives Take-Private and Add-On derivation downstream). PE_PORTFOLIO added to acquirer_type enum to support Add-On recognition. SPIN_SPLIT handling added (acquirer_name = null, parent_seller populated). |
+| 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |

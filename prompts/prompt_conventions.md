@@ -142,3 +142,26 @@ All examples are synthetic. No real press release text, no real company data, no
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
+| 0.2 | 2026-04-23 | Added §11 Prompt File Structure Rule (RESPONSE FORMAT requirement). |
+
+---
+
+## 11. Prompt File Structure Rule
+
+Each prompt file's **§ 4 System Prompt** fence must end with a `RESPONSE FORMAT` block containing a concrete JSON example of the expected response shape. This is the text that `load_prompt_file()` ships to the model at runtime.
+
+**§ 6 Output Schema** remains as human-facing documentation — field definitions, enum expansions, field notes — and is **not** extracted by `load_prompt_file()` and therefore **not** sent to the model.
+
+When adding a new prompt file or revising an existing one, update both the `RESPONSE FORMAT` block in § 4 and the JSON example in § 6 together; they must stay in sync.
+
+**Required format** (place immediately before the closing fence in § 4):
+
+```
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{ ... concrete JSON example ... }
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+```

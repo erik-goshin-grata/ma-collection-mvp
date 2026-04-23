@@ -1,6 +1,6 @@
 # Strategic Rationale Prompt
 
-**Version:** 0.1 (draft)
+**Version:** 0.2 (draft)
 **Repo path:** `prompts/strategic_rationale.md`
 
 ---
@@ -81,7 +81,20 @@ CLASSIFICATION RULES:
 - If the source excerpts contain only generic language ("strengthen our business," "create value for shareholders") without specifics, use OTHER with a note.
 - Do not invent rationale based on industry context. The model must see explicit rationale language in the excerpts to classify.
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences. Do not include comments.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "rationale": "GEOGRAPHIC_EXPANSION",
+  "secondary_rationales": ["PRODUCT_OR_TECH_CAPABILITY"],
+  "supporting_excerpt_index": 0,
+  "model_confidence": "HIGH",
+  "notes": null,
+  "prompt_version": "strategic_rationale:0.2"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -113,7 +126,7 @@ Classify the primary strategic rationale.
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "strategic_rationale:0.1"
+  "prompt_version": "strategic_rationale:0.2"
 }
 ```
 
@@ -159,7 +172,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "strategic_rationale:0.1"
+  "prompt_version": "strategic_rationale:0.2"
 }
 ```
 
@@ -187,7 +200,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": "Primary rationale is capability addition (ML to industrial automation); team scale is a secondary signal",
-  "prompt_version": "strategic_rationale:0.1"
+  "prompt_version": "strategic_rationale:0.2"
 }
 ```
 
@@ -217,7 +230,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": "PE take-private with standard shareholder-value framing; no specific strategic rationale beyond the financial thesis",
-  "prompt_version": "strategic_rationale:0.1"
+  "prompt_version": "strategic_rationale:0.2"
 }
 ```
 
@@ -245,7 +258,7 @@ Output:
   "supporting_excerpt_index": null,
   "model_confidence": "LOW",
   "notes": "Excerpts contain only generic value-creation language; no specific strategic rationale can be identified",
-  "prompt_version": "strategic_rationale:0.1"
+  "prompt_version": "strategic_rationale:0.2"
 }
 ```
 
@@ -273,7 +286,7 @@ Output:
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
   "notes": "Downstream integration into distribution",
-  "prompt_version": "strategic_rationale:0.1"
+  "prompt_version": "strategic_rationale:0.2"
 }
 ```
 
@@ -297,3 +310,4 @@ Output:
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
+| 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |

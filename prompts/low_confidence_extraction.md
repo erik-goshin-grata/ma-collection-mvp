@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.2 (revised)
+**Version:** 0.3 (revised)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -125,7 +125,45 @@ Termination fee rules:
 
 All booleans default false unless the text supports them. Do not set any flag true based on deal type alone.
 
-Return a single JSON object matching the schema. Do not include any text before or after the JSON. Do not wrap the JSON in Markdown code fences.
+RESPONSE FORMAT
+
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+
+{
+  "advisors": [
+    {"name": "Goldman Sachs", "type": "FINANCIAL", "advised_party": "ACQUIRER"},
+    {"name": "Wachtell, Lipton, Rosen & Katz", "type": "LEGAL", "advised_party": "ACQUIRER"}
+  ],
+  "consideration_components": [
+    {
+      "form": "CASH",
+      "amount": 500000000,
+      "percentage": 100.0,
+      "description": "All-cash consideration paid at closing"
+    }
+  ],
+  "flags": {
+    "includes_earnout": false,
+    "hostile": false,
+    "competing_bid": false,
+    "regulatory_approvals_required": false
+  },
+  "go_shop": {
+    "has_go_shop": false,
+    "go_shop_period_days": null
+  },
+  "termination_fees": {
+    "target_fee_amount": null,
+    "target_fee_percentage": null,
+    "acquirer_fee_amount": null,
+    "acquirer_fee_percentage": null
+  },
+  "model_confidence": "HIGH",
+  "notes": null,
+  "prompt_version": "low_confidence_extraction:0.3"
+}
+
+All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -183,7 +221,7 @@ Extract advisors, consideration components, and deal characteristic flags.
   },
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "low_confidence_extraction:0.2"
+  "prompt_version": "low_confidence_extraction:0.3"
 }
 ```
 
@@ -238,7 +276,7 @@ Output:
   },
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "low_confidence_extraction:0.2"
+  "prompt_version": "low_confidence_extraction:0.3"
 }
 ```
 
@@ -279,7 +317,7 @@ Output:
   },
   "model_confidence": "HIGH",
   "notes": "Percentages against $800M max deal value",
-  "prompt_version": "low_confidence_extraction:0.2"
+  "prompt_version": "low_confidence_extraction:0.3"
 }
 ```
 
@@ -318,7 +356,7 @@ Output:
   },
   "model_confidence": "HIGH",
   "notes": "HSR explicit. Target fee amount-only; acquirer fee both amount and percentage stated.",
-  "prompt_version": "low_confidence_extraction:0.2"
+  "prompt_version": "low_confidence_extraction:0.3"
 }
 ```
 
@@ -355,7 +393,7 @@ Output:
   },
   "model_confidence": "HIGH",
   "notes": "Closing release with no financial terms disclosed",
-  "prompt_version": "low_confidence_extraction:0.2"
+  "prompt_version": "low_confidence_extraction:0.3"
 }
 ```
 
@@ -382,3 +420,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-22 | Revised. Removed `all_cash` and `includes_stock` flags (derived by orchestrator from consideration array). Split `break_fee_*` fields into `termination_fees` object with target/acquirer × amount/percentage per schema. Formalized `go_shop` as object with `has_go_shop` + `go_shop_period_days`. Renamed `consideration` → `consideration_components` for clarity. |
+| 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
