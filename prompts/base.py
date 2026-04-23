@@ -257,6 +257,14 @@ def _resolve_model(model: str, cfg: Config) -> str:
     return model
 
 
+# Model ID prefixes for which `temperature` is not accepted by the API.
+_NO_TEMPERATURE_PREFIXES = ("claude-opus-4",)
+
+
+def _supports_temperature(model_id: str) -> bool:
+    return not any(model_id.startswith(p) for p in _NO_TEMPERATURE_PREFIXES)
+
+
 # ---------------------------------------------------------------------------
 # Central API call
 # ---------------------------------------------------------------------------
@@ -360,16 +368,19 @@ def call_prompt(
     raw_response = ""
     message: anthropic.types.Message | None = None
 
+    api_kwargs: dict[str, Any] = {
+        "model": model_id,
+        "max_tokens": max_tokens,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    if _supports_temperature(model_id):
+        api_kwargs["temperature"] = temperature
+
     for attempt in range(2):
         t0 = time.monotonic()
         try:
-            message = client.messages.create(
-                model=model_id,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
+            message = client.messages.create(**api_kwargs)
         except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
             # Auth failures are fatal — halt the pipeline immediately.
             raise _fail("API_ERROR", f"Auth failure ({type(exc).__name__}): {exc}")
