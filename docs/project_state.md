@@ -221,7 +221,7 @@ These are known opportunities, logged but not scoped. Review when planning post-
 
 ### 5.1 Transaction Lifecycle Management
 
-**The biggest structural v2 item.** Today the pipeline treats each PR as a discrete event. A CLOSE PR arriving weeks after an ANNOUNCEMENT creates a new orphan CLOSE record. Amendments, terminations, regulatory approvals have the same problem.
+Today's automated pipeline treats each PR as a discrete event. The Grata manual collection process already handles deal lifecycle — close announcements, regulatory milestones, amendments, terminations — as supplemental observations linked to the original announcement record. Lifecycle management for the automated pipeline is automation parity with that manual workflow, not a new architectural problem. Where DataOps has documented matching criteria for linking follow-up PRs to existing deals, the automated path should inherit those rules. The escape-valve pattern (flag low-confidence matches for human review) extends from the existing aggregation_conflict_log convention via a new transaction_link_log table.
 
 V2 architecture adds a linking stage:
 
