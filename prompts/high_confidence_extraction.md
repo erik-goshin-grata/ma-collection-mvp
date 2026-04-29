@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.6 (revised)
+**Version:** 0.7 (revised)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -139,13 +139,39 @@ DEAL VALUE:
 - per_share_price — for transactions involving public targets, the per-share cash (or cash-equivalent) price paid to target shareholders. Null for other deal types unless relevant.
 - value_qualifier — short string capturing qualifying language around the value: "approximately", "up to", "in excess of", "$400-500M range", or null if precise.
 
-value_type enum (CRITICAL — follow these rules carefully):
-- EQUITY_VALUE — the value is explicitly described as equity value, purchase price for the equity, or purchase price for all outstanding shares.
-- ENTERPRISE_VALUE — the value is explicitly described as enterprise value, or as "equity value plus debt," or a combination that clearly includes debt assumption.
-- TRANSACTION_VALUE — the default. Use this when the release states "deal value," "transaction value," "valued at $X," "for $X million in cash," or simply "$X million" without specifying equity value or enterprise value. TRANSACTION_VALUE is equity value plus any debt assumed as stated — when the release doesn't make the distinction, we default here rather than guessing equity vs enterprise.
-- UNDISCLOSED — no value is stated or financial terms are explicitly said to be undisclosed.
+VALUE TYPE — determination
 
-Set value_type_confidence = HIGH when the text explicitly uses "equity value" or "enterprise value" language. Set MEDIUM when defaulting to TRANSACTION_VALUE. Set HIGH when the release explicitly states "terms were not disclosed" (UNDISCLOSED is confident).
+Pick exactly one value_type per transaction. Apply the rules in priority order:
+
+1. UNDISCLOSED — when the source text states no monetary value at all, OR explicitly says terms were not disclosed.
+   - Signals: "terms were not disclosed", "financial terms were not disclosed", "undisclosed terms", "for an undisclosed amount"
+   - When UNDISCLOSED, value_amount must be NULL.
+
+2. ENTERPRISE_VALUE — when the source text uses "enterprise value" language directly, OR when value clearly includes debt assumed.
+   - Signals: "enterprise value of $X", "EV of $X", "total enterprise value", "deal valued at $X including assumed debt", "X times EBITDA" (multiple of EBITDA implies EV)
+
+3. EQUITY_VALUE — apply when ANY of the following hold:
+   a. Source text uses "equity value" language directly: "equity value of $X", "stockholders' equity", "for the equity"
+   b. Per-share offer price language: "$X per share", "offer of $X per share to shareholders"
+   c. Partial-stake acquisition where pct_acquired is stated and less than 100%: the value reflects payment for the acquired equity stake, not whole-company. Override TRANSACTION_VALUE default in this case.
+   d. Financial services target (banks, insurance, asset managers, broker-dealers): industry convention is equity value, not enterprise value. Banks are valued on P/B and P/TBV; insurance on book value or embedded value. Use EQUITY_VALUE when the target's primary business is regulated financial services unless source text explicitly states ENTERPRISE_VALUE.
+   e. Take-private of public company where consideration is described per-share: aggregate value is implicit equity value (offer price × shares outstanding).
+   f. Stock-for-stock deals where consideration is shares of the acquirer: equity-for-equity exchange, EQUITY_VALUE.
+
+4. TRANSACTION_VALUE — default when value is stated but type is not explicit AND none of the EQUITY_VALUE conditions above apply.
+   - Common signals: "transaction valued at $X", "deal worth $X", "$X transaction"
+   - This is the safe default for strategic acquisitions of standalone companies where consideration is cash and no per-share or partial-stake framing is present.
+
+Decision priority: when multiple rules could apply, prioritize:
+- Explicit value-type language (rule 2 or 3a) overrides defaults
+- Partial-stake (3c) overrides TRANSACTION_VALUE default
+- Financial services convention (3d) overrides TRANSACTION_VALUE default
+- TRANSACTION_VALUE applies only when nothing more specific fits
+
+Set value_type_confidence to:
+- HIGH when an explicit value-type signal is present in source text
+- MEDIUM when applying a convention rule (3c, 3d, 3e, 3f) without explicit text confirmation
+- LOW when the source text is ambiguous and the model is making a best-guess assignment
 
 PCT_ACQUIRED:
 - pct_acquired — the percentage of the target being acquired, when explicitly stated.
@@ -280,7 +306,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -368,7 +394,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -436,7 +462,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -490,7 +516,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag. No About sections in source; descriptions null.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -544,7 +570,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'. No About sections; descriptions null.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -596,7 +622,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -654,7 +680,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -723,7 +749,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Asset portfolio acquisition (12 mitigation banks); not a going-concern subsidiary. ASSETS target_type appropriate. Terms not disclosed.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -792,7 +818,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Partial acquisition (51%) for stock consideration; $17.5M is purchase price for 51% stake (EQUITY_VALUE for the acquired portion). pct_acquired = 51.0.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -862,7 +888,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Add-on acquisition: PE_PORTFOLIO acquirer (PremiStar) backed by Audax Private Equity acquires standalone target.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -932,7 +958,189 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Majority recapitalization with co-investor structure. Both sponsors are direct PE acquirers (PRIVATE_EQUITY, not PE_PORTFOLIO) — neither is a portfolio-company shell. acquirer_sponsor_name captures both sponsors comma-delimited. Founders/management likely retain minority equity in this recap structure.",
-  "prompt_version": "high_confidence_extraction:0.6"
+  "prompt_version": "high_confidence_extraction:0.7"
+}
+```
+
+**Example 10 — Partial acquisition: EQUITY_VALUE per partial-stake rule (rule 3c):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-04-23
+
+TITLE: Foresight Autonomous Holdings Announces Agreement to Acquire 51% of VisionWave Holdings
+BODY: Foresight Autonomous Holdings Ltd. (NASDAQ: FRSX) today announced an agreement to acquire 51% of VisionWave Holdings, Inc. for $17.5 million in Foresight common stock.
+```
+
+Output:
+```json
+{
+  "target": {"name": "VisionWave Holdings, Inc.", "domain": null, "ticker": null, "description": null},
+  "acquirer": {
+    "name": "Foresight Autonomous Holdings Ltd.",
+    "domain": null,
+    "ticker": "NASDAQ:FRSX",
+    "type": "STRATEGIC_CORPORATE",
+    "description": null,
+    "sponsor_name": null
+  },
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": 51.0},
+  "dates": {"announced_date": "2026-04-23", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": 17500000,
+    "currency": "USD",
+    "type": "EQUITY_VALUE",
+    "type_confidence": "HIGH",
+    "per_share_price": null,
+    "qualifier": "for 51% of equity"
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Partial acquisition (51%); $17.5M consideration is for the acquired equity stake, not whole-company. value_type = EQUITY_VALUE per partial-stake rule (3c). Implies $34.3M total equity value of target.",
+  "prompt_version": "high_confidence_extraction:0.7"
+}
+```
+
+**Example 11 — Financial services target: EQUITY_VALUE per industry convention (rule 3d):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PUBLIC
+PUBLISHED DATE: 2026-04-22
+
+TITLE: Peoples Bancorp Inc. to Acquire Citizens National Corporation
+BODY: Peoples Bancorp Inc. (NASDAQ: PEBO) and Citizens National Corporation announced today a definitive agreement under which Peoples will acquire Citizens National in a cash and stock transaction valued at approximately $148 million. Citizens National is the holding company for Citizens National Bank, a community bank serving West Virginia and Kentucky with $1.2 billion in assets.
+```
+
+Output:
+```json
+{
+  "target": {
+    "name": "Citizens National Corporation",
+    "domain": null,
+    "ticker": null,
+    "description": "the holding company for Citizens National Bank, a community bank serving West Virginia and Kentucky with $1.2 billion in assets"
+  },
+  "acquirer": {
+    "name": "Peoples Bancorp Inc.",
+    "domain": null,
+    "ticker": "NASDAQ:PEBO",
+    "type": "STRATEGIC_CORPORATE",
+    "description": null,
+    "sponsor_name": null
+  },
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
+  "dates": {"announced_date": "2026-04-22", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": 148000000,
+    "currency": "USD",
+    "type": "EQUITY_VALUE",
+    "type_confidence": "MEDIUM",
+    "per_share_price": null,
+    "qualifier": "approximately"
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Bank holding company acquisition. Financial services convention: banks valued on equity value (P/B, P/TBV), not enterprise value. value_type = EQUITY_VALUE per industry convention rule (3d). Confidence MEDIUM because source text does not explicitly say 'equity value' but industry convention is unambiguous for community banks.",
+  "prompt_version": "high_confidence_extraction:0.7"
+}
+```
+
+**Example 12 — Take-private with per-share offer: EQUITY_VALUE (rules 3b + 3e):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PUBLIC
+PUBLISHED DATE: 2026-04-15
+
+TITLE: Acme Capital to Acquire BetaCo for $42 Per Share in Cash
+BODY: Acme Capital Partners today announced an agreement to acquire BetaCo, Inc. (NASDAQ: BETA) for $42.00 per share in cash, representing a 35% premium to BetaCo's closing price of $31.10 on April 14. The transaction values BetaCo at approximately $2.4 billion, with closing expected in Q3 2026 subject to BetaCo shareholder approval and regulatory clearances.
+```
+
+Output:
+```json
+{
+  "target": {"name": "BetaCo, Inc.", "domain": null, "ticker": "NASDAQ:BETA", "description": null},
+  "acquirer": {
+    "name": "Acme Capital Partners",
+    "domain": null,
+    "ticker": null,
+    "type": "PRIVATE_EQUITY",
+    "description": null,
+    "sponsor_name": null
+  },
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
+  "dates": {"announced_date": "2026-04-15", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": 2400000000,
+    "currency": "USD",
+    "type": "EQUITY_VALUE",
+    "type_confidence": "HIGH",
+    "per_share_price": 42.00,
+    "qualifier": "approximately"
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Take-private at $42/share cash, 35% premium. $2.4B aggregate value reflects equity acquired (per-share price × shares outstanding); value_type = EQUITY_VALUE per per-share rule (3b) and take-private rule (3e). Acquirer is PE; PUBLIC target + PE acquirer → is_take_private derived downstream.",
+  "prompt_version": "high_confidence_extraction:0.7"
 }
 ```
 
@@ -965,3 +1173,4 @@ Output:
 | 0.4 | 2026-04-23 | Added simultaneous announce-and-close date rule for CLOSE event_type when no separate close date is stated. Applies to the common private-to-private pattern where past-tense completive language is used without a distinct close date. Added Example 5 to illustrate. |
 | 0.5 | 2026-04-23 | Added ASSETS to target_type handling (TARGET TYPE CONTEXT section; parent_seller extraction rule extended to ASSETS). Added pct_acquired numeric field for partial acquisitions (PCT_ACQUIRED section). Added party description extraction for target, acquirer, parent_seller from "About" boilerplate (PARTY DESCRIPTIONS section). Updated RESPONSE FORMAT block and output schema (§6) to include description fields on all party objects and new "deal" object with target_type context and pct_acquired. Updated all five existing examples with description fields and deal section. Added Example 6 (ASSETS portfolio acquisition) and Example 7 (partial acquisition with pct_acquired). |
 | 0.6 | 2026-04-29 | Tightened acquirer_type=PE_PORTFOLIO detection with concrete language signals (10+ phrases including "portfolio company of," "X-backed," "X platform"). Added acquirer_sponsor_name extraction with single-sponsor and multi-sponsor (comma-delimited) handling. Updated RESPONSE FORMAT and §6 output schema to include sponsor_name on acquirer object. Updated all seven existing examples with sponsor_name field. Added Example 8 (single-sponsor PE add-on: PremiStar/Armistead Mechanical) and Example 9 (multi-sponsor co-investor recap: Harrell-Fish). Addresses 14 missed add-ons from 100-PR review. |
+| 0.7 | 2026-04-29 | Tightened value_type determination with priority-ordered rules (UNDISCLOSED → ENTERPRISE_VALUE → EQUITY_VALUE → TRANSACTION_VALUE). Added explicit handling for partial-stake acquisitions (rule 3c: EQUITY_VALUE when pct_acquired < 100%), financial services convention (rule 3d: banks/insurance use equity value), per-share take-privates (rule 3e: aggregate is equity value), and stock-for-stock deals (rule 3f). Refined value_type_confidence guidance: HIGH for explicit text signals, MEDIUM for convention rules (3c–3f), LOW for ambiguous. Added Examples 10 (partial-stake Foresight/VisionWave), 11 (community bank Peoples/Citizens National), 12 (per-share take-private BetaCo). Addresses 3 patterns from 100-PR review where TRANSACTION_VALUE was assigned when EQUITY_VALUE was correct. |
