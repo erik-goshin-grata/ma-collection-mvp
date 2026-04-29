@@ -397,6 +397,19 @@ Terse, directive. No hedging. Erik edits Code's output into his own voice. Cross
 - `HAIKU_MODEL=claude-haiku-4-5-20251001`
 - Python 3.11+, 5 dependencies (`anthropic`, `requests`, `trafilatura`, `rapidfuzz`, `python-dotenv`)
 
+### 7.6 Re-run resets
+
+When re-running the pipeline at a specific stage (e.g., `--mode=aggregate` after a Stage 8 patch), the operator clears downstream tables manually. The correct reset depends on the entry stage:
+
+| Re-run from | Tables to clear | Tables to preserve |
+| :--- | :--- | :--- |
+| `--mode=full` (fresh DB) | All tables | None |
+| `--mode=aggregate` (Stages 8–9) | `transaction_record`, `transaction_source`, `aggregation_conflict_log`. Roll `staging_extraction.status` back to `LC_EXTRACTED`. | `advisor`, `consideration_components` (on `staging_extraction`), `summary`, `rationale_tag`, `source_raw` |
+| `--mode=generate` (Stages 10–11) | `summary` (or flip `is_current=0`), `rationale_tag` (or flip `is_current=0`) | All else |
+| `--mode=rerun-prompt` | None — new outputs flip prior `is_current` to 0 | All |
+
+Operator: tailor the reset to the stages that will actually re-run. The `advisor` table is written by Stage 7 and should NOT be cleared on aggregate-mode reruns.
+
 ---
 
 ## 8. Next Session Kickoff
