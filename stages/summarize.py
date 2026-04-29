@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.4"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0
@@ -165,9 +165,16 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             announced_date=_f(tr["announced_date"]),
             closed_date=_f(tr["closed_date"]),
             target_name=_f(tr["target_name"]),
+            target_ticker=_f(tr["target_ticker"]),
+            target_description=_f(tr["target_description"]),
             acquirer_name=_f(tr["acquirer_name"]),
             acquirer_type=_f(tr["acquirer_type"]),
+            acquirer_description=_f(tr["acquirer_description"]),
+            acquirer_sponsor_name=_f(tr["acquirer_sponsor_name"]),
+            pct_acquired=_f(tr["pct_acquired"]),
             parent_seller_name=_f(tr["parent_seller_name"]),
+            parent_seller_ticker=_f(tr["parent_seller_ticker"]),
+            parent_seller_description=_f(tr["parent_seller_description"]),
             value_amount=_f(tr["value_amount"]),
             value_currency=_f(tr["value_currency"]),
             value_type=_f(tr["value_type"]),
@@ -181,6 +188,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             target_revenue_period=_f(rev_period),
             target_ebitda=_f(tr["target_ebitda"]),
             target_ebitda_period=_f(ebitda_period),
+            ev_to_revenue_ltm=_f(tr["ev_to_revenue_ltm"]),
+            ev_to_revenue_ntm=_f(tr["ev_to_revenue_ntm"]),
+            ev_to_ebitda_ltm=_f(tr["ev_to_ebitda_ltm"]),
+            ev_to_ebitda_ntm=_f(tr["ev_to_ebitda_ntm"]),
+            multiple_quality=_f(tr["multiple_quality"]),
             advisors_summary=_f(advisors_summary),
         )
 
@@ -192,7 +204,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 system_prompt=prompt["system"],
                 model="opus",
                 temperature=0.3,
-                max_tokens=512,
+                max_tokens=768,
                 cfg=cfg,
                 conn=conn,
                 run_id=run_id,
@@ -212,7 +224,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             continue
 
         word_count = result.get("word_count")
-        if word_count and (word_count < 80 or word_count > 150):
+        if word_count and (word_count < 50 or word_count > 500):
             log.warning(
                 "transaction_id=%s word_count=%s outside 80–150 range — accepting",
                 tid, word_count,
