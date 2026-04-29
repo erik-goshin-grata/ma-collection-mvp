@@ -326,6 +326,8 @@ The descriptive taxonomy supports common user filters without additional schema 
 
 Priority: high. Subsumes the previously-flagged PE hierarchy work. Ships in approximately 1-2 days of spec + implementation after MVP lands.
 
+**Note on `acquirer_sponsor_name` (added in Drop 3.10):** currently a comma-delimited TEXT field on `transaction_record`. Captures sponsor identity at the source level, including co-sponsor cases (Harrell-Fish-style multi-investor recaps). When the entity layer ships, this column will be replaced with FK references to a sponsor / company entity table. The structured-name capture in this drop preserves the data we need for future entity resolution; the comma-delimited form is acceptable interim because sponsor names are usually well-formed and unique enough that splitting on commas during entity resolution will be straightforward.
+
 ### 5.5 GlobeNewswire Adapter
 
 Second wire service. The pipeline is source-agnostic (`source_type` enum accepts new values). RSS + body scrape, no API needed. Validated post-first-run; defer to after production run.

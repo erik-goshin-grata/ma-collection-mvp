@@ -513,6 +513,9 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 - `pct_acquired REAL` — percentage of target acquired when explicitly stated; NULL for implicit 100% (on `staging_extraction` and `transaction_record`)
 - `target_description TEXT`, `acquirer_description TEXT`, `parent_seller_description TEXT` — concise 1-sentence party descriptions from "About" boilerplate (on both tables)
 
+**New fields (Drop 3.10 / schema v0.4):**
+- `acquirer_sponsor_name TEXT` — PE sponsor(s) backing the acquirer; comma-delimited when multiple (e.g. "New State Capital Partners, Amethyst Capital Group"). NULL when acquirer is not PE-backed or sponsor not stated. Written by HC extraction and passed through aggregate. (on `staging_extraction` and `transaction_record`)
+
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft for review |

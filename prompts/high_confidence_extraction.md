@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.5 (revised)
+**Version:** 0.6 (revised)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -74,6 +74,31 @@ acquirer_type enum:
 - CONSORTIUM — a group of investors acting together (capture in notes which types are in the consortium)
 - PE_PORTFOLIO — a portfolio company of a private equity sponsor. Use this for add-on acquisitions where the named acquirer is the PE-backed platform company rather than the sponsor itself.
 - UNKNOWN — cannot be determined
+
+ACQUIRER TYPE — PE_PORTFOLIO determination
+
+Set acquirer_type = PE_PORTFOLIO when ANY of the following language signals are present in the source text describing the acquirer:
+- "portfolio company of [X]"
+- "[X] portfolio company"
+- "[X]-backed [Acquirer]"
+- "backed by [X]"
+- "owned by [X Capital / X Partners / X Equity / X Holdings]"
+- "[X], a [type] portfolio company"
+- "platform company of [X]"
+- "[X] platform"
+- Direct statement that acquirer is operating under a private equity sponsor
+- A stated parent-subsidiary relationship where the parent is identifiable as a PE firm
+
+Do NOT set PE_PORTFOLIO when:
+- The acquirer is a publicly-traded company that happens to have a PE investor (that's STRATEGIC_CORPORATE)
+- A PE firm is mentioned in the PR but not as the backer of the acquiring entity (e.g., advisor or co-investor)
+- The acquirer is itself a PE firm directly making the acquisition (that's PRIVATE_EQUITY, not PE_PORTFOLIO)
+
+Distinguishing PRIVATE_EQUITY vs PE_PORTFOLIO:
+- PRIVATE_EQUITY: the PE firm is the named acquirer ("Bain Capital acquired X")
+- PE_PORTFOLIO: a portfolio company of the PE firm is the named acquirer ("Acme Holdings, a Bain Capital portfolio company, acquired X")
+
+When acquirer_type = PE_PORTFOLIO is set, you MUST also populate acquirer_sponsor_name.
 
 For CARVE_OUT and ASSET_SALE contexts (target_type in BUSINESS_UNIT, SUBSIDIARY, or ASSETS), also extract:
 - parent_seller_name — the Parent company divesting the target
@@ -166,6 +191,27 @@ LEAVE NULL when:
 
 DO NOT INVENT descriptions. If the source text says "Acme Corp acquired Beta Industries" with no further context about what either does, set both descriptions to NULL.
 
+ACQUIRER_SPONSOR_NAME:
+- The PE sponsor(s) backing the acquirer entity.
+- Populate when acquirer_type = PE_PORTFOLIO (always) or acquirer_type = PRIVATE_EQUITY (when the named acquirer's sponsor parent is also identified).
+- Single sponsor: store the sponsor name as a string ("Bain Capital").
+- Multiple sponsors (co-investor structures, common in PE recaps and minority deals): comma-delimited list ("New State Capital Partners, Amethyst Capital Group").
+
+Source signals for sponsor name extraction:
+- "[Acquirer], a portfolio company of [SPONSOR]" → SPONSOR
+- "[Acquirer], a [SPONSOR]-backed company" → SPONSOR
+- "[Acquirer], owned by [SPONSOR]" → SPONSOR
+- "majority investment from [SPONSOR-1] and [SPONSOR-2]" → "SPONSOR-1, SPONSOR-2"
+- "co-led by [SPONSOR-1] and [SPONSOR-2]" → "SPONSOR-1, SPONSOR-2"
+- About-section text: "[X Capital] is a private investment firm... [X Capital] portfolio companies include..." → confirms sponsor identity when ambiguous
+
+LEAVE NULL when:
+- acquirer_type is STRATEGIC_CORPORATE, INDIVIDUAL, MANAGEMENT, EMPLOYEE_GROUP, or other non-PE categories
+- acquirer_type is PRIVATE_EQUITY and the named acquirer IS the sponsor (no additional parent to capture)
+- acquirer_type is PE_PORTFOLIO but the source does not name the sponsor (rare; flag in notes)
+
+Strip legal suffixes from sponsor names: "Bain Capital, LP" → "Bain Capital". "Audax Group, LLC" → "Audax Group". This matches our normalization for other entity names and improves forward-compat with entity resolution.
+
 EXTRACTION RULES:
 
 - Do not infer values from multiples. If the release states "the transaction represents 10x EBITDA," do not reverse-calculate the EBITDA.
@@ -191,7 +237,8 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     "domain": "acme.com",
     "ticker": "NASDAQ:ACME",
     "type": "STRATEGIC_CORPORATE",
-    "description": "a publicly-traded SaaS platform providing business management tools to landscaping companies"
+    "description": "a publicly-traded SaaS platform providing business management tools to landscaping companies",
+    "sponsor_name": null
   },
   "parent_seller": {
     "name": null,
@@ -233,7 +280,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -278,7 +325,8 @@ Extract the high-confidence fields.
     "domain": "acme.com",
     "ticker": "NASDAQ:ACME",
     "type": "STRATEGIC_CORPORATE",
-    "description": "a leading provider of industrial automation solutions"
+    "description": "a leading provider of industrial automation solutions",
+    "sponsor_name": null
   },
   "parent_seller": {
     "name": null,
@@ -320,7 +368,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -358,7 +406,7 @@ Output:
 ```json
 {
   "target": {"name": "Beta Industries", "domain": null, "ticker": null, "description": "a privately held manufacturer of specialty valves headquartered in Dallas, Texas"},
-  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": "NASDAQ:ACME", "type": "STRATEGIC_CORPORATE", "description": "a leading provider of industrial automation solutions"},
+  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": "NASDAQ:ACME", "type": "STRATEGIC_CORPORATE", "description": "a leading provider of industrial automation solutions", "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
   "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {"announced_date": "2026-04-15", "closed_date": null, "signing_date": null},
@@ -388,7 +436,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -412,7 +460,7 @@ Output:
 ```json
 {
   "target": {"name": "Acme Corp", "domain": null, "ticker": "NYSE:ACME", "description": null},
-  "acquirer": {"name": "Zenith Capital Partners", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": null},
+  "acquirer": {"name": "Zenith Capital Partners", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": null, "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
   "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {"announced_date": "2026-04-10", "closed_date": null, "signing_date": null},
@@ -442,7 +490,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag. No About sections in source; descriptions null.",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -466,7 +514,7 @@ Output:
 ```json
 {
   "target": {"name": "Industrial Coatings Division", "domain": null, "ticker": null, "description": null},
-  "acquirer": {"name": "Delta Holdings", "domain": null, "ticker": null, "type": "PE_PORTFOLIO", "description": null},
+  "acquirer": {"name": "Delta Holdings", "domain": null, "ticker": null, "type": "PE_PORTFOLIO", "description": null, "sponsor_name": null},
   "parent_seller": {"name": "MegaCorp", "ticker": "NYSE:MGC", "description": null},
   "deal": {"target_type": "BUSINESS_UNIT", "pct_acquired": null},
   "dates": {"announced_date": "2026-03-22", "closed_date": null, "signing_date": null},
@@ -496,7 +544,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'. No About sections; descriptions null.",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -518,7 +566,7 @@ Output:
 ```json
 {
   "target": {"name": "Beta Industries", "domain": null, "ticker": null, "description": null},
-  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": null, "type": "STRATEGIC_CORPORATE", "description": null},
+  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": null, "type": "STRATEGIC_CORPORATE", "description": null, "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
   "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {"announced_date": null, "closed_date": "2026-04-02", "signing_date": null},
@@ -548,7 +596,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated.",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -572,7 +620,7 @@ Output:
 ```json
 {
   "target": {"name": "ABC Widgets", "domain": null, "ticker": null, "description": "a privately held manufacturer of industrial fasteners headquartered in Ohio"},
-  "acquirer": {"name": "XYZ Capital", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": "a private equity firm based in Chicago"},
+  "acquirer": {"name": "XYZ Capital", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": "a private equity firm based in Chicago", "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
   "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {
@@ -606,7 +654,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date.",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -643,7 +691,8 @@ Output:
     "domain": null,
     "ticker": null,
     "type": "PRIVATE_EQUITY",
-    "description": "a private investment firm specializing in environmental markets including wetland and stream mitigation banking, conservation easements, and carbon credit projects"
+    "description": "a private investment firm specializing in environmental markets including wetland and stream mitigation banking, conservation easements, and carbon credit projects",
+    "sponsor_name": null
   },
   "parent_seller": {"name": "Diversified Mitigation Banks LLC", "ticker": null, "description": null},
   "deal": {"target_type": "ASSETS", "pct_acquired": null},
@@ -674,7 +723,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Asset portfolio acquisition (12 mitigation banks); not a going-concern subsidiary. ASSETS target_type appropriate. Terms not disclosed.",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -711,7 +760,8 @@ Output:
     "domain": null,
     "ticker": "NASDAQ:FRSX",
     "type": "STRATEGIC_CORPORATE",
-    "description": "a publicly-traded company specializing in vision systems for the automotive and autonomous driving industries"
+    "description": "a publicly-traded company specializing in vision systems for the automotive and autonomous driving industries",
+    "sponsor_name": null
   },
   "parent_seller": {"name": null, "ticker": null, "description": null},
   "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": 51.0},
@@ -742,7 +792,147 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Partial acquisition (51%) for stock consideration; $17.5M is purchase price for 51% stake (EQUITY_VALUE for the acquired portion). pct_acquired = 51.0.",
-  "prompt_version": "high_confidence_extraction:0.5"
+  "prompt_version": "high_confidence_extraction:0.6"
+}
+```
+
+**Example 8 — Single-sponsor PE add-on (PE_PORTFOLIO acquirer with acquirer_sponsor_name):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-04-23
+
+TITLE: PremiStar Acquires Armistead Mechanical
+BODY: PremiStar, LLC ("PremiStar"), a portfolio company of Audax Private Equity, today announced the acquisition of Armistead Mechanical, Inc., a privately-held provider of HVAC and mechanical services to commercial customers in the Mid-Atlantic. Terms were not disclosed.
+
+About PremiStar
+PremiStar is a national platform of HVAC and mechanical services companies, backed by Audax Private Equity.
+
+About Armistead Mechanical
+Armistead Mechanical, founded in 1962, is a leading commercial HVAC and mechanical services contractor headquartered in New Jersey.
+```
+
+Output:
+```json
+{
+  "target": {
+    "name": "Armistead Mechanical, Inc.",
+    "domain": null,
+    "ticker": null,
+    "description": "a privately-held HVAC and mechanical services contractor headquartered in New Jersey, founded in 1962, serving commercial customers in the Mid-Atlantic"
+  },
+  "acquirer": {
+    "name": "PremiStar, LLC",
+    "domain": null,
+    "ticker": null,
+    "type": "PE_PORTFOLIO",
+    "description": "a national platform of HVAC and mechanical services companies, backed by Audax Private Equity",
+    "sponsor_name": "Audax Private Equity"
+  },
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
+  "dates": {"announced_date": "2026-04-23", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": null,
+    "currency": null,
+    "type": "UNDISCLOSED",
+    "type_confidence": "HIGH",
+    "per_share_price": null,
+    "qualifier": null
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Add-on acquisition: PE_PORTFOLIO acquirer (PremiStar) backed by Audax Private Equity acquires standalone target.",
+  "prompt_version": "high_confidence_extraction:0.6"
+}
+```
+
+**Example 9 — Multi-sponsor co-investor recap (comma-delimited acquirer_sponsor_name):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-01-21
+
+TITLE: Harrell-Fish Receives Majority Investment from New State Capital Partners and Amethyst Capital Group
+BODY: GLC Advisors & Co. ("GLC"), a leading independent investment banking advisory firm, is pleased to announce that it served as the exclusive financial advisor to Harrell-Fish Inc. ("HFI") in its majority investment from New State Capital Partners ("New State") and Amethyst Capital Group, LLC. The transaction supports HFI's continued organic growth, adds deep operating resources, and enables future M&A expansion opportunities.
+
+About New State Capital Partners
+New State Capital Partners is a private equity firm focused on lower-middle-market investments across business services, industrials, and consumer sectors.
+
+About Amethyst Capital Group
+Amethyst Capital Group is a private investment firm specializing in growth-stage industrial and services platforms.
+```
+
+Output:
+```json
+{
+  "target": {
+    "name": "Harrell-Fish Inc.",
+    "domain": null,
+    "ticker": null,
+    "description": null
+  },
+  "acquirer": {
+    "name": "New State Capital Partners and Amethyst Capital Group",
+    "domain": null,
+    "ticker": null,
+    "type": "PRIVATE_EQUITY",
+    "description": "two co-investing private equity firms; New State Capital is focused on lower-middle-market business services, industrials, and consumer; Amethyst Capital specializes in growth-stage industrial and services platforms",
+    "sponsor_name": "New State Capital Partners, Amethyst Capital Group"
+  },
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
+  "dates": {"announced_date": "2026-01-21", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": null,
+    "currency": null,
+    "type": "UNDISCLOSED",
+    "type_confidence": "HIGH",
+    "per_share_price": null,
+    "qualifier": null
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Majority recapitalization with co-investor structure. Both sponsors are direct PE acquirers (PRIVATE_EQUITY, not PE_PORTFOLIO) — neither is a portfolio-company shell. acquirer_sponsor_name captures both sponsors comma-delimited. Founders/management likely retain minority equity in this recap structure.",
+  "prompt_version": "high_confidence_extraction:0.6"
 }
 ```
 
@@ -774,3 +964,4 @@ Output:
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.4 | 2026-04-23 | Added simultaneous announce-and-close date rule for CLOSE event_type when no separate close date is stated. Applies to the common private-to-private pattern where past-tense completive language is used without a distinct close date. Added Example 5 to illustrate. |
 | 0.5 | 2026-04-23 | Added ASSETS to target_type handling (TARGET TYPE CONTEXT section; parent_seller extraction rule extended to ASSETS). Added pct_acquired numeric field for partial acquisitions (PCT_ACQUIRED section). Added party description extraction for target, acquirer, parent_seller from "About" boilerplate (PARTY DESCRIPTIONS section). Updated RESPONSE FORMAT block and output schema (§6) to include description fields on all party objects and new "deal" object with target_type context and pct_acquired. Updated all five existing examples with description fields and deal section. Added Example 6 (ASSETS portfolio acquisition) and Example 7 (partial acquisition with pct_acquired). |
+| 0.6 | 2026-04-29 | Tightened acquirer_type=PE_PORTFOLIO detection with concrete language signals (10+ phrases including "portfolio company of," "X-backed," "X platform"). Added acquirer_sponsor_name extraction with single-sponsor and multi-sponsor (comma-delimited) handling. Updated RESPONSE FORMAT and §6 output schema to include sponsor_name on acquirer object. Updated all seven existing examples with sponsor_name field. Added Example 8 (single-sponsor PE add-on: PremiStar/Armistead Mechanical) and Example 9 (multi-sponsor co-investor recap: Harrell-Fish). Addresses 14 missed add-ons from 100-PR review. |

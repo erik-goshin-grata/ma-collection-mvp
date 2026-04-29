@@ -32,7 +32,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.5"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal"})
@@ -160,6 +160,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 target_description = ?,
                 acquirer_name = ?,  acquirer_domain = ?,  acquirer_ticker = ?,  acquirer_type = ?,
                 acquirer_description = ?,
+                acquirer_sponsor_name = ?,
                 parent_seller_name = ?,  parent_seller_ticker = ?,
                 parent_seller_description = ?,
                 pct_acquired = ?,
@@ -178,6 +179,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 t.get("description"),
                 a.get("name"), a.get("domain"), a.get("ticker"), a.get("type"),
                 a.get("description"),
+                a.get("sponsor_name"),
                 ps.get("name"), ps.get("ticker"),
                 ps.get("description"),
                 (result.get("deal") or {}).get("pct_acquired"),

@@ -62,6 +62,7 @@ _FIELDS = [
     ("parent_seller_ticker", "string"),
     ("target_description", "string"),
     ("acquirer_description", "string"),
+    ("acquirer_sponsor_name", "string"),
     ("parent_seller_description", "string"),
     ("announced_date", "date"),
     ("closed_date", "date"),
@@ -332,7 +333,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                se.target_name, se.target_domain, se.target_ticker,
                se.acquirer_name, se.acquirer_domain, se.acquirer_ticker, se.acquirer_type,
                se.parent_seller_name, se.parent_seller_ticker,
-               se.target_description, se.acquirer_description, se.parent_seller_description,
+               se.target_description, se.acquirer_description, se.acquirer_sponsor_name, se.parent_seller_description,
                se.announced_date, se.closed_date, se.signing_date,
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
@@ -443,7 +444,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     target_name, target_domain, target_ticker,
                     acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type,
                     parent_seller_name, parent_seller_ticker,
-                    target_description, acquirer_description, parent_seller_description,
+                    target_description, acquirer_description, acquirer_sponsor_name, parent_seller_description,
                     announced_date, closed_date, signing_date,
                     value_amount, value_currency, value_type, per_share_price, pct_acquired,
                     target_revenue, target_revenue_period_type, target_revenue_period_end,
@@ -457,7 +458,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     is_take_private, is_add_on, is_divestiture,
                     is_current, aggregation_version, updated_at
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -479,6 +480,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("parent_seller_ticker"),
                     field_values.get("target_description"),
                     field_values.get("acquirer_description"),
+                    field_values.get("acquirer_sponsor_name"),
                     field_values.get("parent_seller_description"),
                     field_values.get("announced_date"),
                     field_values.get("closed_date"),

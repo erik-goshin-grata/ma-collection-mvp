@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
     parent_seller_ticker        TEXT,
     target_description          TEXT,
     acquirer_description        TEXT,
+    acquirer_sponsor_name       TEXT,        -- PE sponsor(s) backing the acquirer; comma-delimited when multiple. NULL when acquirer_type is not PE_PORTFOLIO or PRIVATE_EQUITY, or when sponsor not stated in source.
     parent_seller_description   TEXT,
     announced_date              TEXT,        -- ISO 8601
     closed_date                 TEXT,        -- ISO 8601
@@ -180,6 +181,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     parent_seller_ticker        TEXT,
     target_description          TEXT,
     acquirer_description        TEXT,
+    acquirer_sponsor_name       TEXT,        -- PE sponsor(s) backing the acquirer; comma-delimited when multiple. NULL when acquirer_type is not PE_PORTFOLIO or PRIVATE_EQUITY, or when sponsor not stated in source.
     parent_seller_description   TEXT,
 
     -- Dates
