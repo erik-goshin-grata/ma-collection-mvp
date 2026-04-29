@@ -410,6 +410,8 @@ When re-running the pipeline at a specific stage (e.g., `--mode=aggregate` after
 
 Operator: tailor the reset to the stages that will actually re-run. The `advisor` table is written by Stage 7 and should NOT be cleared on aggregate-mode reruns.
 
+**Validation runs use a separate DB path.** Validation runs (small-N test runs after a prompt revision, schema change, or new feature) MUST use `data/ma_mvp_test.db` or any path other than the production `data/ma_mvp.db`. Never run `rm -f data/ma_mvp.db` followed by schema re-init as part of a validation step — this destroys production state. The validation pattern is: set `DB_PATH=data/ma_mvp_test.db` in env or shell, init that path's schema, run the test, inspect, then leave it alone or remove only that test path. Production runs use the default `data/ma_mvp.db` path. This separation is a hard convention, not a guideline. Failure to maintain it cost us the 100-PR DB state during Drop 3.9 validation; the canonical CSV survived but the queryable DB did not.
+
 ---
 
 ## 8. Next Session Kickoff
