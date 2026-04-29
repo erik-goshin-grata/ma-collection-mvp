@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.4 (revised)
+**Version:** 0.5 (revised)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -75,7 +75,7 @@ acquirer_type enum:
 - PE_PORTFOLIO — a portfolio company of a private equity sponsor. Use this for add-on acquisitions where the named acquirer is the PE-backed platform company rather than the sponsor itself.
 - UNKNOWN — cannot be determined
 
-For CARVE_OUT and ASSET_SALE contexts (target_type in BUSINESS_UNIT or SUBSIDIARY), also extract:
+For CARVE_OUT and ASSET_SALE contexts (target_type in BUSINESS_UNIT, SUBSIDIARY, or ASSETS), also extract:
 - parent_seller_name — the Parent company divesting the target
 - parent_seller_ticker — if the Parent is public
 
@@ -83,6 +83,12 @@ For SPIN_SPLIT transactions:
 - parent_seller_name is the distributing Parent
 - acquirer_name should be null (spin-offs have no acquirer)
 - Still capture target_name (the SpinCo)
+
+TARGET TYPE CONTEXT:
+When target_type = ASSETS (a discrete set of assets, not a going-concern unit):
+- target_name should describe the asset bundle specifically (e.g., "Diversified National Portfolio of Mitigation Banks", "KeyLift Expandable Interlaminar Stabilization System")
+- If the assets are being sold from a parent company, populate parent_seller_name/ticker using the same rules as BUSINESS_UNIT/SUBSIDIARY
+- pct_acquired is typically null for ASSETS deals (full asset transfer implied)
 
 DATES:
 - announced_date — the date the deal was first announced (ISO 8601, YYYY-MM-DD)
@@ -116,6 +122,17 @@ value_type enum (CRITICAL — follow these rules carefully):
 
 Set value_type_confidence = HIGH when the text explicitly uses "equity value" or "enterprise value" language. Set MEDIUM when defaulting to TRANSACTION_VALUE. Set HIGH when the release explicitly states "terms were not disclosed" (UNDISCLOSED is confident).
 
+PCT_ACQUIRED:
+- pct_acquired — the percentage of the target being acquired, when explicitly stated.
+- Extract as a number (e.g., 51.0 for "51%", 24.9 for "24.9%").
+- LEAVE NULL when:
+  - The PR does not state a percentage (most full acquisitions don't say "100%")
+  - The deal is described as "all of" or "the entire company" (treat as 100% implicit; leave NULL)
+- POPULATE when:
+  - The PR states a specific percentage being acquired
+  - The deal is partial: minority investment, partial stake, increased ownership to a stated %
+- For minority investments, capture the percentage even when small (e.g., "5% stake")
+
 TARGET FINANCIALS (only if stated explicitly in the release):
 - revenue_amount — target's revenue
 - revenue_period_type — enum: LTM, FY, TTM, CY, QUARTER, NTM, UNKNOWN
@@ -124,6 +141,30 @@ TARGET FINANCIALS (only if stated explicitly in the release):
 - ebitda_period_type — same enum as revenue
 - ebitda_period_end — same format as revenue_period_end
 - financials_currency — ISO 4217, usually matches value_currency
+
+PARTY DESCRIPTIONS:
+Extract concise descriptions for each party. Source: the "About [Company]" boilerplate at the bottom of nearly every PR, plus opening-paragraph framing ("Acme Corp, a publicly traded SaaS platform for landscaping business management, today announced...").
+
+- target_description — what the target company does. 5-30 words. Include industry, primary business, geographic scope if stated, and ownership status (publicly traded, privately held, PE-backed) when relevant.
+- acquirer_description — what the acquirer does. Same length and content guidance.
+- parent_seller_description — for divestiture or carve-out transactions, what the parent company does. NULL when there is no parent_seller.
+
+Examples of good descriptions:
+- "a publicly-traded SaaS platform providing business management tools to landscaping companies"
+- "a privately-held ERP provider serving the construction industry"
+- "an Audax Group portfolio company operating a multi-state DSO platform with 65 dental clinics"
+- "a Fortune 100 industrial conglomerate spanning aerospace, building technologies, and performance materials"
+
+Examples of weak descriptions to AVOID:
+- "a privately held company" (too thin — extract the industry/business at minimum)
+- "Acme Corp, a Delaware corporation" (legal form is not a description)
+- A literal copy of the entire "About" paragraph (too long — distill to one sentence)
+
+LEAVE NULL when:
+- The PR genuinely contains no descriptive content about the party (rare)
+- The party is mentioned only by name with no context
+
+DO NOT INVENT descriptions. If the source text says "Acme Corp acquired Beta Industries" with no further context about what either does, set both descriptions to NULL.
 
 EXTRACTION RULES:
 
@@ -141,18 +182,25 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
 {
   "target": {
     "name": "Beta Industries",
-    "domain": "beta-industries.com",
-    "ticker": null
+    "domain": null,
+    "ticker": null,
+    "description": "a privately-held ERP provider serving the construction industry"
   },
   "acquirer": {
     "name": "Acme Corp",
     "domain": "acme.com",
     "ticker": "NASDAQ:ACME",
-    "type": "STRATEGIC_CORPORATE"
+    "type": "STRATEGIC_CORPORATE",
+    "description": "a publicly-traded SaaS platform providing business management tools to landscaping companies"
   },
   "parent_seller": {
     "name": null,
-    "ticker": null
+    "ticker": null,
+    "description": null
+  },
+  "deal": {
+    "target_type": "STANDALONE_COMPANY",
+    "pct_acquired": null
   },
   "dates": {
     "announced_date": "2026-04-15",
@@ -185,7 +233,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.4"
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -221,18 +269,25 @@ Extract the high-confidence fields.
 {
   "target": {
     "name": "Beta Industries",
-    "domain": "beta-industries.com",
-    "ticker": null
+    "domain": null,
+    "ticker": null,
+    "description": "a privately-held manufacturer of specialty valves headquartered in Dallas, Texas"
   },
   "acquirer": {
     "name": "Acme Corp",
     "domain": "acme.com",
     "ticker": "NASDAQ:ACME",
-    "type": "STRATEGIC_CORPORATE"
+    "type": "STRATEGIC_CORPORATE",
+    "description": "a leading provider of industrial automation solutions"
   },
   "parent_seller": {
     "name": null,
-    "ticker": null
+    "ticker": null,
+    "description": null
+  },
+  "deal": {
+    "target_type": "STANDALONE_COMPANY",
+    "pct_acquired": null
   },
   "dates": {
     "announced_date": "2026-04-15",
@@ -265,7 +320,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.4"
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 ```
 
@@ -275,7 +330,9 @@ Extract the high-confidence fields.
 - `value.type` now follows the schema-aligned enum: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED. The v0.1 values STATED_UNQUALIFIED, IMPLIED, and RANGE_OR_APPROXIMATE are removed.
 - `value.type_confidence` replaces per-field confidence for value_type. HIGH when explicit, MEDIUM when defaulting to TRANSACTION_VALUE.
 - `value.qualifier` captures range/approximation language separately.
-- `parent_seller` populated for target_type in {BUSINESS_UNIT, SUBSIDIARY} and for SPIN_SPLIT transactions.
+- `parent_seller` populated for target_type in {BUSINESS_UNIT, SUBSIDIARY, ASSETS} and for SPIN_SPLIT transactions.
+- `deal.pct_acquired` captures partial stake percentages when explicitly stated (new in v0.5).
+- `target.description`, `acquirer.description`, `parent_seller.description` — concise party descriptions from "About" boilerplate (new in v0.5).
 
 ---
 
@@ -300,9 +357,10 @@ BODY: Acme Corp (NASDAQ: ACME), a leading provider of industrial automation solu
 Output:
 ```json
 {
-  "target": {"name": "Beta Industries", "domain": null, "ticker": null},
-  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": "NASDAQ:ACME", "type": "STRATEGIC_CORPORATE"},
-  "parent_seller": {"name": null, "ticker": null},
+  "target": {"name": "Beta Industries", "domain": null, "ticker": null, "description": "a privately held manufacturer of specialty valves headquartered in Dallas, Texas"},
+  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": "NASDAQ:ACME", "type": "STRATEGIC_CORPORATE", "description": "a leading provider of industrial automation solutions"},
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {"announced_date": "2026-04-15", "closed_date": null, "signing_date": null},
   "value": {
     "amount": 500000000,
@@ -330,7 +388,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given",
-  "prompt_version": "high_confidence_extraction:0.4"
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 ```
 
@@ -353,9 +411,10 @@ BODY: Acme Corp (NYSE: ACME) today announced that it has entered into a definiti
 Output:
 ```json
 {
-  "target": {"name": "Acme Corp", "domain": null, "ticker": "NYSE:ACME"},
-  "acquirer": {"name": "Zenith Capital Partners", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY"},
-  "parent_seller": {"name": null, "ticker": null},
+  "target": {"name": "Acme Corp", "domain": null, "ticker": "NYSE:ACME", "description": null},
+  "acquirer": {"name": "Zenith Capital Partners", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": null},
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {"announced_date": "2026-04-10", "closed_date": null, "signing_date": null},
   "value": {
     "amount": 4500000000,
@@ -382,8 +441,8 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag",
-  "prompt_version": "high_confidence_extraction:0.4"
+  "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag. No About sections in source; descriptions null.",
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 ```
 
@@ -406,9 +465,10 @@ BODY: MegaCorp (NYSE: MGC) today announced a definitive agreement to sell its In
 Output:
 ```json
 {
-  "target": {"name": "Industrial Coatings Division", "domain": null, "ticker": null},
-  "acquirer": {"name": "Delta Holdings", "domain": null, "ticker": null, "type": "PE_PORTFOLIO"},
-  "parent_seller": {"name": "MegaCorp", "ticker": "NYSE:MGC"},
+  "target": {"name": "Industrial Coatings Division", "domain": null, "ticker": null, "description": null},
+  "acquirer": {"name": "Delta Holdings", "domain": null, "ticker": null, "type": "PE_PORTFOLIO", "description": null},
+  "parent_seller": {"name": "MegaCorp", "ticker": "NYSE:MGC", "description": null},
+  "deal": {"target_type": "BUSINESS_UNIT", "pct_acquired": null},
   "dates": {"announced_date": "2026-03-22", "closed_date": null, "signing_date": null},
   "value": {
     "amount": 1200000000,
@@ -435,8 +495,8 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'.",
-  "prompt_version": "high_confidence_extraction:0.4"
+  "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'. No About sections; descriptions null.",
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 ```
 
@@ -457,9 +517,10 @@ BODY: Acme Corp today announced that it has completed its previously announced a
 Output:
 ```json
 {
-  "target": {"name": "Beta Industries", "domain": null, "ticker": null},
-  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": null, "type": "STRATEGIC_CORPORATE"},
-  "parent_seller": {"name": null, "ticker": null},
+  "target": {"name": "Beta Industries", "domain": null, "ticker": null, "description": null},
+  "acquirer": {"name": "Acme Corp", "domain": null, "ticker": null, "type": "STRATEGIC_CORPORATE", "description": null},
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {"announced_date": null, "closed_date": "2026-04-02", "signing_date": null},
   "value": {
     "amount": null,
@@ -487,7 +548,7 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated.",
-  "prompt_version": "high_confidence_extraction:0.4"
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 ```
 
@@ -510,9 +571,10 @@ BODY: XYZ Capital, a private equity firm based in Chicago, announced today it ha
 Output:
 ```json
 {
-  "target": {"name": "ABC Widgets", "domain": null, "ticker": null},
-  "acquirer": {"name": "XYZ Capital", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY"},
-  "parent_seller": {"name": null, "ticker": null},
+  "target": {"name": "ABC Widgets", "domain": null, "ticker": null, "description": "a privately held manufacturer of industrial fasteners headquartered in Ohio"},
+  "acquirer": {"name": "XYZ Capital", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": "a private equity firm based in Chicago"},
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": null},
   "dates": {
     "announced_date": "2026-04-15",
     "closed_date": "2026-04-15",
@@ -544,7 +606,143 @@ Output:
     "value_amount": "HIGH"
   },
   "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date.",
-  "prompt_version": "high_confidence_extraction:0.4"
+  "prompt_version": "high_confidence_extraction:0.5"
+}
+```
+
+**Example 6 — ASSETS target type (asset portfolio acquisition):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: ASSETS
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: SUBSIDIARY_OF_PRIVATE
+PUBLISHED DATE: 2026-04-23
+
+TITLE: Conservation Equity Management Acquires Diversified National Portfolio of Mitigation Banks
+BODY: Conservation Equity Management ("CEM"), a privately-held investment firm focused on environmental markets, today announced the acquisition of a diversified national portfolio of mitigation banks from Diversified Mitigation Banks LLC. The portfolio comprises 12 wetland and stream mitigation banks across 8 states, generating recurring credit sales to developers and infrastructure projects.
+
+About Conservation Equity Management
+CEM is a private investment firm specializing in environmental markets, including wetland and stream mitigation banking, conservation easements, and carbon credit projects.
+```
+
+Output:
+```json
+{
+  "target": {
+    "name": "Diversified National Portfolio of Mitigation Banks",
+    "domain": null,
+    "ticker": null,
+    "description": "a 12-asset portfolio of wetland and stream mitigation banks across 8 states generating recurring credit sales to developers and infrastructure projects"
+  },
+  "acquirer": {
+    "name": "Conservation Equity Management",
+    "domain": null,
+    "ticker": null,
+    "type": "PRIVATE_EQUITY",
+    "description": "a private investment firm specializing in environmental markets including wetland and stream mitigation banking, conservation easements, and carbon credit projects"
+  },
+  "parent_seller": {"name": "Diversified Mitigation Banks LLC", "ticker": null, "description": null},
+  "deal": {"target_type": "ASSETS", "pct_acquired": null},
+  "dates": {"announced_date": "2026-04-23", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": null,
+    "currency": null,
+    "type": "UNDISCLOSED",
+    "type_confidence": "HIGH",
+    "per_share_price": null,
+    "qualifier": null
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "MEDIUM",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Asset portfolio acquisition (12 mitigation banks); not a going-concern subsidiary. ASSETS target_type appropriate. Terms not disclosed.",
+  "prompt_version": "high_confidence_extraction:0.5"
+}
+```
+
+**Example 7 — Partial acquisition with pct_acquired:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: STANDALONE_COMPANY
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-04-23
+
+TITLE: Foresight Autonomous Holdings Announces Agreement to Acquire 51% of VisionWave Holdings
+BODY: Foresight Autonomous Holdings Ltd. (NASDAQ: FRSX), a publicly-traded company specializing in vision systems for the automotive and autonomous driving industries, today announced an agreement to acquire 51% of VisionWave Holdings, Inc. for $17.5 million in Foresight common stock.
+
+About VisionWave
+VisionWave Holdings is a private developer of LiDAR perception software for autonomous vehicles.
+```
+
+Output:
+```json
+{
+  "target": {
+    "name": "VisionWave Holdings, Inc.",
+    "domain": null,
+    "ticker": null,
+    "description": "a private developer of LiDAR perception software for autonomous vehicles"
+  },
+  "acquirer": {
+    "name": "Foresight Autonomous Holdings Ltd.",
+    "domain": null,
+    "ticker": "NASDAQ:FRSX",
+    "type": "STRATEGIC_CORPORATE",
+    "description": "a publicly-traded company specializing in vision systems for the automotive and autonomous driving industries"
+  },
+  "parent_seller": {"name": null, "ticker": null, "description": null},
+  "deal": {"target_type": "STANDALONE_COMPANY", "pct_acquired": 51.0},
+  "dates": {"announced_date": "2026-04-23", "closed_date": null, "signing_date": null},
+  "value": {
+    "amount": 17500000,
+    "currency": "USD",
+    "type": "EQUITY_VALUE",
+    "type_confidence": "HIGH",
+    "per_share_price": null,
+    "qualifier": null
+  },
+  "target_financials": {
+    "revenue_amount": null,
+    "revenue_period_type": null,
+    "revenue_period_end": null,
+    "ebitda_amount": null,
+    "ebitda_period_type": null,
+    "ebitda_period_end": null,
+    "currency": null
+  },
+  "model_confidence": "HIGH",
+  "field_confidence": {
+    "target_name": "HIGH",
+    "acquirer_name": "HIGH",
+    "acquirer_type": "HIGH",
+    "announced_date": "HIGH",
+    "value_amount": "HIGH"
+  },
+  "notes": "Partial acquisition (51%) for stock consideration; $17.5M is purchase price for 51% stake (EQUITY_VALUE for the acquired portion). pct_acquired = 51.0.",
+  "prompt_version": "high_confidence_extraction:0.5"
 }
 ```
 
@@ -562,6 +760,8 @@ Output:
 | Model reverses acquirer and target | Prompt structure (DEAL TYPE + TARGET TYPE context) helps. Gold set tracks. |
 | Model returns string "null" instead of JSON null | Parser rejects |
 | Model uses acquirer_type = UNKNOWN frequently | QA monitors rate; prompt may need revision if above 15% on classifiable acquirers |
+| Model invents description when source has none | Prompt forbids. Gold set catches hallucinated descriptions. |
+| Model uses BUSINESS_UNIT for discrete asset sales (KeyLift, mitigation banks) | ASSETS guidance + Example 6 addresses. |
 
 ---
 
@@ -573,3 +773,4 @@ Output:
 | 0.2 | 2026-04-22 | Revised. value_type enum aligned with schema (EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED) with TRANSACTION_VALUE as default. value_type_confidence added. acquirer_type added as output (drives Take-Private and Add-On derivation downstream). PE_PORTFOLIO added to acquirer_type enum to support Add-On recognition. SPIN_SPLIT handling added (acquirer_name = null, parent_seller populated). |
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.4 | 2026-04-23 | Added simultaneous announce-and-close date rule for CLOSE event_type when no separate close date is stated. Applies to the common private-to-private pattern where past-tense completive language is used without a distinct close date. Added Example 5 to illustrate. |
+| 0.5 | 2026-04-23 | Added ASSETS to target_type handling (TARGET TYPE CONTEXT section; parent_seller extraction rule extended to ASSETS). Added pct_acquired numeric field for partial acquisitions (PCT_ACQUIRED section). Added party description extraction for target, acquirer, parent_seller from "About" boilerplate (PARTY DESCRIPTIONS section). Updated RESPONSE FORMAT block and output schema (§6) to include description fields on all party objects and new "deal" object with target_type context and pct_acquired. Updated all five existing examples with description fields and deal section. Added Example 6 (ASSETS portfolio acquisition) and Example 7 (partial acquisition with pct_acquired). |

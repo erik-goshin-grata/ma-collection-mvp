@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
                                 -- | JOINT_VENTURE | MINORITY_INVESTMENT | UNKNOWN
     spin_split_type             TEXT,        -- SPIN_OFF | SPLIT | null (only for SPIN_SPLIT)
     distribution_mechanism      TEXT,        -- PRO_RATA | EXCHANGE_OFFER | null (only for SPIN_SPLIT)
-    target_type                 TEXT,        -- STANDALONE_COMPANY | BUSINESS_UNIT | SUBSIDIARY | null
+    target_type                 TEXT,        -- STANDALONE_COMPANY | BUSINESS_UNIT | SUBSIDIARY | ASSETS | null
     event_type                  TEXT,        -- ANNOUNCEMENT | CLOSE | AMENDMENT | TERMINATION
     target_status               TEXT,
                                 -- PUBLIC | PRIVATE | SUBSIDIARY_OF_PUBLIC | SUBSIDIARY_OF_PRIVATE | UNKNOWN
@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
                                 -- | SPAC | CONSORTIUM | PE_PORTFOLIO | OTHER_FINANCIAL_SPONSOR | UNKNOWN
     parent_seller_name          TEXT,
     parent_seller_ticker        TEXT,
+    target_description          TEXT,
+    acquirer_description        TEXT,
+    parent_seller_description   TEXT,
     announced_date              TEXT,        -- ISO 8601
     closed_date                 TEXT,        -- ISO 8601
     signing_date                TEXT,        -- ISO 8601
@@ -84,6 +87,7 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
     value_type_confidence       TEXT,        -- HIGH | MEDIUM | LOW
     value_qualifier             TEXT,
     per_share_price             REAL,
+    pct_acquired                REAL,        -- e.g. 51.0 for 51% stake; NULL when implicit 100% or not stated
     target_revenue              REAL,
     target_revenue_period_type  TEXT,        -- LTM | FY | TTM | CY | QUARTER | NTM | UNKNOWN
     target_revenue_period_end   TEXT,
@@ -174,6 +178,9 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     acquirer_type               TEXT,
     parent_seller_name          TEXT,
     parent_seller_ticker        TEXT,
+    target_description          TEXT,
+    acquirer_description        TEXT,
+    parent_seller_description   TEXT,
 
     -- Dates
     announced_date              TEXT,
@@ -185,6 +192,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     value_currency              TEXT,
     value_type                  TEXT,
     per_share_price             REAL,
+    pct_acquired                REAL,        -- e.g. 51.0 for 51% stake; NULL when implicit 100% or not stated
 
     -- Target financials
     target_revenue              REAL,
@@ -218,7 +226,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     -- Derived flags (computed downstream from deal context)
     is_take_private             INTEGER,     -- target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY/PE_PORTFOLIO
     is_add_on                   INTEGER,     -- acquirer_type=PE_PORTFOLIO
-    is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY)
+    is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY, ASSETS)
 
     -- Metadata
     is_current                  INTEGER NOT NULL DEFAULT 1,  -- older versions flipped to 0 on re-aggregation

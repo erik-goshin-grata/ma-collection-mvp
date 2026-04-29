@@ -117,6 +117,11 @@ MVP only writes T1 and T2 rows. T3 is structural placeholder.
 **deal_type**
 `ACQUISITION`, `MERGER`, `CARVE_OUT`, `ASSET_SALE`, `SPIN_OFF`, `TAKE_PRIVATE`, `REVERSE_MERGER`, `JV`, `MINORITY_INVESTMENT`, `UNKNOWN`
 
+**target_type** (schema v0.3+)
+`STANDALONE_COMPANY`, `BUSINESS_UNIT`, `SUBSIDIARY`, `ASSETS`
+
+Note: `ASSETS` added in Drop 3.9 for discrete asset purchases (product lines, physical asset portfolios, contracts) that are not going-concern units. `is_divestiture` derivation includes `ASSETS` alongside `BUSINESS_UNIT` and `SUBSIDIARY`.
+
 **deal_status**
 `ANNOUNCED`, `PENDING`, `COMPLETED`, `TERMINATED`, `WITHDRAWN`, `UNKNOWN`
 
@@ -503,6 +508,10 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 ---
 
 ## 10. Document Control
+
+**New fields (Drop 3.9 / schema v0.3):**
+- `pct_acquired REAL` — percentage of target acquired when explicitly stated; NULL for implicit 100% (on `staging_extraction` and `transaction_record`)
+- `target_description TEXT`, `acquirer_description TEXT`, `parent_seller_description TEXT` — concise 1-sentence party descriptions from "About" boilerplate (on both tables)
 
 | Version | Date | Change |
 | :--- | :--- | :--- |

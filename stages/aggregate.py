@@ -60,6 +60,9 @@ _FIELDS = [
     ("acquirer_type", "string"),
     ("parent_seller_name", "string"),
     ("parent_seller_ticker", "string"),
+    ("target_description", "string"),
+    ("acquirer_description", "string"),
+    ("parent_seller_description", "string"),
     ("announced_date", "date"),
     ("closed_date", "date"),
     ("signing_date", "date"),
@@ -67,6 +70,7 @@ _FIELDS = [
     ("value_currency", "string"),
     ("value_type", "string"),
     ("per_share_price", "number"),
+    ("pct_acquired", "number"),
     ("target_revenue", "number"),
     ("target_revenue_period_type", "string"),
     ("target_revenue_period_end", "date"),
@@ -125,7 +129,7 @@ def _derive_flags(fields: dict) -> dict:
             and acquirer_type in ("PRIVATE_EQUITY", "PE_PORTFOLIO")
         ),
         "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
-        "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY")),
+        "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY", "ASSETS")),
     }
 
 
@@ -328,8 +332,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                se.target_name, se.target_domain, se.target_ticker,
                se.acquirer_name, se.acquirer_domain, se.acquirer_ticker, se.acquirer_type,
                se.parent_seller_name, se.parent_seller_ticker,
+               se.target_description, se.acquirer_description, se.parent_seller_description,
                se.announced_date, se.closed_date, se.signing_date,
-               se.value_amount, se.value_currency, se.value_type, se.per_share_price,
+               se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
                se.financials_currency,
@@ -438,8 +443,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     target_name, target_domain, target_ticker,
                     acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type,
                     parent_seller_name, parent_seller_ticker,
+                    target_description, acquirer_description, parent_seller_description,
                     announced_date, closed_date, signing_date,
-                    value_amount, value_currency, value_type, per_share_price,
+                    value_amount, value_currency, value_type, per_share_price, pct_acquired,
                     target_revenue, target_revenue_period_type, target_revenue_period_end,
                     target_ebitda, target_ebitda_period_type, target_ebitda_period_end,
                     financials_currency,
@@ -451,7 +457,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     is_take_private, is_add_on, is_divestiture,
                     is_current, aggregation_version, updated_at
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -471,6 +477,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("acquirer_type"),
                     field_values.get("parent_seller_name"),
                     field_values.get("parent_seller_ticker"),
+                    field_values.get("target_description"),
+                    field_values.get("acquirer_description"),
+                    field_values.get("parent_seller_description"),
                     field_values.get("announced_date"),
                     field_values.get("closed_date"),
                     field_values.get("signing_date"),
@@ -478,6 +487,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("value_currency"),
                     field_values.get("value_type"),
                     field_values.get("per_share_price"),
+                    field_values.get("pct_acquired"),
                     field_values.get("target_revenue"),
                     field_values.get("target_revenue_period_type"),
                     field_values.get("target_revenue_period_end"),

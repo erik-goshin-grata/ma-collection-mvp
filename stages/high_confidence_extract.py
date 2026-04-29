@@ -32,10 +32,10 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.4"
+_VERSION = "0.5"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
-_REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence"})
+_REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal"})
 _VALID_VALUE_TYPES = frozenset({"EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE", "UNDISCLOSED"})
 _SLEEP = 1.0  # conservative Opus throttle
 
@@ -157,8 +157,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             UPDATE staging_extraction SET
                 status = 'HC_EXTRACTED',
                 target_name = ?,  target_domain = ?,  target_ticker = ?,
+                target_description = ?,
                 acquirer_name = ?,  acquirer_domain = ?,  acquirer_ticker = ?,  acquirer_type = ?,
+                acquirer_description = ?,
                 parent_seller_name = ?,  parent_seller_ticker = ?,
+                parent_seller_description = ?,
+                pct_acquired = ?,
                 announced_date = ?,  closed_date = ?,  signing_date = ?,
                 value_amount = ?,  value_currency = ?,  value_type = ?,
                 value_type_confidence = ?,  value_qualifier = ?,  per_share_price = ?,
@@ -171,8 +175,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             """,
             (
                 t.get("name"), t.get("domain"), t.get("ticker"),
+                t.get("description"),
                 a.get("name"), a.get("domain"), a.get("ticker"), a.get("type"),
+                a.get("description"),
                 ps.get("name"), ps.get("ticker"),
+                ps.get("description"),
+                (result.get("deal") or {}).get("pct_acquired"),
                 d.get("announced_date"), d.get("closed_date"), d.get("signing_date"),
                 v.get("amount"), v.get("currency"), v.get("type"),
                 v.get("type_confidence"), v.get("qualifier"), v.get("per_share_price"),

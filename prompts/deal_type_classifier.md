@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.3 (revised)
+**Version:** 0.4 (revised)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -91,8 +91,9 @@ For all deal types that have a target, classify target_type:
 - STANDALONE_COMPANY — An independent company being acquired. Most common case. Has its own domain, independent legal identity, may be public or private.
 - SUBSIDIARY — A separate legal entity owned by a Parent. May have a domain, may operate independently, but is owned. Identifiable by language like "a subsidiary of [Parent]," "wholly owned subsidiary."
 - BUSINESS_UNIT — A division or operating segment of a Parent company, fully integrated and not a separate legal entity. Usually no standalone domain. Identifiable by language like "division," "business unit," "operating segment."
+- ASSETS — A discrete set of assets, contracts, products, or operating rights that does not constitute a separate operating subsidiary or business unit. Examples: a product line ("KeyLift system"), a portfolio of physical assets ("mitigation banks"), specific contracts or licenses, real estate-only deals. Use ASSETS when the press release frames the deal as a sale of specific assets rather than a going-concern unit. When in doubt between BUSINESS_UNIT and ASSETS: if the target has employees, customers, and revenue as a unit, use BUSINESS_UNIT; if it's a discrete asset set being transferred, use ASSETS.
 
-When target_type is SUBSIDIARY or BUSINESS_UNIT, parent_seller must exist (extracted by a later prompt, not this one). Flag the case in notes if the Parent is ambiguous.
+When target_type is SUBSIDIARY, BUSINESS_UNIT, or ASSETS, parent_seller must exist (extracted by a later prompt, not this one). Flag the case in notes if the Parent is ambiguous.
 
 For SPIN_SPLIT, target_type should be SUBSIDIARY (the SpinCo being distributed is structurally a subsidiary being separated).
 For JOINT_VENTURE, target_type is null (no target in the M&A sense).
@@ -183,7 +184,7 @@ Classify the deal type, discriminators, target type, event type, and target stat
 | `deal_type` | enum | `ACQUISITION`, `MERGER`, `SPIN_SPLIT`, `REVERSE_MERGER`, `JOINT_VENTURE`, `MINORITY_INVESTMENT`, `UNKNOWN` |
 | `spin_split_type` | enum or null | `SPIN_OFF`, `SPLIT`, or null if deal_type ≠ SPIN_SPLIT |
 | `distribution_mechanism` | enum or null | `PRO_RATA`, `EXCHANGE_OFFER`, or null if deal_type ≠ SPIN_SPLIT |
-| `target_type` | enum or null | `STANDALONE_COMPANY`, `SUBSIDIARY`, `BUSINESS_UNIT`, or null for JVs |
+| `target_type` | enum or null | `STANDALONE_COMPANY`, `SUBSIDIARY`, `BUSINESS_UNIT`, `ASSETS`, or null for JVs |
 | `event_type` | enum | `ANNOUNCEMENT`, `CLOSE`, `AMENDMENT`, `TERMINATION` |
 | `target_status` | enum | `PUBLIC`, `PRIVATE`, `SUBSIDIARY_OF_PUBLIC`, `SUBSIDIARY_OF_PRIVATE`, `UNKNOWN` |
 | `overrides_relevancy_hint` | boolean | True if deal_type disagrees with the relevancy reason_code |
@@ -384,3 +385,4 @@ Output:
 | 0.1 | 2026-04-22 | Initial draft — 10-type taxonomy including TAKE_PRIVATE, CARVE_OUT, ASSET_SALE, SPIN_OFF as top-level types. |
 | 0.2 | 2026-04-22 | Revised to align with agreed schema. 7-type taxonomy. SPIN_SPLIT with spin_split_type + distribution_mechanism discriminators. target_type added as output. TAKE_PRIVATE and CARVE_OUT removed as top-level (derived downstream or out of scope). Target_status enum expanded to include SUBSIDIARY_OF_PUBLIC / SUBSIDIARY_OF_PRIVATE. |
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
+| 0.4 | 2026-04-23 | Added ASSETS to target_type enum. ASSETS covers discrete asset sets (product lines, physical asset portfolios, contracts) that are not going-concern units. Updated parent_seller rule to include ASSETS alongside SUBSIDIARY and BUSINESS_UNIT. Updated output schema table. |
