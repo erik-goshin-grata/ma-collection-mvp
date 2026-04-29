@@ -205,6 +205,13 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     target_ebitda_period_end    TEXT,
     financials_currency         TEXT,
 
+    -- Valuation multiples (derived; populated when source financials and value_type permit)
+    ev_to_revenue_ltm           REAL,        -- enterprise_value / target_revenue (when period_type = LTM/TTM)
+    ev_to_revenue_ntm           REAL,        -- enterprise_value / target_revenue (when period_type = NTM)
+    ev_to_ebitda_ltm            REAL,        -- enterprise_value / target_ebitda (when period_type = LTM/TTM)
+    ev_to_ebitda_ntm            REAL,        -- enterprise_value / target_ebitda (when period_type = NTM)
+    multiple_quality            TEXT,        -- CALCULATED | NM | NOT_CALCULABLE
+
     -- Consideration
     consideration_type          TEXT,        -- derived from components
     consideration_components    TEXT,        -- JSON

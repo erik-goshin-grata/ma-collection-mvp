@@ -516,6 +516,14 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 **New fields (Drop 3.10 / schema v0.4):**
 - `acquirer_sponsor_name TEXT` — PE sponsor(s) backing the acquirer; comma-delimited when multiple (e.g. "New State Capital Partners, Amethyst Capital Group"). NULL when acquirer is not PE-backed or sponsor not stated. Written by HC extraction and passed through aggregate. (on `staging_extraction` and `transaction_record`)
 
+**Valuation multiples (Drop 3.12, derived at aggregation — `transaction_record` only):**
+- `ev_to_revenue_ltm`, `ev_to_revenue_ntm`, `ev_to_ebitda_ltm`, `ev_to_ebitda_ntm` — EV/Revenue and EV/EBITDA multiples for LTM/NTM periods. TTM is treated as LTM.
+- `multiple_quality` — `CALCULATED` | `NM` | `NOT_CALCULABLE`
+- Computed only when `value_type = ENTERPRISE_VALUE` and the corresponding financial metric is present and positive. Plausible ranges: EV/Revenue 0.1x–50x, EV/EBITDA 1x–100x.
+- NM display rule: out-of-range multiples display as `NM` in CSV export, but the computed value is preserved in the DB for inspection.
+- Currency mismatch (e.g. USD EV vs EUR EBITDA) flags NM without conversion; FX conversion is a v2 enhancement.
+- Equity multiples (P/E, P/B, P/TBV) deferred — require additional extraction fields (net_income, book_value).
+
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft for review |

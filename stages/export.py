@@ -30,6 +30,7 @@ _COLUMNS = [
     "value_amount", "value_currency", "value_type", "per_share_price",
     "target_revenue", "target_revenue_period_type", "target_revenue_period_end",
     "target_ebitda", "target_ebitda_period_type", "target_ebitda_period_end",
+    "ev_to_revenue_ltm", "ev_to_revenue_ntm", "ev_to_ebitda_ltm", "ev_to_ebitda_ntm", "multiple_quality",
     "consideration_type", "consideration_components_json",
     "includes_earnout", "hostile", "competing_bid", "regulatory_approvals_required",
     "has_go_shop", "go_shop_period_days",
@@ -38,6 +39,24 @@ _COLUMNS = [
     "summary_text", "primary_rationale", "secondary_rationales_json",
     "created_at", "updated_at",
 ]
+
+
+_MULTIPLE_COLS = ("ev_to_revenue_ltm", "ev_to_revenue_ntm", "ev_to_ebitda_ltm", "ev_to_ebitda_ntm")
+
+
+def _format_row(row: dict) -> dict:
+    """Apply NM display rule to valuation multiple columns."""
+    out = dict(row)
+    quality = out.get("multiple_quality")
+    for col in _MULTIPLE_COLS:
+        val = out.get(col)
+        if val is None:
+            out[col] = ""
+        elif quality == "NM":
+            out[col] = "NM"
+        else:
+            out[col] = f"{val:.2f}"
+    return out
 
 
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
@@ -63,6 +82,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tr.value_amount, tr.value_currency, tr.value_type, tr.per_share_price,
             tr.target_revenue, tr.target_revenue_period_type, tr.target_revenue_period_end,
             tr.target_ebitda, tr.target_ebitda_period_type, tr.target_ebitda_period_end,
+            tr.ev_to_revenue_ltm, tr.ev_to_revenue_ntm, tr.ev_to_ebitda_ltm, tr.ev_to_ebitda_ntm,
+            tr.multiple_quality,
             tr.consideration_type,
             tr.consideration_components       AS consideration_components_json,
             tr.includes_earnout, tr.hostile, tr.competing_bid,
@@ -97,7 +118,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         writer = csv.DictWriter(f, fieldnames=_COLUMNS, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow(dict(row))
+            writer.writerow(_format_row(dict(row)))
 
     log.info("Stage 12 done  rows=%d  path=%s", total, csv_path)
     return {"transactions_total": total, "rows_exported": total, "export_path": csv_path}

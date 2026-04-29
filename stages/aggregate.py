@@ -134,6 +134,81 @@ def _derive_flags(fields: dict) -> dict:
     }
 
 
+def _compute_multiples(
+    value_amount: float | None,
+    value_type: str | None,
+    value_currency: str | None,
+    target_revenue: float | None,
+    target_revenue_period_type: str | None,
+    target_ebitda: float | None,
+    target_ebitda_period_type: str | None,
+    financials_currency: str | None,
+    log: Any,
+    cluster_id: str,
+) -> dict:
+    """Compute EV/Revenue and EV/EBITDA multiples.
+
+    Requires value_type = ENTERPRISE_VALUE. TTM is treated as LTM (interchangeable
+    industry usage). Cross-currency pairs are flagged NM without conversion.
+    Plausible ranges: EV/Revenue 0.1x–50x, EV/EBITDA 1x–100x.
+    """
+    result: dict[str, Any] = {
+        "ev_to_revenue_ltm": None,
+        "ev_to_revenue_ntm": None,
+        "ev_to_ebitda_ltm": None,
+        "ev_to_ebitda_ntm": None,
+        "multiple_quality": "NOT_CALCULABLE",
+    }
+
+    if value_type != "ENTERPRISE_VALUE" or not value_amount or value_amount <= 0:
+        return result
+
+    currency_mismatch = bool(
+        value_currency and financials_currency and value_currency != financials_currency
+    )
+
+    _RANGES = {"revenue": (0.1, 50.0), "ebitda": (1.0, 100.0)}
+
+    def _slot(period_type: str | None, metric: str) -> str | None:
+        p = (period_type or "").upper()
+        if p in ("LTM", "TTM"):
+            return f"ev_to_{metric}_ltm"
+        if p == "NTM":
+            return f"ev_to_{metric}_ntm"
+        log.debug("cluster=%s %s period_type=%r not LTM/NTM — skipping multiple", cluster_id, metric, period_type)
+        return None
+
+    calculated_in_range = False
+    calculated_out_of_range = False
+
+    for metric, raw_value, period_type in (
+        ("revenue", target_revenue, target_revenue_period_type),
+        ("ebitda", target_ebitda, target_ebitda_period_type),
+    ):
+        if not raw_value or raw_value <= 0:
+            continue
+        slot = _slot(period_type, metric)
+        if slot is None:
+            continue
+        if currency_mismatch:
+            calculated_out_of_range = True
+            continue
+        multiple = round(value_amount / raw_value, 2)
+        result[slot] = multiple
+        lo, hi = _RANGES[metric]
+        if lo <= multiple <= hi:
+            calculated_in_range = True
+        else:
+            calculated_out_of_range = True
+
+    if calculated_in_range:
+        result["multiple_quality"] = "CALCULATED"
+    elif calculated_out_of_range:
+        result["multiple_quality"] = "NM"
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Tier-based field aggregation
 # ---------------------------------------------------------------------------
@@ -427,6 +502,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Derive additional fields
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
             derived = _derive_flags(field_values)
+            multiples = _compute_multiples(
+                value_amount=field_values.get("value_amount"),
+                value_type=field_values.get("value_type"),
+                value_currency=field_values.get("value_currency"),
+                target_revenue=field_values.get("target_revenue"),
+                target_revenue_period_type=field_values.get("target_revenue_period_type"),
+                target_ebitda=field_values.get("target_ebitda"),
+                target_ebitda_period_type=field_values.get("target_ebitda_period_type"),
+                financials_currency=field_values.get("financials_currency"),
+                log=log,
+                cluster_id=cluster_id,
+            )
 
             # Check for existing transaction_record to determine version
             existing = conn.execute(
@@ -450,6 +537,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     target_revenue, target_revenue_period_type, target_revenue_period_end,
                     target_ebitda, target_ebitda_period_type, target_ebitda_period_end,
                     financials_currency,
+                    ev_to_revenue_ltm, ev_to_revenue_ntm, ev_to_ebitda_ltm, ev_to_ebitda_ntm, multiple_quality,
                     consideration_type, consideration_components,
                     includes_earnout, hostile, competing_bid, regulatory_approvals_required,
                     has_go_shop, go_shop_period_days,
@@ -458,7 +546,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     is_take_private, is_add_on, is_divestiture,
                     is_current, aggregation_version, updated_at
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -497,6 +585,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("target_ebitda_period_type"),
                     field_values.get("target_ebitda_period_end"),
                     field_values.get("financials_currency"),
+                    multiples["ev_to_revenue_ltm"],
+                    multiples["ev_to_revenue_ntm"],
+                    multiples["ev_to_ebitda_ltm"],
+                    multiples["ev_to_ebitda_ntm"],
+                    multiples["multiple_quality"],
                     ctype,
                     field_values.get("consideration_components"),
                     field_values.get("includes_earnout"),
