@@ -122,7 +122,17 @@ MVP only writes T1 and T2 rows. T3 is structural placeholder.
 
 Note: `ASSETS` added in Drop 3.9 for discrete asset purchases (product lines, physical asset portfolios, contracts) that are not going-concern units. `is_divestiture` derivation includes `ASSETS` alongside `BUSINESS_UNIT` and `SUBSIDIARY`.
 
-**deal_status**
+**event_type** (source observation kind — what type of PR is this?)
+`ANNOUNCEMENT` (first public announcement), `CLOSE` (separate later completion release), `AMENDMENT` (changes to previously-announced deal), `TERMINATION` (deal will not close), `RUMOR` (pre-announcement).
+
+Note: event_type does NOT describe deal lifecycle status. A same-day announce-and-close PR has event_type=ANNOUNCEMENT, not CLOSE. CLOSE is reserved for a separate later release explicitly referencing a previously-announced deal.
+
+**transaction_status** (deal lifecycle state — derived, not extracted)
+`PENDING` (announced, not yet closed), `CLOSED` (deal completed), `TERMINATED` (deal will not close), `RUMORED` (informal pre-announcement signal), `UNKNOWN`. Derived in aggregate.py from event_type + closed_date.
+
+Same-day announce-and-close pattern (most common in private M&A): event_type=ANNOUNCEMENT, closed_date=announced_date, transaction_status=CLOSED. The PR is announcement-type but the deal is closed at the same time.
+
+**deal_status** (legacy; superseded by transaction_status in schema v0.5+)
 `ANNOUNCED`, `PENDING`, `COMPLETED`, `TERMINATED`, `WITHDRAWN`, `UNKNOWN`
 
 **value_type**
@@ -523,6 +533,11 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 - NM display rule: out-of-range multiples display as `NM` in CSV export, but the computed value is preserved in the DB for inspection.
 - Currency mismatch (e.g. USD EV vs EUR EBITDA) flags NM without conversion; FX conversion is a v2 enhancement.
 - Equity multiples (P/E, P/B, P/TBV) deferred — require additional extraction fields (net_income, book_value).
+
+**New fields (Drop 3.14/3.15/3.17 / schema v0.5):**
+- `transaction_status TEXT` — deal lifecycle state (`PENDING | CLOSED | TERMINATED | RUMORED | UNKNOWN`). Derived at aggregation from event_type + closed_date. Distinct from event_type (which is the source PR kind). (`transaction_record` only)
+- `is_de_spac INTEGER` — 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC. (`transaction_record` only)
+- event_type semantics revised (HC extraction v0.8): same-day announce-and-close PRs now correctly produce event_type=ANNOUNCEMENT + closed_date populated (previously mis-tagged as event_type=CLOSE in v0.4–0.7).
 
 | Version | Date | Change |
 | :--- | :--- | :--- |

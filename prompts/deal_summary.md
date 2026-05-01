@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.6
+**Version:** 0.7
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -116,11 +116,15 @@ WRITING PRINCIPLES
 
 7. Name all captured advisors. When the advisor table contains advisor rows for this transaction, include all of them in the summary, grouped by side and role. Format clearly: "Goldman Sachs and Morgan Stanley served as financial advisors to Acme; Skadden and Wachtell served as legal counsel. Evercore advised BetaCo; Sullivan & Cromwell served as legal counsel." Do not omit advisors to save words.
 
-8. Dates per event_type:
-   - ANNOUNCEMENT: state announced_date naturally ("today announced," or specific date if not same-day)
-   - CLOSE: state closed_date; reference original announcement date when available ("originally announced [date], today closed...")
-   - AMENDMENT or TERMINATION: state the action and reference the original announcement
-   - When announced_date == closed_date (simultaneous announce-and-close, common for private deals), single mention is sufficient
+8. Dates: explicit calendar format. Open the summary with the announcement date in the form "On [Month DD, YYYY], ..." or "On [Month DD, YYYY]:" when the date is known. Do NOT rely on phrasing like "today announced" without preceding date — the summary will be read out of context and "today" is meaningless without the date stamp.
+
+   Format details:
+   - Spelled month, two-digit day with no leading zero, four-digit year: "On April 23, 2026, X announced..."
+   - Comma after year, before the verb
+   - When announced_date is known but closed_date differs: include both. "On April 23, 2026, X announced an agreement to acquire Y; the transaction closed on June 15, 2026."
+   - When announced_date and closed_date are the same (same-day announce-and-close, common for private deals): single date is sufficient. "On April 23, 2026, X announced the acquisition of Y." The past-tense verb signals close; do not write "today closed" since "today" is again context-free.
+   - When the source PR uses past-tense action ("today announced the acquisition" rather than "today announced an agreement"), this typically signals same-day close. Reflect this in the summary's verb choice but anchor with the date.
+   - For CLOSE event PRs that reference an earlier announced_date: "Originally announced on March 1, 2026, X today closed its acquisition of Y." When closed_date and the PR publication date are the same.
 
 9. Closing context. End with timing/closing details, advisors, and conditions when present. For announced deals, expected closing timeframe if stated. For closed deals, statement of completion.
 
@@ -170,7 +174,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "word_count": 70,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.6"
+  "prompt_version": "deal_summary:0.7"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -237,7 +241,7 @@ Generate the summary.
   "word_count": 70,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.6"
+  "prompt_version": "deal_summary:0.7"
 }
 ```
 
@@ -274,11 +278,11 @@ ADVISORS: null
 Output:
 ```json
 {
-  "summary_text": "Parkview Dental Partners, a private equity-backed dental services platform headquartered in Texas, today announced the acquisition of VIP Dental, a privately-held provider of pediatric and family dental services operating eight clinics across the Austin metro area. The transaction is an add-on to Parkview's existing Texas footprint, extending the platform's clinical capacity in pediatric care. VIP Dental's clinical leadership will continue under the Parkview umbrella. Financial terms were not disclosed.",
+  "summary_text": "On April 23, 2026, Parkview Dental Partners, a private equity-backed dental services platform headquartered in Texas, announced the acquisition of VIP Dental, a privately-held provider of pediatric and family dental services operating eight clinics across the Austin metro area. The transaction is an add-on to Parkview's existing Texas footprint, extending the platform's clinical capacity in pediatric care. VIP Dental's clinical leadership will continue under the Parkview umbrella. Financial terms were not disclosed.",
   "word_count": 73,
   "model_confidence": "HIGH",
   "notes": "Sparse private deal; PE_PORTFOLIO acquirer with no sponsor name captured. Used party descriptions and source's strategic-rationale language ('clinical capacity in pediatric care') to communicate substance despite undisclosed terms.",
-  "prompt_version": "deal_summary:0.6"
+  "prompt_version": "deal_summary:0.7"
 }
 ```
 
@@ -310,11 +314,11 @@ ADVISORS: Goldman Sachs and Skadden, Arps, Slate, Meagher & Flom advised BetaCo;
 Output:
 ```json
 {
-  "summary_text": "Acme Capital Partners, a private equity firm focused on technology and industrial software platforms, today announced an agreement to acquire BetaCo, Inc. (NASDAQ: BETA) for $42.00 per share in cash, valuing the publicly-traded automated workflow software provider at approximately $2.4 billion. The offer represents a 35% premium to BetaCo's prior closing price. The transaction values BetaCo at approximately 7.5x LTM revenue and 25.3x LTM EBITDA. Acme Capital cited BetaCo's market position and recurring revenue base as supporting meaningful margin expansion through operational improvements. Goldman Sachs served as financial advisor and Skadden as legal counsel to BetaCo; Evercore served as financial advisor and Kirkland & Ellis as legal counsel to Acme Capital. The transaction is subject to BetaCo shareholder approval and customary regulatory clearances; closing is expected in Q3 2026.",
+  "summary_text": "On April 15, 2026, Acme Capital Partners, a private equity firm focused on technology and industrial software platforms, announced an agreement to acquire BetaCo, Inc. (NASDAQ: BETA) for $42.00 per share in cash, valuing the publicly-traded automated workflow software provider at approximately $2.4 billion. The offer represents a 35% premium to BetaCo's prior closing price. The transaction values BetaCo at approximately 7.5x LTM revenue and 25.3x LTM EBITDA. Acme Capital cited BetaCo's market position and recurring revenue base as supporting meaningful margin expansion through operational improvements. Goldman Sachs served as financial advisor and Skadden as legal counsel to BetaCo; Evercore served as financial advisor and Kirkland & Ellis as legal counsel to Acme Capital. The transaction is subject to BetaCo shareholder approval and customary regulatory clearances; closing is expected in Q3 2026.",
   "word_count": 137,
   "model_confidence": "HIGH",
   "notes": "Take-private of public target. Equity value framing per Drop 3.11 rule (per-share price aggregate is equity value). Multiples included with LTM period qualifier per Drop 3.12. All four advisors named with role attribution. Premium and source's own rationale language woven naturally.",
-  "prompt_version": "deal_summary:0.6"
+  "prompt_version": "deal_summary:0.7"
 }
 ```
 
@@ -342,11 +346,11 @@ ADVISORS: null
 Output:
 ```json
 {
-  "summary_text": "PremiStar, LLC, a national platform of HVAC and mechanical services companies backed by Audax Private Equity, today announced the acquisition of Armistead Mechanical, Inc., a privately-held commercial HVAC and mechanical services contractor headquartered in New Jersey. Armistead, founded in 1962, serves commercial customers across the Mid-Atlantic. The transaction is an add-on to PremiStar's existing platform, expanding the company's geographic presence in the Mid-Atlantic and adding skilled service technicians and Armistead's established customer relationships. Financial terms were not disclosed.",
+  "summary_text": "On April 23, 2026, PremiStar, LLC, a national platform of HVAC and mechanical services companies backed by Audax Private Equity, announced the acquisition of Armistead Mechanical, Inc., a privately-held commercial HVAC and mechanical services contractor headquartered in New Jersey. Armistead, founded in 1962, serves commercial customers across the Mid-Atlantic. The transaction is an add-on to PremiStar's existing platform, expanding the company's geographic presence in the Mid-Atlantic and adding skilled service technicians and Armistead's established customer relationships. Financial terms were not disclosed.",
   "word_count": 81,
   "model_confidence": "HIGH",
   "notes": "PE add-on; Audax Private Equity sponsor named in opening per add-on framing rule. Add-on framing explicit. Source's strategic-rationale language ('skilled service technicians,' 'customer relationships') woven without literal enum tag.",
-  "prompt_version": "deal_summary:0.6"
+  "prompt_version": "deal_summary:0.7"
 }
 ```
 
@@ -374,11 +378,11 @@ ADVISORS: GLC Advisors & Co. advised TARGET.
 Output:
 ```json
 {
-  "summary_text": "Harrell-Fish Inc., a privately-held mechanical and electrical services contractor with operations across the Midwest, today announced a majority investment from New State Capital Partners and Amethyst Capital Group. New State, focused on lower-middle-market business services and industrials, and Amethyst, focused on growth-stage industrial and services platforms, will partner with Harrell-Fish to support continued organic growth, expand operating resources, and pursue future M&A opportunities. GLC Advisors & Co. served as exclusive financial advisor to Harrell-Fish. Financial terms were not disclosed.",
+  "summary_text": "On January 21, 2026, Harrell-Fish Inc., a privately-held mechanical and electrical services contractor with operations across the Midwest, announced a majority investment from New State Capital Partners and Amethyst Capital Group. New State, focused on lower-middle-market business services and industrials, and Amethyst, focused on growth-stage industrial and services platforms, will partner with Harrell-Fish to support continued organic growth, expand operating resources, and pursue future M&A opportunities. GLC Advisors & Co. served as exclusive financial advisor to Harrell-Fish. Financial terms were not disclosed.",
   "word_count": 81,
   "model_confidence": "HIGH",
   "notes": "Co-investor structure (PRIVATE_EQUITY acquirer with both sponsors named in acquirer_sponsor_name). Source PR's strategic framing ('continued organic growth,' 'deep operating resources') used directly. Single advisor named with role attribution. Majority investment language ('majority investment from') matches source PR framing.",
-  "prompt_version": "deal_summary:0.6"
+  "prompt_version": "deal_summary:0.7"
 }
 ```
 
@@ -409,4 +413,5 @@ Output:
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.4 | 2026-04-23 | Removed "carve-out sale" as acceptable terminology for private business unit sales. Per schema taxonomy, "carve-out" is reserved for subsidiary IPOs (out of MVP scope). Private subsidiary sales are divestitures. Updated style rule 8 with explicit prohibition and acceptable alternatives. |
 | 0.5 | 2026-04-23 | Added ASSETS to target_type divestiture handling rule (style rule 8). ASSETS targets follow the same summary framing as BUSINESS_UNIT/SUBSIDIARY divestitures. |
+| 0.7 | 2026-05-01 | Date format enforcement: opening sentence uses "On [Month DD, YYYY], ..." consistently. Fixed ~55% of v0.6 summaries that relied on "today announced" without explicit date. Updated all 4 few-shot examples to demonstrate. Documented same-day announce-and-close handling, distinct-announce-and-close (CLOSE event referencing earlier announce), and originally-announced phrasing for CLOSE PRs. |
 | 0.6 | 2026-04-29 | Major rewrite. Replaced template-feeling field-recitation summaries with narrative summaries that weave structured fields into prose. Required: party descriptions in opening (Drop 3.9), PE sponsor names in add-on framing (Drop 3.10), value type framing (Drop 3.11), multiples with period qualifier when CALCULATED (Drop 3.12), all captured advisors named with side and role attribution. Strategic rationale woven from source language rather than enum-tagged. Length follows substance, not artificial floor. Replaced existing few-shot examples with four examples covering: sparse private deal, public take-private with multiples and advisors, PE add-on with sponsor, multi-sponsor co-investor recap. User template extended with target_description, acquirer_description, acquirer_sponsor_name, pct_acquired, multiples columns, parent_seller_description, parent_seller_ticker, target_ticker. |

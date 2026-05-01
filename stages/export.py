@@ -22,7 +22,7 @@ from logger import get_logger
 
 _COLUMNS = [
     "transaction_id",
-    "deal_type", "event_type", "spin_split_type", "distribution_mechanism",
+    "deal_type", "event_type", "transaction_status", "spin_split_type", "distribution_mechanism",
     "target_name", "target_domain", "target_ticker", "target_type", "pct_acquired", "target_status", "target_description",
     "acquirer_name", "acquirer_domain", "acquirer_ticker", "acquirer_type", "acquirer_description", "acquirer_sponsor_name",
     "parent_seller_name", "parent_seller_ticker", "parent_seller_description",
@@ -35,7 +35,7 @@ _COLUMNS = [
     "includes_earnout", "hostile", "competing_bid", "regulatory_approvals_required",
     "has_go_shop", "go_shop_period_days",
     "target_fee_amount", "target_fee_percentage", "acquirer_fee_amount", "acquirer_fee_percentage",
-    "is_take_private", "is_add_on", "is_divestiture",
+    "is_take_private", "is_add_on", "is_divestiture", "is_de_spac",
     "summary_text", "primary_rationale", "secondary_rationales_json",
     "created_at", "updated_at",
 ]
@@ -73,7 +73,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         """
         SELECT
             tr.transaction_id,
-            tr.deal_type, tr.event_type, tr.spin_split_type, tr.distribution_mechanism,
+            tr.deal_type, tr.event_type, tr.transaction_status, tr.spin_split_type, tr.distribution_mechanism,
             tr.target_name, tr.target_domain, tr.target_ticker, tr.target_type, tr.pct_acquired, tr.target_status, tr.target_description,
             tr.acquirer_name, tr.acquirer_domain, tr.acquirer_ticker, tr.acquirer_type, tr.acquirer_description,
             tr.acquirer_sponsor_name,
@@ -91,7 +91,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tr.has_go_shop, tr.go_shop_period_days,
             tr.target_fee_amount, tr.target_fee_percentage,
             tr.acquirer_fee_amount, tr.acquirer_fee_percentage,
-            tr.is_take_private, tr.is_add_on, tr.is_divestiture,
+            tr.is_take_private, tr.is_add_on, tr.is_divestiture, tr.is_de_spac,
             s.summary_text,
             rt.primary_rationale,
             rt.secondary_rationales           AS secondary_rationales_json,

@@ -124,6 +124,7 @@ def _derive_flags(fields: dict) -> dict:
     target_status = fields.get("target_status")
     acquirer_type = fields.get("acquirer_type")
     target_type = fields.get("target_type")
+    deal_type = fields.get("deal_type")
     return {
         "is_take_private": int(
             target_status == "PUBLIC"
@@ -131,7 +132,20 @@ def _derive_flags(fields: dict) -> dict:
         ),
         "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
         "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY", "ASSETS")),
+        "is_de_spac": int(deal_type == "REVERSE_MERGER" and acquirer_type == "SPAC"),
     }
+
+
+def _derive_transaction_status(event_type: str | None, closed_date: str | None) -> str:
+    if event_type == "TERMINATION":
+        return "TERMINATED"
+    if event_type == "RUMOR":
+        return "RUMORED"
+    if closed_date is not None:
+        return "CLOSED"
+    if event_type in ("ANNOUNCEMENT", "AMENDMENT"):
+        return "PENDING"
+    return "UNKNOWN"
 
 
 def _compute_multiples(
@@ -502,6 +516,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Derive additional fields
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
             derived = _derive_flags(field_values)
+            txn_status = _derive_transaction_status(
+                field_values.get("event_type"), field_values.get("closed_date")
+            )
             multiples = _compute_multiples(
                 value_amount=field_values.get("value_amount"),
                 value_type=field_values.get("value_type"),
@@ -527,7 +544,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 """
                 INSERT OR REPLACE INTO transaction_record (
                     transaction_id, deal_type, spin_split_type, distribution_mechanism,
-                    target_type, event_type, target_status,
+                    target_type, event_type, transaction_status, target_status,
                     target_name, target_domain, target_ticker,
                     acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type,
                     parent_seller_name, parent_seller_ticker,
@@ -543,10 +560,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     has_go_shop, go_shop_period_days,
                     target_fee_amount, target_fee_percentage,
                     acquirer_fee_amount, acquirer_fee_percentage,
-                    is_take_private, is_add_on, is_divestiture,
+                    is_take_private, is_add_on, is_divestiture, is_de_spac,
                     is_current, aggregation_version, updated_at
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -556,6 +573,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("distribution_mechanism"),
                     field_values.get("target_type"),
                     field_values.get("event_type"),
+                    txn_status,
                     field_values.get("target_status"),
                     field_values.get("target_name"),
                     field_values.get("target_domain"),
@@ -605,6 +623,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     derived["is_take_private"],
                     derived["is_add_on"],
                     derived["is_divestiture"],
+                    derived["is_de_spac"],
                     1,
                     agg_version,
                     now,

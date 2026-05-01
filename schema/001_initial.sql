@@ -167,6 +167,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     distribution_mechanism      TEXT,
     target_type                 TEXT,
     event_type                  TEXT,
+    transaction_status          TEXT,              -- PENDING | CLOSED | TERMINATED | RUMORED | UNKNOWN. Derived from event_type + closed_date.
     target_status               TEXT,
 
     -- Parties
@@ -236,6 +237,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     is_take_private             INTEGER,     -- target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY/PE_PORTFOLIO
     is_add_on                   INTEGER,     -- acquirer_type=PE_PORTFOLIO
     is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY, ASSETS)
+    is_de_spac                  INTEGER DEFAULT 0,  -- 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC
 
     -- Metadata
     is_current                  INTEGER NOT NULL DEFAULT 1,  -- older versions flipped to 0 on re-aggregation
