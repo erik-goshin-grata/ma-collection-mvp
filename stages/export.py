@@ -35,7 +35,7 @@ _COLUMNS = [
     "includes_earnout", "hostile", "competing_bid", "regulatory_approvals_required",
     "has_go_shop", "go_shop_period_days",
     "target_fee_amount", "target_fee_percentage", "acquirer_fee_amount", "acquirer_fee_percentage",
-    "is_take_private", "is_add_on", "is_divestiture", "is_de_spac",
+    "is_take_private", "is_add_on", "is_divestiture", "is_de_spac", "has_earnout", "has_cvr",
     "summary_text", "primary_rationale", "secondary_rationales_json",
     "created_at", "updated_at",
 ]
@@ -91,7 +91,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tr.has_go_shop, tr.go_shop_period_days,
             tr.target_fee_amount, tr.target_fee_percentage,
             tr.acquirer_fee_amount, tr.acquirer_fee_percentage,
-            tr.is_take_private, tr.is_add_on, tr.is_divestiture, tr.is_de_spac,
+            tr.is_take_private, tr.is_add_on, tr.is_divestiture, tr.is_de_spac, tr.has_earnout, tr.has_cvr,
             s.summary_text,
             rt.primary_rationale,
             rt.secondary_rationales           AS secondary_rationales_json,

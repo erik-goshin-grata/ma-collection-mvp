@@ -539,6 +539,15 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 - `is_de_spac INTEGER` — 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC. (`transaction_record` only)
 - event_type semantics revised (HC extraction v0.8): same-day announce-and-close PRs now correctly produce event_type=ANNOUNCEMENT + closed_date populated (previously mis-tagged as event_type=CLOSE in v0.4–0.7).
 
+**Earnout and CVR consideration (Drop 3.16 / schema v0.6):**
+- `has_earnout INTEGER` — 1 when consideration_components contains a EARNOUT-form entry. Derived at aggregation. (`transaction_record` only)
+- `has_cvr INTEGER` — 1 when consideration_components contains a CVR-form entry. Derived at aggregation. (`transaction_record` only)
+- These flags are derived from consideration_components JSON at aggregation time; they are NOT extracted by the LC prompt directly.
+- Earnouts and CVRs are ADDITIVE to primary consideration; they do not change `consideration_type`. A cash + earnout deal stays `consideration_type=CASH` with `has_earnout=1`.
+- Earnout component shape: `form=EARNOUT`, `amount`, `percentage`, `description`
+- CVR component shape: `form=CVR`, `amount`, `percentage`, `description`
+
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft for review |
+| 0.6 | 2026-05-02 | Drop 3.16: has_earnout, has_cvr flags; EARNOUT/CVR guidance in LC extraction prompt v0.4. |

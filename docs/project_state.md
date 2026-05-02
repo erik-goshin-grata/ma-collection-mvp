@@ -354,7 +354,7 @@ Things that look like bugs but aren't. Flagged so future sessions don't chase th
 - **`consideration_type` null rate at 78%.** Expected for middle-market private deals. Terms are almost never disclosed.
 - **No TALENT_ACQUISITION rationale tags.** PR Newswire M&A coverage skews product/capability + geographic. Acqui-hires are rarely wire-distributed.
 - **SEC NO_MATCH rate.** Of 14 NO_MATCH rows in the 100-PR run, some are legitimately private-to-private deals where the public-party detector tripped on boilerplate ticker mentions but no 8-K will ever exist. Normal.
-- **`OTHER` consideration_type (7/76).** Catches complex structures (earnout-only, retained equity, CVR-only) that don't map cleanly to the 4-item derived enum. Intentional fallback.
+- **`OTHER` consideration_type (7/76).** Catches structures that don't map cleanly to CASH / STOCK / CASH_AND_STOCK / ELECTION. Examples: pure asset swaps, debt-for-equity, complex multi-instrument exchanges. Earnout-only and CVR-only deals (captured via has_earnout / has_cvr flags since Drop 3.16) no longer collapse into OTHER when the primary cash/stock component is also captured.
 
 ---
 

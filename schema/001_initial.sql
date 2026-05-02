@@ -238,6 +238,8 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     is_add_on                   INTEGER,     -- acquirer_type=PE_PORTFOLIO
     is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY, ASSETS)
     is_de_spac                  INTEGER DEFAULT 0,  -- 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC
+    has_earnout                 INTEGER DEFAULT 0,  -- 1 when consideration_components contains a EARNOUT-form entry
+    has_cvr                     INTEGER DEFAULT 0,  -- 1 when consideration_components contains a CVR-form entry
 
     -- Metadata
     is_current                  INTEGER NOT NULL DEFAULT 1,  -- older versions flipped to 0 on re-aggregation

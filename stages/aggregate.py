@@ -136,6 +136,26 @@ def _derive_flags(fields: dict) -> dict:
     }
 
 
+def _derive_has_earnout(consideration_components_json: str | None) -> int:
+    if not consideration_components_json:
+        return 0
+    try:
+        comps = json.loads(consideration_components_json) if isinstance(consideration_components_json, str) else consideration_components_json
+        return int(any(c.get("form") == "EARNOUT" for c in comps if isinstance(c, dict)))
+    except (ValueError, TypeError, AttributeError):
+        return 0
+
+
+def _derive_has_cvr(consideration_components_json: str | None) -> int:
+    if not consideration_components_json:
+        return 0
+    try:
+        comps = json.loads(consideration_components_json) if isinstance(consideration_components_json, str) else consideration_components_json
+        return int(any(c.get("form") == "CVR" for c in comps if isinstance(c, dict)))
+    except (ValueError, TypeError, AttributeError):
+        return 0
+
+
 def _derive_transaction_status(event_type: str | None, closed_date: str | None) -> str:
     if event_type == "TERMINATION":
         return "TERMINATED"
@@ -561,9 +581,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     target_fee_amount, target_fee_percentage,
                     acquirer_fee_amount, acquirer_fee_percentage,
                     is_take_private, is_add_on, is_divestiture, is_de_spac,
+                    has_earnout, has_cvr,
                     is_current, aggregation_version, updated_at
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -624,6 +645,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     derived["is_add_on"],
                     derived["is_divestiture"],
                     derived["is_de_spac"],
+                    _derive_has_earnout(field_values.get("consideration_components")),
+                    _derive_has_cvr(field_values.get("consideration_components")),
                     1,
                     agg_version,
                     now,
