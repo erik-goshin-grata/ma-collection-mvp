@@ -547,7 +547,16 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 - Earnout component shape: `form=EARNOUT`, `amount`, `percentage`, `description`
 - CVR component shape: `form=CVR`, `amount`, `percentage`, `description`
 
+**Multi-transaction PR splitting (Drop 3.18 / schema v0.7):**
+- `multi_transaction_index INTEGER` — 0-indexed position within the set of transactions extracted from a single source PR. 0 for single-transaction PRs (the common case). (`staging_extraction` only)
+- `multi_transaction_total INTEGER` — total number of transactions extracted from a given source PR. 1 for single-transaction PRs. (`staging_extraction` only)
+- HC extraction prompt v0.9: response shape changed from a single top-level object to `{"transactions": [...], "prompt_version": "..."}`. The `transactions` array always contains at least one element. Single-transaction PRs produce a 1-element array.
+- Pipeline behavior: for a multi-transaction response, `transactions[0]` UPDATEs the original `staging_extraction` row (sets `multi_transaction_index=0`); `transactions[1+]` each INSERT a new row carrying Stage 3 classification fields (`deal_type`, `spin_split_type`, `distribution_mechanism`, `target_type`, `event_type`, `target_status`, `dt_prompt_version`) from the original row. All resulting rows share the same `source_raw_id`.
+- Downstream stages (LC extraction, entity clustering, aggregation, summarize, rationale) are unchanged — they operate on `HC_EXTRACTED` rows regardless of `multi_transaction_index`.
+- Splitting criterion: only when the PR explicitly announces distinct deals (e.g. simultaneous acquisition of two separate named companies). Do NOT split for a single target described in multiple paragraphs or with multiple consideration tranches.
+
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft for review |
 | 0.6 | 2026-05-02 | Drop 3.16: has_earnout, has_cvr flags; EARNOUT/CVR guidance in LC extraction prompt v0.4. |
+| 0.7 | 2026-05-02 | Drop 3.18: multi_transaction_index/total columns in staging_extraction; HC extraction v0.9 returns transactions array. |

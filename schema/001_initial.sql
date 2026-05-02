@@ -125,6 +125,10 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
                                              -- Stage 5 sets NOT_TRIGGERED or TRIGGERED.
                                              -- Stage 6 leaves TRIGGERED on success, or sets NO_MATCH / ERROR.
 
+    -- Multi-transaction tracking
+    multi_transaction_index     INTEGER DEFAULT 0,  -- 0-indexed position when one PR yields multiple transactions; 0 for single-transaction PRs
+    multi_transaction_total     INTEGER DEFAULT 1,  -- total number of transactions extracted from this source_raw; 1 for single-transaction PRs
+
     -- Metadata — one version column per prompt stage
     model_confidence            TEXT,        -- HIGH | MEDIUM | LOW
     dt_prompt_version           TEXT,        -- deal_type_classifier version, e.g., "0.2"

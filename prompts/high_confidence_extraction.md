@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.8
+**Version:** 0.9
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -47,6 +47,26 @@ The full `clean_text` is passed — financial details are often deep in the docu
 
 ```
 You are a financial data extraction model for an M&A data collection pipeline. Given the text of a press release or SEC filing about a transaction, extract the following fields as structured data.
+
+MULTI-TRANSACTION DETECTION
+
+A press release usually describes ONE M&A transaction. Occasionally a single PR describes MULTIPLE distinct, separately-owned targets being acquired in coordinated but distinct transactions. When this is the case, return a "transactions" array with one element per distinct deal.
+
+When to split — return MULTIPLE transactions:
+- The PR explicitly enumerates multiple separately-owned targets: "Acme acquired three companies: A, B, and C, each independently owned and operated"
+- Different sellers for different targets in the same PR
+- List-style language for distinct deals: "These acquisitions include..." followed by company names with separate origins
+- Each named target has its own descriptive text (separate "About" paragraphs, different geographies, different former owners)
+
+When NOT to split — return a SINGLE transaction (array of length 1):
+- One target that is itself a multi-component business unit (e.g., "U.S. Branded Business of Cumberland Pharma, including products A, B, C") — single with target_type=BUSINESS_UNIT
+- An asset portfolio acquired together as a unit (e.g., "12 mitigation banks across 8 states") — single with target_type=ASSETS
+- A target with multiple subsidiaries being acquired together — single transaction; subsidiaries are part of the parent
+- Same deal reported in two PRs from different perspectives — handled by clustering, not splitting
+
+Decision rule: if the PR describes 2+ targets where each would have its own deal_type, value, advisors, and rationale if announced separately, SPLIT. Otherwise, single transaction.
+
+Default to NOT splitting when ambiguous. Splitting incorrectly creates two records where there should be one. When uncertain, use a single transaction and note the ambiguity.
 
 TARGET:
 - target_name — the entity being acquired, divested, or invested in
@@ -273,67 +293,71 @@ EXTRACTION RULES:
 
 RESPONSE FORMAT
 
-Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble.
+Return a JSON object with a top-level "transactions" array. No prose, no Markdown code fences, no preamble. For single-transaction PRs, return an array of length 1. For multi-transaction PRs, return one element per distinct deal.
 
 {
-  "target": {
-    "name": "Beta Industries",
-    "domain": null,
-    "ticker": null,
-    "description": "a privately-held ERP provider serving the construction industry"
-  },
-  "acquirer": {
-    "name": "Acme Corp",
-    "domain": "acme.com",
-    "ticker": "NASDAQ:ACME",
-    "type": "STRATEGIC_CORPORATE",
-    "description": "a publicly-traded SaaS platform providing business management tools to landscaping companies",
-    "sponsor_name": null
-  },
-  "parent_seller": {
-    "name": null,
-    "ticker": null,
-    "description": null
-  },
-  "deal": {
-    "target_type": "STANDALONE_COMPANY",
-    "pct_acquired": null
-  },
-  "dates": {
-    "announced_date": "2026-04-15",
-    "closed_date": null,
-    "signing_date": null
-  },
-  "value": {
-    "amount": 500000000,
-    "currency": "USD",
-    "type": "TRANSACTION_VALUE",
-    "type_confidence": "MEDIUM",
-    "per_share_price": null,
-    "qualifier": null
-  },
-  "target_financials": {
-    "revenue_amount": null,
-    "revenue_period_type": null,
-    "revenue_period_end": null,
-    "ebitda_amount": null,
-    "ebitda_period_type": null,
-    "ebitda_period_end": null,
-    "currency": null
-  },
-  "model_confidence": "HIGH",
-  "field_confidence": {
-    "target_name": "HIGH",
-    "acquirer_name": "HIGH",
-    "acquirer_type": "HIGH",
-    "announced_date": "HIGH",
-    "value_amount": "HIGH"
-  },
-  "notes": null,
-  "prompt_version": "high_confidence_extraction:0.8"
+  "transactions": [
+    {
+      "target": {
+        "name": "Beta Industries",
+        "domain": null,
+        "ticker": null,
+        "description": "a privately-held ERP provider serving the construction industry"
+      },
+      "acquirer": {
+        "name": "Acme Corp",
+        "domain": "acme.com",
+        "ticker": "NASDAQ:ACME",
+        "type": "STRATEGIC_CORPORATE",
+        "description": "a publicly-traded SaaS platform providing business management tools to landscaping companies",
+        "sponsor_name": null
+      },
+      "parent_seller": {
+        "name": null,
+        "ticker": null,
+        "description": null
+      },
+      "deal": {
+        "target_type": "STANDALONE_COMPANY",
+        "pct_acquired": null
+      },
+      "dates": {
+        "announced_date": "2026-04-15",
+        "closed_date": null,
+        "signing_date": null
+      },
+      "value": {
+        "amount": 500000000,
+        "currency": "USD",
+        "type": "TRANSACTION_VALUE",
+        "type_confidence": "MEDIUM",
+        "per_share_price": null,
+        "qualifier": null
+      },
+      "target_financials": {
+        "revenue_amount": null,
+        "revenue_period_type": null,
+        "revenue_period_end": null,
+        "ebitda_amount": null,
+        "ebitda_period_type": null,
+        "ebitda_period_end": null,
+        "currency": null
+      },
+      "model_confidence": "HIGH",
+      "field_confidence": {
+        "target_name": "HIGH",
+        "acquirer_name": "HIGH",
+        "acquirer_type": "HIGH",
+        "announced_date": "HIGH",
+        "value_amount": "HIGH"
+      },
+      "notes": null
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 
-All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields within each transaction element are required. Use null for optional fields that have no value. "prompt_version" is at the top level (single value for the entire response); it is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -418,7 +442,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.8"
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -455,6 +479,8 @@ BODY: Acme Corp (NASDAQ: ACME), a leading provider of industrial automation solu
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "Beta Industries", "domain": null, "ticker": null, "description": "a privately held manufacturer of specialty valves headquartered in Dallas, Texas"},
   "acquirer": {"name": "Acme Corp", "domain": null, "ticker": "NASDAQ:ACME", "type": "STRATEGIC_CORPORATE", "description": "a leading provider of industrial automation solutions", "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
@@ -485,8 +511,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given"
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -509,6 +537,8 @@ BODY: Acme Corp (NYSE: ACME) today announced that it has entered into a definiti
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "Acme Corp", "domain": null, "ticker": "NYSE:ACME", "description": null},
   "acquirer": {"name": "Zenith Capital Partners", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": null, "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
@@ -539,8 +569,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag. No About sections in source; descriptions null.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag. No About sections in source; descriptions null."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -563,6 +595,8 @@ BODY: MegaCorp (NYSE: MGC) today announced a definitive agreement to sell its In
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "Industrial Coatings Division", "domain": null, "ticker": null, "description": null},
   "acquirer": {"name": "Delta Holdings", "domain": null, "ticker": null, "type": "PE_PORTFOLIO", "description": null, "sponsor_name": null},
   "parent_seller": {"name": "MegaCorp", "ticker": "NYSE:MGC", "description": null},
@@ -593,8 +627,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'. No About sections; descriptions null.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'. No About sections; descriptions null."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -615,6 +651,8 @@ BODY: Acme Corp today announced that it has completed its previously announced a
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "Beta Industries", "domain": null, "ticker": null, "description": null},
   "acquirer": {"name": "Acme Corp", "domain": null, "ticker": null, "type": "STRATEGIC_CORPORATE", "description": null, "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
@@ -645,8 +683,10 @@ Output:
     "announced_date": "LOW",
     "value_amount": "HIGH"
   },
-  "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -669,6 +709,8 @@ BODY: XYZ Capital, a private equity firm based in Chicago, announced today it ha
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "ABC Widgets", "domain": null, "ticker": null, "description": "a privately held manufacturer of industrial fasteners headquartered in Ohio"},
   "acquirer": {"name": "XYZ Capital", "domain": null, "ticker": null, "type": "PRIVATE_EQUITY", "description": "a private equity firm based in Chicago", "sponsor_name": null},
   "parent_seller": {"name": null, "ticker": null, "description": null},
@@ -703,8 +745,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -730,6 +774,8 @@ CEM is a private investment firm specializing in environmental markets, includin
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {
     "name": "Diversified National Portfolio of Mitigation Banks",
     "domain": null,
@@ -772,8 +818,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Asset portfolio acquisition (12 mitigation banks); not a going-concern subsidiary. ASSETS target_type appropriate. Terms not disclosed.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Asset portfolio acquisition (12 mitigation banks); not a going-concern subsidiary. ASSETS target_type appropriate. Terms not disclosed."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -799,6 +847,8 @@ VisionWave Holdings is a private developer of LiDAR perception software for auto
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {
     "name": "VisionWave Holdings, Inc.",
     "domain": null,
@@ -841,8 +891,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Partial acquisition (51%) for stock consideration; $17.5M is purchase price for 51% stake (EQUITY_VALUE for the acquired portion). pct_acquired = 51.0.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Partial acquisition (51%) for stock consideration; $17.5M is purchase price for 51% stake (EQUITY_VALUE for the acquired portion). pct_acquired = 51.0."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -869,6 +921,8 @@ Armistead Mechanical, founded in 1962, is a leading commercial HVAC and mechanic
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {
     "name": "Armistead Mechanical, Inc.",
     "domain": null,
@@ -911,8 +965,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Add-on acquisition: PE_PORTFOLIO acquirer (PremiStar) backed by Audax Private Equity acquires standalone target.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Add-on acquisition: PE_PORTFOLIO acquirer (PremiStar) backed by Audax Private Equity acquires standalone target."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -939,6 +995,8 @@ Amethyst Capital Group is a private investment firm specializing in growth-stage
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {
     "name": "Harrell-Fish Inc.",
     "domain": null,
@@ -981,8 +1039,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Majority recapitalization with co-investor structure. Both sponsors are direct PE acquirers (PRIVATE_EQUITY, not PE_PORTFOLIO) — neither is a portfolio-company shell. acquirer_sponsor_name captures both sponsors comma-delimited. Founders/management likely retain minority equity in this recap structure.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Majority recapitalization with co-investor structure. Both sponsors are direct PE acquirers (PRIVATE_EQUITY, not PE_PORTFOLIO) — neither is a portfolio-company shell. acquirer_sponsor_name captures both sponsors comma-delimited. Founders/management likely retain minority equity in this recap structure."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -1003,6 +1063,8 @@ BODY: Foresight Autonomous Holdings Ltd. (NASDAQ: FRSX) today announced an agree
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "VisionWave Holdings, Inc.", "domain": null, "ticker": null, "description": null},
   "acquirer": {
     "name": "Foresight Autonomous Holdings Ltd.",
@@ -1040,8 +1102,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Partial acquisition (51%); $17.5M consideration is for the acquired equity stake, not whole-company. value_type = EQUITY_VALUE per partial-stake rule (3c). Implies $34.3M total equity value of target.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Partial acquisition (51%); $17.5M consideration is for the acquired equity stake, not whole-company. value_type = EQUITY_VALUE per partial-stake rule (3c). Implies $34.3M total equity value of target."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -1062,6 +1126,8 @@ BODY: Peoples Bancorp Inc. (NASDAQ: PEBO) and Citizens National Corporation anno
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {
     "name": "Citizens National Corporation",
     "domain": null,
@@ -1104,8 +1170,10 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Bank holding company acquisition. Financial services convention: banks valued on equity value (P/B, P/TBV), not enterprise value. value_type = EQUITY_VALUE per industry convention rule (3d). Confidence MEDIUM because source text does not explicitly say 'equity value' but industry convention is unambiguous for community banks.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Bank holding company acquisition. Financial services convention: banks valued on equity value (P/B, P/TBV), not enterprise value. value_type = EQUITY_VALUE per industry convention rule (3d). Confidence MEDIUM because source text does not explicitly say 'equity value' but industry convention is unambiguous for community banks."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -1126,6 +1194,8 @@ BODY: Acme Capital Partners today announced an agreement to acquire BetaCo, Inc.
 Output:
 ```json
 {
+  "transactions": [
+    {
   "target": {"name": "BetaCo, Inc.", "domain": null, "ticker": "NASDAQ:BETA", "description": null},
   "acquirer": {
     "name": "Acme Capital Partners",
@@ -1163,8 +1233,86 @@ Output:
     "announced_date": "HIGH",
     "value_amount": "HIGH"
   },
-  "notes": "Take-private at $42/share cash, 35% premium. $2.4B aggregate value reflects equity acquired (per-share price × shares outstanding); value_type = EQUITY_VALUE per per-share rule (3b) and take-private rule (3e). Acquirer is PE; PUBLIC target + PE acquirer → is_take_private derived downstream.",
-  "prompt_version": "high_confidence_extraction:0.8"
+  "notes": "Take-private at $42/share cash, 35% premium. $2.4B aggregate value reflects equity acquired (per-share price × shares outstanding); value_type = EQUITY_VALUE per per-share rule (3b) and take-private rule (3e). Acquirer is PE; PUBLIC target + PE acquirer → is_take_private derived downstream."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
+}
+```
+
+**Example 13 — Multi-transaction PR (two distinct targets, two deals):**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: ASSETS
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-04-30
+
+TITLE: Action Environmental Services Acquires NYC Assets of ADM Environmental Group and M&M Sanitation Services
+BODY: Action Environmental Services today announced the acquisition of select New York City assets of two independent operators: ADM Environmental Group and M&M Sanitation Services. Each transaction was negotiated separately and closes today, expanding Action's NYC service capacity. Financial terms of each transaction were not disclosed.
+
+About Action Environmental Services
+Action Environmental Services is a full-service environmental and waste management company serving commercial and industrial customers in the greater New York metropolitan area.
+```
+
+Output:
+```json
+{
+  "transactions": [
+    {
+      "target": {
+        "name": "Select New York City assets of ADM Environmental Group",
+        "domain": null,
+        "ticker": null,
+        "description": "waste collection assets in New York City operated by ADM Environmental Group"
+      },
+      "acquirer": {
+        "name": "Action Environmental Services",
+        "domain": null,
+        "ticker": null,
+        "type": "STRATEGIC_CORPORATE",
+        "description": "a full-service environmental and waste management company serving commercial and industrial customers in the greater New York metropolitan area",
+        "sponsor_name": null
+      },
+      "parent_seller": {"name": "ADM Environmental Group", "ticker": null, "description": null},
+      "deal": {"target_type": "ASSETS", "pct_acquired": null},
+      "dates": {"announced_date": "2026-04-30", "closed_date": "2026-04-30", "signing_date": null},
+      "value": {"amount": null, "currency": null, "type": "UNDISCLOSED", "type_confidence": "HIGH", "per_share_price": null, "qualifier": null},
+      "target_financials": {"revenue_amount": null, "revenue_period_type": null, "revenue_period_end": null, "ebitda_amount": null, "ebitda_period_type": null, "ebitda_period_end": null, "currency": null},
+      "model_confidence": "HIGH",
+      "field_confidence": {"target_name": "HIGH", "acquirer_name": "HIGH", "acquirer_type": "HIGH", "announced_date": "HIGH", "value_amount": "HIGH"},
+      "notes": "Multi-transaction PR; deal 1 of 2. ADM Environmental NYC assets negotiated and closed separately from M&M Sanitation deal in same announcement. Same-day announce-and-close."
+    },
+    {
+      "target": {
+        "name": "Select New York City assets of M&M Sanitation Services",
+        "domain": null,
+        "ticker": null,
+        "description": "waste collection assets in New York City operated by M&M Sanitation Services"
+      },
+      "acquirer": {
+        "name": "Action Environmental Services",
+        "domain": null,
+        "ticker": null,
+        "type": "STRATEGIC_CORPORATE",
+        "description": "a full-service environmental and waste management company serving commercial and industrial customers in the greater New York metropolitan area",
+        "sponsor_name": null
+      },
+      "parent_seller": {"name": "M&M Sanitation Services", "ticker": null, "description": null},
+      "deal": {"target_type": "ASSETS", "pct_acquired": null},
+      "dates": {"announced_date": "2026-04-30", "closed_date": "2026-04-30", "signing_date": null},
+      "value": {"amount": null, "currency": null, "type": "UNDISCLOSED", "type_confidence": "HIGH", "per_share_price": null, "qualifier": null},
+      "target_financials": {"revenue_amount": null, "revenue_period_type": null, "revenue_period_end": null, "ebitda_amount": null, "ebitda_period_type": null, "ebitda_period_end": null, "currency": null},
+      "model_confidence": "HIGH",
+      "field_confidence": {"target_name": "HIGH", "acquirer_name": "HIGH", "acquirer_type": "HIGH", "announced_date": "HIGH", "value_amount": "HIGH"},
+      "notes": "Multi-transaction PR; deal 2 of 2. M&M Sanitation NYC assets negotiated and closed separately from ADM Environmental deal in same announcement. Same-day announce-and-close."
+    }
+  ],
+  "prompt_version": "high_confidence_extraction:0.9"
 }
 ```
 
@@ -1199,3 +1347,4 @@ Output:
 | 0.6 | 2026-04-29 | Tightened acquirer_type=PE_PORTFOLIO detection with concrete language signals (10+ phrases including "portfolio company of," "X-backed," "X platform"). Added acquirer_sponsor_name extraction with single-sponsor and multi-sponsor (comma-delimited) handling. Updated RESPONSE FORMAT and §6 output schema to include sponsor_name on acquirer object. Updated all seven existing examples with sponsor_name field. Added Example 8 (single-sponsor PE add-on: PremiStar/Armistead Mechanical) and Example 9 (multi-sponsor co-investor recap: Harrell-Fish). Addresses 14 missed add-ons from 100-PR review. |
 | 0.8 | 2026-05-01 | Revised event_type semantics: event_type reports the kind of PR (source observation type), not deal lifecycle status. Same-day announce-and-close PRs are now event_type=ANNOUNCEMENT with closed_date populated (was CLOSE in v0.4–0.7). transaction_status is derived downstream from closed_date. Added EVENT_TYPE section with explicit ANNOUNCEMENT/CLOSE/AMENDMENT/TERMINATION/RUMOR rules and same-day handling. Updated closed_date rules to handle ANNOUNCEMENT + past-tense completive language. Updated Example 5 (simultaneous announce-and-close): input EVENT TYPE changed from CLOSE to ANNOUNCEMENT; output dates unchanged (closed_date = announced_date). |
 | 0.7 | 2026-04-29 | Tightened value_type determination with priority-ordered rules (UNDISCLOSED → ENTERPRISE_VALUE → EQUITY_VALUE → TRANSACTION_VALUE). Added explicit handling for partial-stake acquisitions (rule 3c: EQUITY_VALUE when pct_acquired < 100%), financial services convention (rule 3d: banks/insurance use equity value), per-share take-privates (rule 3e: aggregate is equity value), and stock-for-stock deals (rule 3f). Refined value_type_confidence guidance: HIGH for explicit text signals, MEDIUM for convention rules (3c–3f), LOW for ambiguous. Added Examples 10 (partial-stake Foresight/VisionWave), 11 (community bank Peoples/Citizens National), 12 (per-share take-private BetaCo). Addresses 3 patterns from 100-PR review where TRANSACTION_VALUE was assigned when EQUITY_VALUE was correct. |
+| 0.9 | 2026-05-02 | Multi-transaction PR splitting: HC extraction now returns {"transactions": [...], "prompt_version": "..."} at the top level. Single-transaction PRs return arrays of length 1 (unified response shape). Multi-transaction PRs (multiple distinct targets in one PR) return one element per transaction. Added MULTI-TRANSACTION DETECTION section with decision rules. Added Example 13 (Action Environmental two-asset NYC acquisition). Wrapped all existing Examples 1–12 in transactions arrays. |
