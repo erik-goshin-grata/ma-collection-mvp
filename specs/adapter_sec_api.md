@@ -352,23 +352,63 @@ Written to `logs/sec_api_<run_id>.log`:
 
 ---
 
-## 7. Out of Scope for MVP
+## 7. Expanded Filing Support (Drop 3.19 — Stage 10: sec_documents)
 
-- 8-K/A amendments. Treated as regular filings in MVP. Supersession logic is v2.
-- Enrichment forms: DEFM14A, S-4, SC TO-T. These add depth but not discovery for MVP.
-- Form 6-K (foreign private issuers). Cross-border deals are MVP-deferred.
-- Full-text search across all filings for a company. Only targeted 8-K lookup in MVP.
+Drop 3.19 adds `query_filings_by_formtype()` and `fetch_filing_full_text()` to the adapter for the new `sec_documents` stage (Stage 10).
+
+### 7.1 New Filing Types
+
+| Filing type | DB filing_type | Form type query | Fetch method |
+| :--- | :--- | :--- | :--- |
+| 8-K Item 2.01 (acquisition completion) | `8K_ITEM_201` | 8-K + item filter | Item Extractor API (existing) |
+| 8-K Exhibit 2.1 (merger agreement) | `8K_EXHIBIT_21` | 8-K + exhibit match | Download API (existing) |
+| Definitive proxy | `DEFM14A` | `formType:"DEFM14A"` | `fetch_filing_full_text()` |
+| Tender offer document | `SC_TOT` | `formType:"SC TO-T"` | `fetch_filing_full_text()` |
+| Registration statement | `S4` | `formType:"S-4"` | `fetch_filing_full_text()` |
+
+### 7.2 `query_filings_by_formtype()`
+
+Generic Filing Query API call parameterized by form type. Differs from `query_filings()`:
+- No items clause (DEFM14A/S-4/SC TO-T have no items in the 8-K sense)
+- `window_days=90` default (broader than the 7-day 8-K window; proxy filings arrive 30-60 days after announcement)
+- `max_results` parameter (default 3; cap per transaction per type)
+
+### 7.3 `fetch_filing_full_text()`
+
+Fetches the main document of a filing using `linkToHtmlDocument` from the filing response dict.
+- HTML/HTM: extract with trafilatura
+- PDF: attempt extraction via `pdfminer.six`; fallback to UNREADABLE if not installed
+- Returns `(raw_text, source_status)` where status is FETCHED | UNREADABLE | SKIP
+
+### 7.4 Destination
+
+Results go to `transaction_document` (not `source_raw`). The Stage 10 sec_documents
+stage handles the DB writes; the adapter functions are pure fetch/return.
+
+### 7.5 Rate Limiting
+
+Stage 10 uses `_SLEEP = 2.0` seconds between requests (more conservative than Stage 6's
+`sec_api_request_delay_seconds` default). Cap of 3 filings per type per transaction limits
+worst-case API calls to 15 per transaction.
+
+---
+
+## 8. Out of Scope
+
+- 8-K/A amendments. Treated as regular filings. Supersession logic is v2.
+- Form 6-K (foreign private issuers). Cross-border deals are deferred.
+- Full-text search across all filings for a company.
 - XBRL-to-JSON target financial hydration. Reserved for v2.
 - Company Subsidiaries API. Reserved for v2 entity resolution work.
 - Outstanding Shares & Public Float. Reserved for v2 valuation enrichment.
 - Form 13D/13G beneficial ownership. Reserved for v2.
-- PDF exhibit text extraction. Reserved for v2.
-- WebSocket streaming for real-time discovery. Polling / PR-triggered lookup sufficient for MVP.
-- Fanning out to every item present in a filing. Adapter extracts only the event-type-relevant primary or fallback.
+- WebSocket streaming for real-time discovery.
+- Fanning out to every item present in a filing. Adapter extracts only the event-type-relevant primary or fallback for Stage 6.
+- LLM extraction from fetched document text. That is Drop 3.20.
 
 ---
 
-## 8. Open Items
+## 9. Open Items
 
 - **Tier rate limit verification.** The $55 Personal & Startups tier's exact rate limit is not documented numerically. Default throttle (0.2s delay — 5 req/sec) is likely well within. Worth confirming from the account dashboard; adjust if lower.
 - **Ticker-to-CIK resolution.** Filing Query supports `ticker:` directly. To be confirmed during sandbox validation with a real filing.
@@ -377,9 +417,10 @@ Written to `logs/sec_api_<run_id>.log`:
 
 ---
 
-## 9. Document Control
+## 10. Document Control
 
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft. Query scoped to Item 1.01 only. Exhibit 2.1 retrieval supported. Exhibit 99.x not addressed. |
 | 0.2 | 2026-04-23 | Expanded Item coverage to include 1.01, 2.01, 8.01, 1.02. Event-type-conditional Item selection (primary + fallback) with pre-check against filing's `items` array. Added Exhibit 99.x retrieval with new `source_type = SEC_EXHIBIT_99`. Documented "processing" response handling per Extractor API FAQ. Clarified endpoint URLs (Filing Query API base vs Extractor API vs Filing & Exhibit Download API). Added PDF exhibit handling via `source_status = UNREADABLE`. Added `staging_extraction.sec_lookup_status = NO_MATCH` state. |
+| 0.3 | 2026-05-02 | Drop 3.19: Added `query_filings_by_formtype()` and `fetch_filing_full_text()` for DEFM14A / SC TO-T / S-4 / 8-K Exhibit 2.1 / 8-K Item 2.01. Added `_extract_pdf_text()` via pdfminer.six (graceful fallback). Extended §7 with new filing types table, method descriptions, rate limit notes. Output destination is `transaction_document` (not `source_raw`). |

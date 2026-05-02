@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     is_de_spac                  INTEGER DEFAULT 0,  -- 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC
     has_earnout                 INTEGER DEFAULT 0,  -- 1 when consideration_components contains a EARNOUT-form entry
     has_cvr                     INTEGER DEFAULT 0,  -- 1 when consideration_components contains a CVR-form entry
+    linked_filings_count        INTEGER DEFAULT 0,  -- count of transaction_document rows for this transaction; set by sec_documents stage
 
     -- Metadata
     is_current                  INTEGER NOT NULL DEFAULT 1,  -- older versions flipped to 0 on re-aggregation
@@ -421,6 +422,51 @@ CREATE TABLE IF NOT EXISTS gold_set (
 );
 
 CREATE INDEX IF NOT EXISTS idx_gold_source ON gold_set(source_raw_id);
+
+
+-- -----------------------------------------------------------------------------
+-- 13. transaction_document — full-text SEC filings linked to transactions
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS transaction_document (
+    document_id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id        TEXT NOT NULL,                  -- FK to transaction_record.transaction_id
+    filing_type           TEXT NOT NULL,
+                          -- 8K_ITEM_201 | 8K_EXHIBIT_21 | DEFM14A | SC_TOT | S4 | OTHER
+    sec_accession_number  TEXT,                           -- e.g. "0001193125-26-123456"
+    sec_filing_url        TEXT,                           -- canonical SEC URL
+    filer_cik             TEXT,
+    filer_name            TEXT,
+    filing_date           TEXT,                           -- YYYY-MM-DD
+    raw_text              TEXT,                           -- full extracted text content
+    raw_text_length       INTEGER,                        -- char count
+    fetch_timestamp       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_current            INTEGER DEFAULT 1,
+    UNIQUE (transaction_id, sec_accession_number, filing_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_document_txn  ON transaction_document(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_transaction_document_type ON transaction_document(filing_type);
+
+
+-- -----------------------------------------------------------------------------
+-- 14. transaction_document_section — heuristic section excerpts
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS transaction_document_section (
+    section_id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id           INTEGER NOT NULL REFERENCES transaction_document(document_id),
+    section_type          TEXT NOT NULL,
+                          -- DEFINITIONS | RECITALS | CONSIDERATION | CAPITALIZATION |
+                          -- CONDITIONS_TO_CLOSING | TERMINATION_FEES | REPRESENTATIONS |
+                          -- BACKGROUND_OF_MERGER | FAIRNESS_OPINION | OTHER
+    heading_text          TEXT,                           -- actual heading found in document
+    excerpt_text          TEXT,                           -- bounded section content
+    excerpt_start_offset  INTEGER,                        -- char offset into raw_text
+    excerpt_end_offset    INTEGER,
+    confidence            TEXT                            -- HIGH | MEDIUM | LOW
+);
+
+CREATE INDEX IF NOT EXISTS idx_section_document ON transaction_document_section(document_id);
+CREATE INDEX IF NOT EXISTS idx_section_type     ON transaction_document_section(section_type);
 
 
 -- =============================================================================

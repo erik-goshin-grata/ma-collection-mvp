@@ -1,5 +1,5 @@
 """
-Stage 12: export
+Stage 13: export
 
 Exports all transaction_record rows where is_current = 1, joined with their
 current summary and rationale_tag rows, to a CSV file at
@@ -8,7 +8,7 @@ exports/transactions_<run_id>.csv. Rows are sorted by announced_date DESC.
 consideration_components and secondary_rationales are serialized as JSON
 strings in the CSV (not exploded). Columns follow the operator-approved order.
 
-Spec references: specs/pipeline.md §2 (Stage 12)
+Spec references: specs/pipeline.md §2 (Stage 13)
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ _COLUMNS = [
     "has_go_shop", "go_shop_period_days",
     "target_fee_amount", "target_fee_percentage", "acquirer_fee_amount", "acquirer_fee_percentage",
     "is_take_private", "is_add_on", "is_divestiture", "is_de_spac", "has_earnout", "has_cvr",
+    "linked_filings_count",
     "summary_text", "primary_rationale", "secondary_rationales_json",
     "created_at", "updated_at",
 ]
@@ -92,6 +93,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tr.target_fee_amount, tr.target_fee_percentage,
             tr.acquirer_fee_amount, tr.acquirer_fee_percentage,
             tr.is_take_private, tr.is_add_on, tr.is_divestiture, tr.is_de_spac, tr.has_earnout, tr.has_cvr,
+            tr.linked_filings_count,
             s.summary_text,
             rt.primary_rationale,
             rt.secondary_rationales           AS secondary_rationales_json,
@@ -107,7 +109,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     ).fetchall()
 
     total = len(rows)
-    log.info("Stage 12: %d transactions to export", total)
+    log.info("Stage 13: %d transactions to export", total)
 
     exports_dir = os.path.join(os.path.dirname(cfg.db_path), "..", "exports")
     os.makedirs(exports_dir, exist_ok=True)

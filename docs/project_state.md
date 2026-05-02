@@ -236,9 +236,39 @@ Schema additions:
 
 Rationale: this is the difference between event-capture quality and platform-quality data. Competitors (S&P Capital IQ, PitchBook) do this; Grata's current data structure does not. This is the single highest-impact v2 improvement.
 
-### 5.2 Source Comprehensiveness for Public-Party Deals
+### 5.2 Source Comprehensiveness for Public-Party Deals — Status: PARTIALLY SHIPPED
 
-For any deal involving a public party, gather ALL same-date or proximate-date SEC filings + IR-page material, not just the 8-K Items we currently target.
+**Drop 3.19 ships filing acquisition + document storage + heuristic section tagging for:**
+- 8-K Item 2.01 (completion of acquisition)
+- 8-K Exhibit 2.1 (merger agreement attachment)
+- DEFM14A (definitive proxy for merger)
+- SC TO-T (tender offer documents)
+- S-4 (stock-for-stock registration statements)
+
+Documents are stored full-text in `transaction_document`, linked to `transaction_record.transaction_id`. Heuristic section tagger (`lib/section_tagger.py`, pure Python regex) identifies standard merger-agreement and proxy sections (CONSIDERATION, CAPITALIZATION, TERMINATION_FEES, CONDITIONS_TO_CLOSING, REPRESENTATIONS, BACKGROUND_OF_MERGER, FAIRNESS_OPINION, DEFINITIONS, RECITALS) and stores bounded excerpts in `transaction_document_section`.
+
+**NOT shipped (Drop 3.20+):**
+- LLM extraction from agreement text
+- Merger Sub / acquisition vehicle identification
+- Per-class share counts and exchange ratios from Capitalization sections
+- Termination fee structures from Termination Fees sections
+- Structured party list from Recitals/preamble
+
+Drop 3.20 will design extraction prompts for bounded section text. The Drop 3.19 section tagger creates the bounded inputs for that work.
+
+**5.X — Drop 3.20: Agreement extraction.** With Drop 3.19's section tagger producing bounded text inputs, the next workstream is structured extraction from those sections. Specifically:
+
+- Recitals / preamble: identify all named parties; distinguish ultimate Parent acquirer from Merger Sub / acquisition vehicle. Add `acquirer_merger_sub_name` and `merger_structure` fields when populated.
+- Consideration / Per Share Merger Consideration: extract cash per share, exchange ratio, election mechanics, CVR / earnout components with greater precision than PR-only extraction.
+- Capitalization: per-security-type share counts (common, preferred, RSU, options, warrants), each with treatment (cash-out, conversion, assumed).
+- Termination Fees: company termination fee, parent termination fee, percentages, triggers.
+- Conditions to Closing: regulatory approvals required, shareholder vote thresholds, MAC clause presence.
+
+Effort: ~2-3 days for prompt design, validation, schema additions.
+
+---
+
+For any deal involving a public party, the original v2 target was to gather ALL same-date or proximate-date SEC filings + IR-page material beyond the 8-K Items currently targeted.
 
 Candidate sources:
 - 8-K Items beyond current coverage: 2.02 (deferred — see §4.3), 7.01 (Reg FD), 9.01 (exhibits index)

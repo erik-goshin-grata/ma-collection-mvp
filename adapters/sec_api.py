@@ -509,6 +509,208 @@ def insert_source_raw(
 # Per-transaction entry point (Stage 6)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Drop 3.19 — expanded filing fetchers for sec_documents stage
+# ---------------------------------------------------------------------------
+
+# Form type → query string (some have spaces, all go in double quotes)
+_FORM_TYPE_QUERY: dict[str, str] = {
+    "DEFM14A": "DEFM14A",
+    "SC_TOT":  "SC TO-T",
+    "S4":      "S-4",
+    "8-K":     "8-K",
+}
+
+
+def _extract_pdf_text(pdf_bytes: bytes, log) -> str | None:
+    """Extract text from PDF bytes using pdfminer.six.
+
+    Returns stripped text string or None if extraction fails or pdfminer
+    is not installed.
+    """
+    try:
+        import io
+        from pdfminer.high_level import extract_text_to_fp
+        from pdfminer.layout import LAParams
+
+        out = io.StringIO()
+        extract_text_to_fp(io.BytesIO(pdf_bytes), out, laparams=LAParams())
+        text = out.getvalue().strip()
+        return text or None
+    except ImportError:
+        log.warning("pdfminer.six not installed — PDF text extraction unavailable; install with: pip install pdfminer.six")
+        return None
+    except Exception as exc:
+        log.warning("PDF text extraction failed: %s", exc)
+        return None
+
+
+def query_filings_by_formtype(
+    cfg: Config,
+    session: requests.Session,
+    filing_type_key: str,
+    ticker: str | None,
+    company_name: str | None,
+    announced_date: str,
+    log,
+    window_days: int = 90,
+    max_results: int = 3,
+) -> list[dict]:
+    """Query sec-api.io Filing Query API for a specific form type.
+
+    filing_type_key: one of DEFM14A | SC_TOT | S4 | 8-K
+    Returns up to max_results filing dicts sorted by date proximity to
+    announced_date, or [] on error / no results.
+    """
+    import logging as _logging
+    log = log or _logging.getLogger(__name__)
+    form_str = _FORM_TYPE_QUERY.get(filing_type_key, filing_type_key)
+
+    try:
+        anchor = datetime.strptime(announced_date, "%Y-%m-%d")
+    except ValueError:
+        anchor = datetime.now(timezone.utc)
+
+    start = (anchor - timedelta(days=window_days)).strftime("%Y-%m-%d")
+    end = (anchor + timedelta(days=window_days)).strftime("%Y-%m-%d")
+
+    parts = [f'formType:"{form_str}"']
+    if ticker:
+        parts.append(f'ticker:"{ticker}"')
+    elif company_name:
+        parts.append(f'companyName:"{company_name}"')
+    parts.append(f"filedAt:[{start} TO {end}]")
+    query_str = " AND ".join(parts)
+
+    payload = {
+        "query": {"query_string": {"query": query_str}},
+        "from": "0",
+        "size": str(max_results),
+        "sort": [{"filedAt": {"order": "desc"}}],
+    }
+    log.debug("query_filings_by_formtype payload: %s", json.dumps(payload))
+
+    time.sleep(cfg.sec_api_request_delay_seconds)
+    for attempt in range(2):
+        try:
+            resp = session.post(
+                _FILING_QUERY_URL,
+                json=payload,
+                params={"token": cfg.sec_api_key},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            if attempt == 0:
+                log.warning("Network error on %s query: %s — retry in 10s", filing_type_key, exc)
+                time.sleep(10)
+                continue
+            log.error("%s query failed after retry: %s", filing_type_key, exc)
+            return []
+
+        if resp.status_code in (401, 403):
+            raise RuntimeError(
+                f"sec-api.io auth failure ({resp.status_code}) — check SEC_API_KEY"
+            )
+        if resp.status_code == 429:
+            if attempt == 0:
+                log.warning("429 on %s query — sleeping 30s, retry once", filing_type_key)
+                time.sleep(30)
+                continue
+            log.warning("Persistent 429 on %s query — skipping", filing_type_key)
+            return []
+        if resp.status_code >= 500 and attempt == 0:
+            log.warning("5xx (%s) on %s query — retry in 10s", resp.status_code, filing_type_key)
+            time.sleep(10)
+            continue
+        if resp.status_code != 200:
+            log.error("Unexpected status %s on %s query: %s", resp.status_code, filing_type_key, resp.text[:500])
+            return []
+
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            log.error("%s query returned non-JSON: %s", filing_type_key, exc)
+            return []
+
+        filings = data.get("filings") or data.get("hits", {}).get("hits", [])
+        if not isinstance(filings, list):
+            return []
+
+        return filings
+
+    return []
+
+
+def fetch_filing_full_text(
+    cfg: Config,
+    session: requests.Session,
+    filing: dict,
+    log,
+) -> tuple[str | None, str]:
+    """Fetch the main document text for a non-8K filing (DEFM14A, S-4, SC TO-T).
+
+    Uses linkToHtmlDocument from the filing dict (SEC EDGAR HTML document).
+    Falls back to linkToFilingDetails if linkToHtmlDocument is absent.
+
+    Returns (raw_text, source_status) where source_status is:
+      "FETCHED"    — text extracted successfully
+      "UNREADABLE" — PDF; extraction attempted but unavailable
+      "SKIP"       — network/HTTP error or no usable URL
+    """
+    import logging as _logging
+    import trafilatura
+    log = log or _logging.getLogger(__name__)
+
+    html_url = (filing.get("linkToHtmlDocument") or "").strip()
+    if not html_url:
+        # Fall back to linkToFilingDetails (the filing index page, less useful but better than nothing)
+        html_url = (filing.get("linkToFilingDetails") or "").strip()
+    if not html_url:
+        log.warning("No document URL in filing %s — skipping", filing.get("accessionNo", "?"))
+        return None, "SKIP"
+
+    extra_params = {"token": cfg.sec_api_key} if _ARCHIVE_HOST in html_url else {}
+
+    time.sleep(cfg.sec_api_request_delay_seconds)
+    try:
+        resp = session.get(
+            html_url,
+            params=extra_params if extra_params else None,
+            timeout=120,
+        )
+    except requests.RequestException as exc:
+        log.warning("Network error fetching %s: %s", html_url, exc)
+        return None, "SKIP"
+
+    if resp.status_code == 404:
+        log.warning("404 for filing document %s", html_url)
+        return None, "SKIP"
+    if resp.status_code != 200:
+        log.warning("Status %s for filing document %s", resp.status_code, html_url)
+        return None, "SKIP"
+
+    content_type = resp.headers.get("Content-Type", "").lower()
+
+    if "pdf" in content_type or html_url.lower().endswith(".pdf"):
+        text = _extract_pdf_text(resp.content, log)
+        if text:
+            log.info("PDF extracted via pdfminer for %s  chars=%d", html_url, len(text))
+            return text, "FETCHED"
+        log.info("PDF filing %s — pdfminer unavailable, marking UNREADABLE", html_url)
+        return None, "UNREADABLE"
+
+    if "html" in content_type or html_url.lower().endswith((".htm", ".html")):
+        raw_html = resp.text
+        clean = trafilatura.extract(raw_html)
+        if clean:
+            return clean.strip(), "FETCHED"
+        # trafilatura gave up; try raw text as last resort
+        return resp.text.strip() or None, "FETCHED" if resp.text.strip() else "SKIP"
+
+    text = resp.text.strip()
+    return (text, "FETCHED") if text else (None, "SKIP")
+
+
 def run_per_transaction(
     conn: sqlite3.Connection,
     cfg: Config,

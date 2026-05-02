@@ -11,8 +11,9 @@ Usage:
     python run.py --mode=scrape                                 # stage 1 only
     python run.py --mode=extract                                # stages 2–7
     python run.py --mode=aggregate                              # stages 8–9
-    python run.py --mode=generate                               # stages 10–11
-    python run.py --mode=export                                 # stage 12
+    python run.py --mode=sec-documents                          # stage 10 only (expanded SEC filing fetch)
+    python run.py --mode=generate                               # stages 11–12
+    python run.py --mode=export                                 # stage 13
     python run.py --mode=rerun-prompt --prompt=<name> --version=<ver>
 
 Spec references: specs/pipeline.md §4 (run modes), §6 (error posture), §7 (configuration)
@@ -40,28 +41,30 @@ import stages.sec_enrich as _stage_6
 import stages.low_confidence_extract as _stage_7
 import stages.entity_cluster as _stage_8
 import stages.aggregate as _stage_9
-import stages.summarize as _stage_10
-import stages.rationale_tag as _stage_11
-import stages.export as _stage_12
+import stages.sec_documents as _stage_10
+import stages.summarize as _stage_11
+import stages.rationale_tag as _stage_12
+import stages.export as _stage_13
 
-# All 12 stages in pipeline order.
+# All 13 stages in pipeline order.
 _ALL_STAGES: list[types.ModuleType] = [
     _stage_1, _stage_2, _stage_3, _stage_4,
     _stage_5, _stage_6, _stage_7, _stage_8,
-    _stage_9, _stage_10, _stage_11, _stage_12,
+    _stage_9, _stage_10, _stage_11, _stage_12, _stage_13,
 ]
 
 _EXTRACTION_STAGES = _ALL_STAGES[1:7]   # stages 2–7 (indices 1–6)
 
 # Stages executed per mode, per pipeline.md §4.
 _MODE_STAGES: dict[str, list[types.ModuleType]] = {
-    "full":      _ALL_STAGES,
-    "resume":    _EXTRACTION_STAGES + [_stage_8, _stage_9, _stage_10, _stage_11, _stage_12],
-    "scrape":    [_stage_1],
-    "extract":   _EXTRACTION_STAGES,
-    "aggregate": [_stage_8, _stage_9],
-    "generate":  [_stage_10, _stage_11],
-    "export":    [_stage_12],
+    "full":          _ALL_STAGES,
+    "resume":        _EXTRACTION_STAGES + [_stage_8, _stage_9, _stage_10, _stage_11, _stage_12, _stage_13],
+    "scrape":        [_stage_1],
+    "extract":       _EXTRACTION_STAGES,
+    "aggregate":     [_stage_8, _stage_9],
+    "sec-documents": [_stage_10],
+    "generate":      [_stage_11, _stage_12],
+    "export":        [_stage_13],
 }
 
 
@@ -133,8 +136,8 @@ def _run_rerun_prompt(
 ) -> dict[str, Any]:
     """Reset is_current flags for the given prompt and re-run the relevant stage."""
     _RERUN_MAP = {
-        "deal_summary": ("summary", "is_current", _stage_10),
-        "strategic_rationale": ("rationale_tag", "is_current", _stage_11),
+        "deal_summary": ("summary", "is_current", _stage_11),
+        "strategic_rationale": ("rationale_tag", "is_current", _stage_12),
     }
     if prompt not in _RERUN_MAP:
         log.warning(

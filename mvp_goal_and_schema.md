@@ -555,8 +555,18 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 - Downstream stages (LC extraction, entity clustering, aggregation, summarize, rationale) are unchanged — they operate on `HC_EXTRACTED` rows regardless of `multi_transaction_index`.
 - Splitting criterion: only when the PR explicitly announces distinct deals (e.g. simultaneous acquisition of two separate named companies). Do NOT split for a single target described in multiple paragraphs or with multiple consideration tranches.
 
+**SEC filing expansion — transaction_document and section tagging (Drop 3.19 / schema v0.8):**
+- `transaction_document` — new table storing full-text SEC filings linked to a transaction by `transaction_id`. Filing types: `8K_ITEM_201`, `8K_EXHIBIT_21`, `DEFM14A`, `SC_TOT`, `S4`, `OTHER`. Includes `raw_text`, `sec_accession_number`, `filer_cik`, `filer_name`, `filing_date`, `raw_text_length`, `fetch_timestamp`, `is_current`. UNIQUE constraint on `(transaction_id, sec_accession_number, filing_type)`.
+- `transaction_document_section` — new table storing heuristic section excerpts from documents in `transaction_document`. `section_type` enum: `DEFINITIONS`, `RECITALS`, `CONSIDERATION`, `CAPITALIZATION`, `CONDITIONS_TO_CLOSING`, `TERMINATION_FEES`, `REPRESENTATIONS`, `BACKGROUND_OF_MERGER`, `FAIRNESS_OPINION`. Stores bounded `excerpt_text`, char offsets, and `confidence` (HIGH | MEDIUM | LOW).
+- `linked_filings_count INTEGER DEFAULT 0` — new column on `transaction_record`. Count of linked `transaction_document` rows. Set by `sec_documents` stage after processing; reset to 0 on re-aggregation, then re-set by sec_documents stage on next run.
+- New Stage 10 (`sec_documents`): runs after aggregate (Stage 9). For transactions with public-party SEC trigger signals, fetches 8-K Item 2.01, 8-K Exhibit 2.1, DEFM14A, SC TO-T, and S-4 filings. Stores full text in `transaction_document`. Runs heuristic section tagger (`lib/section_tagger.py`) and stores results in `transaction_document_section`. Updates `linked_filings_count` on `transaction_record`. Idempotent: skips `(transaction_id, filing_type)` pairs already present.
+- Existing stages 10-12 renumbered to 11-13 (summarize, rationale_tag, export). New mode: `--mode=sec-documents` runs Stage 10 only.
+- `pdfminer.six` added to requirements.txt for PDF exhibit extraction. Graceful degradation if not installed: PDFs marked UNREADABLE.
+- Section detection: pure Python regex, no LLM. Headings detected by all-caps lines, ARTICLE [Roman], Section X.Y, numbered prefixes. HIGH confidence = pattern matches heading text; MEDIUM = pattern matches first 200 chars of section body.
+
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft for review |
 | 0.6 | 2026-05-02 | Drop 3.16: has_earnout, has_cvr flags; EARNOUT/CVR guidance in LC extraction prompt v0.4. |
 | 0.7 | 2026-05-02 | Drop 3.18: multi_transaction_index/total columns in staging_extraction; HC extraction v0.9 returns transactions array. |
+| 0.8 | 2026-05-02 | Drop 3.19: transaction_document and transaction_document_section tables; linked_filings_count on transaction_record; sec_documents stage (Stage 10); pdfminer.six dependency. |
