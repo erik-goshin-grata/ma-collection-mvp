@@ -21,6 +21,38 @@ from pathlib import Path
 _SCHEMA_PATH = Path(__file__).parent / "schema" / "001_initial.sql"
 
 
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the initial CREATE TABLE statements.
+
+    Uses PRAGMA table_info to check existence before ALTER TABLE so each
+    migration is idempotent.  New columns are also added to the CREATE TABLE
+    definitions in schema/001_initial.sql so fresh databases never need these.
+    """
+    def _existing(table: str) -> set:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+    tr_cols = _existing("transaction_record")
+    for col, col_type in [
+        ("acquirer_merger_sub_name",         "TEXT"),
+        ("merger_structure",                 "TEXT"),
+        ("has_mac_clause",                   "INTEGER DEFAULT 0"),
+        ("requires_target_shareholder_vote", "INTEGER"),
+        ("target_vote_threshold",            "TEXT"),
+        ("closing_conditions_summary",       "TEXT"),
+        ("target_total_diluted_shares",      "INTEGER"),
+        ("fully_diluted_calc_quality",       "TEXT"),
+        ("agreement_extraction_status",      "TEXT"),
+    ]:
+        if col not in tr_cols:
+            conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
+
+    td_cols = _existing("transaction_document")
+    if "document_title" not in td_cols:
+        conn.execute("ALTER TABLE transaction_document ADD COLUMN document_title TEXT")
+
+    conn.commit()
+
+
 def init_db(db_path: str) -> None:
     """Create all tables and indexes defined in schema/001_initial.sql.
 
@@ -37,6 +69,7 @@ def init_db(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(ddl)
+        _apply_migrations(conn)
         conn.commit()
     finally:
         conn.close()

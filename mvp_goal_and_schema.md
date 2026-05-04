@@ -570,3 +570,26 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 | 0.6 | 2026-05-02 | Drop 3.16: has_earnout, has_cvr flags; EARNOUT/CVR guidance in LC extraction prompt v0.4. |
 | 0.7 | 2026-05-02 | Drop 3.18: multi_transaction_index/total columns in staging_extraction; HC extraction v0.9 returns transactions array. |
 | 0.8 | 2026-05-02 | Drop 3.19: transaction_document and transaction_document_section tables; linked_filings_count on transaction_record; sec_documents stage (Stage 10); pdfminer.six dependency. |
+| 0.9 | 2026-05-04 | Drop 3.20a: transaction_security table; 9 new columns on transaction_record (agreement extraction fields); document_title on transaction_document; agreement_extract stage (Stage 11); 5 agreement extraction prompts; SEC window tightened to 0 to +180 days. |
+
+**Agreement extraction fields — Drop 3.20a / schema v0.9 (transaction_record):**
+- `acquirer_merger_sub_name TEXT` — name of the Merger Sub / acquisition vehicle in 3-party structures; null for direct mergers. Set by agreement_recitals extraction.
+- `merger_structure TEXT` — DIRECT | FORWARD_TRIANGULAR | REVERSE_TRIANGULAR | TENDER_OFFER | UNKNOWN. Set by agreement_recitals extraction.
+- `has_mac_clause INTEGER DEFAULT 0` — 1 when closing conditions section contains a Material Adverse Change/Effect condition.
+- `requires_target_shareholder_vote INTEGER` — 0 | 1 | null (null until agreement_extract runs). Whether target shareholder approval is a closing condition.
+- `target_vote_threshold TEXT` — MAJORITY_OUTSTANDING | TWO_THIRDS | MAJORITY_VOTING | OTHER | null. The required shareholder approval threshold.
+- `closing_conditions_summary TEXT` — brief plain-text summary of top closing conditions. Not exported to CSV (long text); accessible via DB.
+- `target_total_diluted_shares INTEGER` — sum of all security types from transaction_security rows for this transaction. Computed by agreement_extract.
+- `fully_diluted_calc_quality TEXT` — COMPLETE (common + dilutive securities populated) | PARTIAL (common only) | NOT_AVAILABLE (no securities data).
+- `agreement_extraction_status TEXT` — NOT_TRIGGERED | EXTRACTED | NO_AGREEMENT_LINKED | EXTRACTION_FAILED. Set by agreement_extract stage.
+
+**transaction_security table — Drop 3.20a / schema v0.9:**
+One row per (transaction, security_type, security_class) per source document. Multiple rows per security type expected when multiple source documents disclose the same security (e.g., both 8K_EXHIBIT_21 and DEFM14A). All rows preserved; most-recent-source-wins logic applied at query time or by agreement_extract rollup.
+
+Key columns: `transaction_id`, `security_type` (COMMON_STOCK | PREFERRED_STOCK | OPTIONS | RSU | PSU | DSU | SAR | WARRANT | CONVERTIBLE_NOTE | OTHER), `security_type_as_reported` (verbatim from source), `security_class` (Class A / Series C / null), `shares_outstanding`, `shares_outstanding_as_of` (YYYY-MM-DD), `weighted_avg_strike_price`, `consideration_treatment` (CASH_OUT | CONVERSION | ASSUMED | CANCELLED | ROLLOVER | OTHER), `consideration_per_share`, `consideration_currency`, `extraction_source_section_id` (FK to transaction_document_section), `extraction_source_document_id` (FK to transaction_document).
+
+**document_title — Drop 3.20a / schema v0.9 (transaction_document):**
+- `document_title TEXT` — document's self-declared title extracted from first ~1500 chars by `extract_document_title()` in adapters/sec_api.py. Uses all-caps test and Title-Case + keyword test. Null when not identifiable.
+
+**SEC window tightening — Drop 3.20a:**
+- `query_filings_by_formtype()` date window changed from `announced_date ± 90 days` to `announced_date` through `announced_date + 180 days`. Pre-announcement filings are noise; 180-day post-announcement window covers DEFM14A (+30-60d), S-4 (+45-90d), and 8-K Item 2.01 at typical close timing.

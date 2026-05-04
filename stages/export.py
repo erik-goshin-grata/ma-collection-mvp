@@ -1,5 +1,5 @@
 """
-Stage 13: export
+Stage 14: export
 
 Exports all transaction_record rows where is_current = 1, joined with their
 current summary and rationale_tag rows, to a CSV file at
@@ -8,7 +8,7 @@ exports/transactions_<run_id>.csv. Rows are sorted by announced_date DESC.
 consideration_components and secondary_rationales are serialized as JSON
 strings in the CSV (not exploded). Columns follow the operator-approved order.
 
-Spec references: specs/pipeline.md §2 (Stage 13)
+Spec references: specs/pipeline.md §2 (Stage 14)
 """
 
 from __future__ import annotations
@@ -37,6 +37,10 @@ _COLUMNS = [
     "target_fee_amount", "target_fee_percentage", "acquirer_fee_amount", "acquirer_fee_percentage",
     "is_take_private", "is_add_on", "is_divestiture", "is_de_spac", "has_earnout", "has_cvr",
     "linked_filings_count",
+    "acquirer_merger_sub_name", "merger_structure",
+    "has_mac_clause", "requires_target_shareholder_vote", "target_vote_threshold",
+    "target_total_diluted_shares", "fully_diluted_calc_quality",
+    "agreement_extraction_status", "linked_securities_count",
     "summary_text", "primary_rationale", "secondary_rationales_json",
     "created_at", "updated_at",
 ]
@@ -94,6 +98,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tr.acquirer_fee_amount, tr.acquirer_fee_percentage,
             tr.is_take_private, tr.is_add_on, tr.is_divestiture, tr.is_de_spac, tr.has_earnout, tr.has_cvr,
             tr.linked_filings_count,
+            tr.acquirer_merger_sub_name, tr.merger_structure,
+            tr.has_mac_clause, tr.requires_target_shareholder_vote, tr.target_vote_threshold,
+            tr.target_total_diluted_shares, tr.fully_diluted_calc_quality,
+            tr.agreement_extraction_status,
+            (SELECT COUNT(*) FROM transaction_security ts WHERE ts.transaction_id = tr.transaction_id) AS linked_securities_count,
             s.summary_text,
             rt.primary_rationale,
             rt.secondary_rationales           AS secondary_rationales_json,
@@ -122,5 +131,5 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         for row in rows:
             writer.writerow(_format_row(dict(row)))
 
-    log.info("Stage 12 done  rows=%d  path=%s", total, csv_path)
+    log.info("Stage 14 done  rows=%d  path=%s", total, csv_path)
     return {"transactions_total": total, "rows_exported": total, "export_path": csv_path}

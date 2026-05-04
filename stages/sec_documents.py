@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 import requests
 
 import adapters.sec_api as _sec
+from adapters.sec_api import extract_document_title
 from config import Config
 from lib.section_tagger import tag_sections
 from logger import get_logger
@@ -112,13 +113,14 @@ def _insert_document(
         or filing.get("linkToFilingDetails")
         or ""
     )
+    doc_title = extract_document_title(raw_text) if raw_text else None
     cur = conn.execute(
         """
         INSERT OR IGNORE INTO transaction_document (
             transaction_id, filing_type, sec_accession_number, sec_filing_url,
-            filer_cik, filer_name, filing_date,
+            filer_cik, filer_name, filing_date, document_title,
             raw_text, raw_text_length, fetch_timestamp, is_current
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         """,
         (
             transaction_id,
@@ -128,6 +130,7 @@ def _insert_document(
             filing.get("cik"),
             filing.get("companyName"),
             (filing.get("filedAt") or "")[:10] or None,
+            doc_title,
             raw_text,
             len(raw_text) if raw_text else None,
             fetch_timestamp,

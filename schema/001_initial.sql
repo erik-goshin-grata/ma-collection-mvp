@@ -1,6 +1,6 @@
 -- =============================================================================
 -- M&A Collection MVP — Initial Schema
--- Version: 0.2 (reflects Drop 2.1 prompt revisions)
+-- Version: 0.9 (reflects Drop 3.20a — agreement extraction, transaction_security, document_title)
 -- Target: SQLite 3.x
 -- =============================================================================
 -- Design notes:
@@ -246,6 +246,17 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     has_cvr                     INTEGER DEFAULT 0,  -- 1 when consideration_components contains a CVR-form entry
     linked_filings_count        INTEGER DEFAULT 0,  -- count of transaction_document rows for this transaction; set by sec_documents stage
 
+    -- Agreement extraction fields (populated by Stage 11, agreement_extract)
+    acquirer_merger_sub_name    TEXT,              -- name of acquisition vehicle / Merger Sub in 3-party structure
+    merger_structure            TEXT,              -- DIRECT | FORWARD_TRIANGULAR | REVERSE_TRIANGULAR | TENDER_OFFER | UNKNOWN
+    has_mac_clause              INTEGER DEFAULT 0,
+    requires_target_shareholder_vote INTEGER,      -- 0 | 1 | null when not yet known
+    target_vote_threshold       TEXT,              -- MAJORITY_OUTSTANDING | TWO_THIRDS | MAJORITY_VOTING | OTHER | null
+    closing_conditions_summary  TEXT,              -- brief text of top conditions from CONDITIONS_TO_CLOSING section
+    target_total_diluted_shares INTEGER,           -- sum of all security types from transaction_security; set by agreement_extract
+    fully_diluted_calc_quality  TEXT,              -- COMPLETE | PARTIAL | NOT_AVAILABLE
+    agreement_extraction_status TEXT,              -- NOT_TRIGGERED | EXTRACTED | NO_AGREEMENT_LINKED | EXTRACTION_FAILED
+
     -- Metadata
     is_current                  INTEGER NOT NULL DEFAULT 1,  -- older versions flipped to 0 on re-aggregation
     aggregation_version         INTEGER NOT NULL DEFAULT 1,
@@ -437,6 +448,7 @@ CREATE TABLE IF NOT EXISTS transaction_document (
     filer_cik             TEXT,
     filer_name            TEXT,
     filing_date           TEXT,                           -- YYYY-MM-DD
+    document_title        TEXT,                           -- document's self-declared title extracted from first page
     raw_text              TEXT,                           -- full extracted text content
     raw_text_length       INTEGER,                        -- char count
     fetch_timestamp       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -467,6 +479,37 @@ CREATE TABLE IF NOT EXISTS transaction_document_section (
 
 CREATE INDEX IF NOT EXISTS idx_section_document ON transaction_document_section(document_id);
 CREATE INDEX IF NOT EXISTS idx_section_type     ON transaction_document_section(section_type);
+
+
+-- -----------------------------------------------------------------------------
+-- 15. transaction_security — per-class outstanding securities from deal documents
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS transaction_security (
+    security_id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id                TEXT NOT NULL,
+    security_type                 TEXT NOT NULL,
+                                  -- COMMON_STOCK | PREFERRED_STOCK | OPTIONS | RSU | PSU
+                                  -- | DSU | SAR | WARRANT | CONVERTIBLE_NOTE | OTHER
+    security_type_as_reported     TEXT,              -- verbatim from source
+    security_class                TEXT,              -- "Class A", "Series C", null for single-class
+    shares_outstanding            INTEGER,
+    shares_outstanding_as_of      TEXT,              -- YYYY-MM-DD
+    weighted_avg_strike_price     REAL,              -- for options/SARs/warrants
+    consideration_treatment       TEXT,              -- CASH_OUT | CONVERSION | ASSUMED | CANCELLED | ROLLOVER | OTHER
+    consideration_per_share       REAL,
+    consideration_currency        TEXT,
+    notes                         TEXT,
+    is_current                    INTEGER DEFAULT 1,
+    extraction_source_section_id  INTEGER,           -- FK to transaction_document_section
+    extraction_source_document_id INTEGER,           -- FK to transaction_document (denormalized)
+    extracted_at                  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (transaction_id) REFERENCES transaction_record(transaction_id),
+    FOREIGN KEY (extraction_source_section_id) REFERENCES transaction_document_section(section_id),
+    FOREIGN KEY (extraction_source_document_id) REFERENCES transaction_document(document_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_transaction ON transaction_security(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_security_type        ON transaction_security(security_type);
 
 
 -- =============================================================================

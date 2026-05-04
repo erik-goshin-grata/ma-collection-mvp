@@ -12,8 +12,9 @@ Usage:
     python run.py --mode=extract                                # stages 2–7
     python run.py --mode=aggregate                              # stages 8–9
     python run.py --mode=sec-documents                          # stage 10 only (expanded SEC filing fetch)
-    python run.py --mode=generate                               # stages 11–12
-    python run.py --mode=export                                 # stage 13
+    python run.py --mode=agreement-extract                      # stage 11 only (agreement extraction)
+    python run.py --mode=generate                               # stages 12–13
+    python run.py --mode=export                                 # stage 14
     python run.py --mode=rerun-prompt --prompt=<name> --version=<ver>
 
 Spec references: specs/pipeline.md §4 (run modes), §6 (error posture), §7 (configuration)
@@ -42,29 +43,31 @@ import stages.low_confidence_extract as _stage_7
 import stages.entity_cluster as _stage_8
 import stages.aggregate as _stage_9
 import stages.sec_documents as _stage_10
-import stages.summarize as _stage_11
-import stages.rationale_tag as _stage_12
-import stages.export as _stage_13
+import stages.agreement_extract as _stage_11
+import stages.summarize as _stage_12
+import stages.rationale_tag as _stage_13
+import stages.export as _stage_14
 
-# All 13 stages in pipeline order.
+# All 14 stages in pipeline order.
 _ALL_STAGES: list[types.ModuleType] = [
     _stage_1, _stage_2, _stage_3, _stage_4,
     _stage_5, _stage_6, _stage_7, _stage_8,
-    _stage_9, _stage_10, _stage_11, _stage_12, _stage_13,
+    _stage_9, _stage_10, _stage_11, _stage_12, _stage_13, _stage_14,
 ]
 
 _EXTRACTION_STAGES = _ALL_STAGES[1:7]   # stages 2–7 (indices 1–6)
 
 # Stages executed per mode, per pipeline.md §4.
 _MODE_STAGES: dict[str, list[types.ModuleType]] = {
-    "full":          _ALL_STAGES,
-    "resume":        _EXTRACTION_STAGES + [_stage_8, _stage_9, _stage_10, _stage_11, _stage_12, _stage_13],
-    "scrape":        [_stage_1],
-    "extract":       _EXTRACTION_STAGES,
-    "aggregate":     [_stage_8, _stage_9],
-    "sec-documents": [_stage_10],
-    "generate":      [_stage_11, _stage_12],
-    "export":        [_stage_13],
+    "full":               _ALL_STAGES,
+    "resume":             _EXTRACTION_STAGES + [_stage_8, _stage_9, _stage_10, _stage_11, _stage_12, _stage_13, _stage_14],
+    "scrape":             [_stage_1],
+    "extract":            _EXTRACTION_STAGES,
+    "aggregate":          [_stage_8, _stage_9],
+    "sec-documents":      [_stage_10],
+    "agreement-extract":  [_stage_11],
+    "generate":           [_stage_12, _stage_13],
+    "export":             [_stage_14],
 }
 
 
@@ -136,8 +139,8 @@ def _run_rerun_prompt(
 ) -> dict[str, Any]:
     """Reset is_current flags for the given prompt and re-run the relevant stage."""
     _RERUN_MAP = {
-        "deal_summary": ("summary", "is_current", _stage_11),
-        "strategic_rationale": ("rationale_tag", "is_current", _stage_12),
+        "deal_summary": ("summary", "is_current", _stage_12),
+        "strategic_rationale": ("rationale_tag", "is_current", _stage_13),
     }
     if prompt not in _RERUN_MAP:
         log.warning(
@@ -188,7 +191,7 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         default="resume",
-        choices=list(_MODE_STAGES.keys()) + ["rerun-prompt"],
+        choices=sorted(_MODE_STAGES.keys()) + ["rerun-prompt"],
         help="Pipeline run mode. Default: resume.",
     )
     parser.add_argument(

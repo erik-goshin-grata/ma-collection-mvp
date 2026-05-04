@@ -29,7 +29,7 @@ A single-operator, laptop-scale M&A data collection pipeline. Intent: demonstrat
 - **Models:** Claude Haiku 4.5 (relevancy filter only); Claude Opus 4.7 (all other LLM stages)
 - **Error posture:** never halt on single-row failures; halt only on infrastructure (auth, DB, persistent rate limits)
 
-### 2.2 Pipeline (12 Stages)
+### 2.2 Pipeline (14 Stages)
 
 | # | Stage | Input state | Output state | Engine |
 | :--- | :--- | :--- | :--- | :--- |
@@ -42,11 +42,13 @@ A single-operator, laptop-scale M&A data collection pipeline. Intent: demonstrat
 | 7 | `low_confidence_extract` | `HC_EXTRACTED` / `SEC_ENRICHED` / `SEC_NOT_TRIGGERED` | `LC_EXTRACTED` | Opus |
 | 8 | `entity_cluster` | `LC_EXTRACTED` | `CLUSTERED` | Python fuzzy match + union-find |
 | 9 | `aggregate` | `CLUSTERED` | `AGGREGATED` | Tier rules + Opus on conflicts |
-| 10 | `summarize` | `AGGREGATED` | new `summary` row | Opus |
-| 11 | `rationale_tag` | `AGGREGATED` | new `rationale_tag` row | Opus |
-| 12 | `export` | `is_current = true` | CSV | — |
+| 10 | `sec_documents` | `AGGREGATED` + SEC trigger | `transaction_document` rows | sec-api.io + heuristic tagger |
+| 11 | `agreement_extract` | `transaction_document_section` rows | `transaction_security` rows + `transaction_record` fields | Opus (5 section prompts) |
+| 12 | `summarize` | `AGGREGATED` | new `summary` row | Opus |
+| 13 | `rationale_tag` | `AGGREGATED` | new `rationale_tag` row | Opus |
+| 14 | `export` | `is_current = true` | CSV | — |
 
-### 2.3 Schema (v0.2)
+### 2.3 Schema (v0.9)
 
 Twelve tables. Key decisions:
 
@@ -245,26 +247,25 @@ Rationale: this is the difference between event-capture quality and platform-qua
 - SC TO-T (tender offer documents)
 - S-4 (stock-for-stock registration statements)
 
-Documents are stored full-text in `transaction_document`, linked to `transaction_record.transaction_id`. Heuristic section tagger (`lib/section_tagger.py`, pure Python regex) identifies standard merger-agreement and proxy sections (CONSIDERATION, CAPITALIZATION, TERMINATION_FEES, CONDITIONS_TO_CLOSING, REPRESENTATIONS, BACKGROUND_OF_MERGER, FAIRNESS_OPINION, DEFINITIONS, RECITALS) and stores bounded excerpts in `transaction_document_section`.
+Documents stored full-text in `transaction_document`. Heuristic section tagger (`lib/section_tagger.py`) produces bounded excerpts in `transaction_document_section`.
 
-**NOT shipped (Drop 3.20+):**
-- LLM extraction from agreement text
-- Merger Sub / acquisition vehicle identification
-- Per-class share counts and exchange ratios from Capitalization sections
-- Termination fee structures from Termination Fees sections
-- Structured party list from Recitals/preamble
+**Drop 3.20a ships agreement extraction from those sections:**
+- `agreement_recitals` prompt: party identification, Merger Sub demotion, merger structure classification
+- `agreement_consideration` prompt: cash per share, exchange ratio, CVR/earnout components
+- `agreement_capitalization` prompt: per-security-class share counts → `transaction_security` table
+- `agreement_termination` prompt: termination fees, go-shop provisions
+- `agreement_conditions` prompt: MAC clause, shareholder vote threshold, conditions summary
+- Stage 11 (`agreement_extract`): runs all 5 prompts against HIGH/MEDIUM-confidence deal-document sections
+- `transaction_security` table: per-(transaction, security_type, security_class) rows with source attribution
+- 9 new columns on `transaction_record`: acquirer_merger_sub_name, merger_structure, has_mac_clause, requires_target_shareholder_vote, target_vote_threshold, closing_conditions_summary, target_total_diluted_shares, fully_diluted_calc_quality, agreement_extraction_status
+- `document_title` column on `transaction_document`: heuristic title extraction
+- SEC window tightened: 0 to +180 days post-announcement (no pre-announcement noise)
 
-Drop 3.20 will design extraction prompts for bounded section text. The Drop 3.19 section tagger creates the bounded inputs for that work.
-
-**5.X — Drop 3.20: Agreement extraction.** With Drop 3.19's section tagger producing bounded text inputs, the next workstream is structured extraction from those sections. Specifically:
-
-- Recitals / preamble: identify all named parties; distinguish ultimate Parent acquirer from Merger Sub / acquisition vehicle. Add `acquirer_merger_sub_name` and `merger_structure` fields when populated.
-- Consideration / Per Share Merger Consideration: extract cash per share, exchange ratio, election mechanics, CVR / earnout components with greater precision than PR-only extraction.
-- Capitalization: per-security-type share counts (common, preferred, RSU, options, warrants), each with treatment (cash-out, conversion, assumed).
-- Termination Fees: company termination fee, parent termination fee, percentages, triggers.
-- Conditions to Closing: regulatory approvals required, shareholder vote thresholds, MAC clause presence.
-
-Effort: ~2-3 days for prompt design, validation, schema additions.
+**NOT shipped (Drop 3.20b+):**
+- Explicit observation tracking / diff surfacing when multiple sources disagree on the same field
+- Agreement-vs-PR conflict report surfacing to operator review queue
+- Per-form-type SEC window sub-ranges (8-K Exhibit 2.1 signing-day vs 8-K Item 2.01 close-day)
+- Long-tail deal sec-retry mode for deals with regulatory review > 180 days
 
 ---
 
@@ -465,5 +466,7 @@ Recommended first message to a fresh session:
 
 | Version | Date | Change |
 | :--- | :--- | :--- |
+| 0.4 | 2026-05-04 | Drop 3.20a: pipeline expanded to 14 stages; agreement_extract stage added; transaction_security and schema v0.9 fields documented; §5.2 updated with what shipped in 3.20a vs 3.20b. |
+| 0.3 | 2026-05-02 | Drop 3.19: sec_documents stage (Stage 10), pipeline expanded to 13 stages, schema v0.8 documented. |
 | 0.2 | 2026-04-23 | Updated post-Stage 8 patch: resolved null-date hash collision, 78/76 cluster gap closed. Added Layer 5 (eval/score.py) and Stage 8 fix to commit log. Updated §3.2 cluster count, §3.3 dedup status, §4.1 immediate items. |
 | 0.1 | 2026-04-23 | Initial handoff document. Snapshot after 100-PR production run. |

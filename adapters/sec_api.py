@@ -571,8 +571,10 @@ def query_filings_by_formtype(
     except ValueError:
         anchor = datetime.now(timezone.utc)
 
-    start = (anchor - timedelta(days=window_days)).strftime("%Y-%m-%d")
-    end = (anchor + timedelta(days=window_days)).strftime("%Y-%m-%d")
+    # Drop 3.20a: window is announcement-date to +180 days only (no pre-announcement noise).
+    # window_days param is retained for call-site compatibility but no longer controls the start.
+    start = anchor.strftime("%Y-%m-%d")
+    end = (anchor + timedelta(days=180)).strftime("%Y-%m-%d")
 
     parts = [f'formType:"{form_str}"']
     if ticker:
@@ -709,6 +711,54 @@ def fetch_filing_full_text(
 
     text = resp.text.strip()
     return (text, "FETCHED") if text else (None, "SKIP")
+
+
+_TITLE_BOILERPLATE = re.compile(
+    r"UNITED STATES SECURITIES AND EXCHANGE COMMISSION"
+    r"|WASHINGTON,?\s*D\.?C\.?"
+    r"|FORM\s+\d+-?[A-Z]?"
+    r"|CURRENT REPORT"
+    r"|AMENDMENT NO"
+    r"|PROSPECTUS"
+    r"|PURSUANT TO"
+    r"|SECTION\s+\d+",
+    re.IGNORECASE,
+)
+
+_TITLE_KEYWORDS = frozenset([
+    "Agreement", "Plan", "Merger", "Purchase", "Tender", "Offer",
+    "Proxy", "Registration", "Statement",
+])
+
+
+def extract_document_title(raw_text: str) -> str | None:
+    """Extract the document's self-declared title from the first ~1500 chars.
+
+    Looks for the first all-caps line (>85% uppercase alpha chars) or a
+    Title-Case heading containing a known deal-document keyword.  Skips SEC
+    filing cover-page boilerplate.  Returns None when no title can be found.
+    """
+    if not raw_text:
+        return None
+    for line in raw_text[:1500].split("\n"):
+        line = line.strip()
+        if not line or len(line) < 10 or len(line) > 150:
+            continue
+        if _TITLE_BOILERPLATE.search(line):
+            continue
+        alpha = [c for c in line if c.isalpha()]
+        if not alpha:
+            continue
+        # All-caps test
+        if sum(1 for c in alpha if c.isupper()) / len(alpha) > 0.85:
+            return line
+        # Title-case + keyword test
+        words = line.split()
+        if len(words) >= 3:
+            cap_ratio = sum(1 for w in words if w and w[0].isupper()) / len(words)
+            if cap_ratio > 0.85 and any(kw in line for kw in _TITLE_KEYWORDS):
+                return line
+    return None
 
 
 def run_per_transaction(
