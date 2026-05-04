@@ -50,6 +50,46 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "document_title" not in td_cols:
         conn.execute("ALTER TABLE transaction_document ADD COLUMN document_title TEXT")
 
+    # Drop 3.20b: observation diff columns on transaction_record
+    for col, col_type in [
+        ("has_observation_changes",          "INTEGER DEFAULT 0"),
+        ("observation_changes_field_count",  "INTEGER DEFAULT 0"),
+        ("observation_changes_summary",      "TEXT"),
+    ]:
+        if col not in tr_cols:
+            conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
+
+    # Drop 3.20b: create transaction_field_observation table if not present
+    existing_tables = {
+        row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "transaction_field_observation" not in existing_tables:
+        conn.executescript("""
+            CREATE TABLE transaction_field_observation (
+                observation_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id              TEXT NOT NULL,
+                field_name                  TEXT NOT NULL,
+                field_value                 TEXT,
+                field_value_numeric         REAL,
+                source_document_id          INTEGER NOT NULL,
+                source_section_id           INTEGER,
+                observed_as_of_date         TEXT,
+                filing_date                 TEXT,
+                extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                extraction_prompt_version   TEXT,
+                is_current                  INTEGER DEFAULT 1,
+                FOREIGN KEY (transaction_id) REFERENCES transaction_record(transaction_id),
+                FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
+                FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_observation_txn_field
+                ON transaction_field_observation(transaction_id, field_name);
+            CREATE INDEX IF NOT EXISTS idx_observation_filing_date
+                ON transaction_field_observation(filing_date);
+        """)
+
     conn.commit()
 
 

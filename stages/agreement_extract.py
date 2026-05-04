@@ -6,15 +6,20 @@ transaction_document_section (populated by Stage 10, sec_documents).
 
 For each transaction with linked deal-document sections, runs 5 section-
 specific prompts against HIGH/MEDIUM-confidence sections from deal documents
-(8K_EXHIBIT_21, DEFM14A, S4, SC_TOT, DEFA14A).  Results are written to
-transaction_security (per-security-class rows) and transaction_record (scalar
-fields).  All extractions are attributed to their source section and document.
+(8K_EXHIBIT_21, DEFM14A, S4, SC_TOT, DEFA14A).  Results are written to:
+  - transaction_security (per-security-class rows)
+  - transaction_record (scalar fields, via priority rules — Drop 3.20b)
+  - transaction_field_observation (every extracted value with source attribution — Drop 3.20b)
 
-Multi-source: when multiple source documents contain the same section type
-(e.g., both 8K_EXHIBIT_21 and DEFM14A have a CAPITALIZATION section),
-all are extracted.  For transaction_security, all rows are kept with source
-attribution.  For scalar fields on transaction_record, most-recent-source-wins
-(by filing_date); conflicts are logged to aggregation_conflict_log.
+Multi-source: when multiple source documents contain the same section type,
+all are extracted.  For transaction_security, all rows are kept.  For scalar
+fields on transaction_record, FIELD_PRIORITY_RULES determine which source type
+populates each canonical column; fields without explicit rules use most-recent-
+filing-date wins.  Conflicts are logged to aggregation_conflict_log.
+
+Diff surfacing (Drop 3.20b): after all sections are processed for a transaction,
+observation_changes_summary on transaction_record is populated with a structured
+description of any field that has multiple distinct values across sources.
 
 Stage placement: after Stage 10 (sec_documents), before Stage 12 (summarize)
 """
@@ -58,6 +63,34 @@ _VERSIONS = {
 
 _SLEEP = 1.0  # between LLM calls
 
+# Per-field source-type priority rules.  First entry in each list is the most
+# preferred source type.  Fields not listed here default to most-recent-filing-
+# date wins (controlled by section query ORDER BY filing_date ASC, so last write
+# = most recent = winner).
+_FIELD_PRIORITY_RULES: dict[str, list[str]] = {
+    # Termination / go-shop: legal source-of-truth is original agreement
+    "target_fee_amount":                ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
+    "target_fee_percentage":            ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
+    "acquirer_fee_amount":              ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
+    "acquirer_fee_percentage":          ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
+    "has_go_shop":                      ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A"],
+    "go_shop_period_days":              ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A"],
+    # Closing conditions: agreement is legal source
+    "has_mac_clause":                   ["8K_EXHIBIT_21", "DEFM14A", "S4"],
+    "requires_target_shareholder_vote": ["8K_EXHIBIT_21", "DEFM14A"],
+    "target_vote_threshold":            ["8K_EXHIBIT_21", "DEFM14A"],
+    # Merger structure: agreement establishes
+    "merger_structure":                 ["8K_EXHIBIT_21", "DEFM14A", "S4"],
+    # per_share_price / consideration_components: most-recent wins (DEFA14A captures bumps)
+    # no explicit rule = default behaviour
+}
+
+# Fields in extraction results that are not written as observations
+_OBSERVATION_SKIP = frozenset({
+    "model_confidence", "notes", "prompt_version",
+    "consideration_components", "securities",
+})
+
 
 # ---------------------------------------------------------------------------
 # Diluted shares computation
@@ -85,7 +118,7 @@ def _compute_diluted_shares(securities: list[dict]) -> tuple[int | None, str]:
                 by_key[key] = s
 
     total = 0
-    has_common = has_options = has_preferred = False
+    has_common = has_options = False
     for s in by_key.values():
         shares = s.get("shares_outstanding") or 0
         stype = s.get("security_type", "")
@@ -94,7 +127,6 @@ def _compute_diluted_shares(securities: list[dict]) -> tuple[int | None, str]:
             has_common = True
         elif stype == "PREFERRED_STOCK":
             total += shares
-            has_preferred = True
         elif stype in ("OPTIONS", "RSU", "PSU", "DSU", "SAR", "WARRANT"):
             total += shares
             has_options = True
@@ -107,6 +139,176 @@ def _compute_diluted_shares(securities: list[dict]) -> tuple[int | None, str]:
         quality = "NOT_AVAILABLE"
 
     return total if total > 0 else None, quality
+
+
+# ---------------------------------------------------------------------------
+# Observation writing (Drop 3.20b)
+# ---------------------------------------------------------------------------
+
+def _write_observations(
+    conn: sqlite3.Connection,
+    transaction_id: str,
+    extraction_results: dict,
+    source_document_id: int,
+    source_section_id: int | None,
+    filing_date: str | None,
+    extraction_prompt_version: str,
+) -> None:
+    """Write transaction_field_observation rows for all scalar fields in extraction_results.
+
+    Skips metadata fields and array fields (securities, consideration_components).
+    Array fields are written as compound field names instead.
+    Null values are skipped (we don't observe absence).
+    """
+    for field_name, field_value in extraction_results.items():
+        if field_name in _OBSERVATION_SKIP:
+            continue
+        if field_value is None:
+            continue
+
+        numeric_value: float | None = None
+        if isinstance(field_value, bool):
+            numeric_value = 1.0 if field_value else 0.0
+        elif isinstance(field_value, (int, float)):
+            numeric_value = float(field_value)
+
+        conn.execute(
+            """
+            INSERT INTO transaction_field_observation (
+                transaction_id, field_name, field_value, field_value_numeric,
+                source_document_id, source_section_id, observed_as_of_date,
+                filing_date, extraction_prompt_version
+            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+            """,
+            (
+                transaction_id, field_name, str(field_value), numeric_value,
+                source_document_id, source_section_id,
+                filing_date, extraction_prompt_version,
+            ),
+        )
+
+    # Compound: securities → shares_outstanding.{type}[.{class}]
+    for sec in extraction_results.get("securities") or []:
+        stype = sec.get("security_type", "UNKNOWN")
+        sclass = sec.get("security_class")
+        shares = sec.get("shares_outstanding")
+        if shares is None:
+            continue
+        fname = f"shares_outstanding.{stype}" + (f".{sclass}" if sclass else "")
+        conn.execute(
+            """
+            INSERT INTO transaction_field_observation (
+                transaction_id, field_name, field_value, field_value_numeric,
+                source_document_id, source_section_id, observed_as_of_date,
+                filing_date, extraction_prompt_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                transaction_id, fname, str(shares), float(shares),
+                source_document_id, source_section_id,
+                sec.get("shares_outstanding_as_of"),
+                filing_date, extraction_prompt_version,
+            ),
+        )
+
+    # Compound: consideration_components → consideration.{form}.{attr}
+    for comp in extraction_results.get("consideration_components") or []:
+        form = comp.get("form", "UNKNOWN")
+        for attr in ("per_share_amount", "amount", "exchange_ratio"):
+            val = comp.get(attr)
+            if val is None:
+                continue
+            fname = f"consideration.{form}.{attr}"
+            numeric = float(val) if isinstance(val, (int, float)) else None
+            conn.execute(
+                """
+                INSERT INTO transaction_field_observation (
+                    transaction_id, field_name, field_value, field_value_numeric,
+                    source_document_id, source_section_id, observed_as_of_date,
+                    filing_date, extraction_prompt_version
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (
+                    transaction_id, fname, str(val), numeric,
+                    source_document_id, source_section_id,
+                    filing_date, extraction_prompt_version,
+                ),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Observation diff computation (Drop 3.20b)
+# ---------------------------------------------------------------------------
+
+def _compute_observation_changes(
+    conn: sqlite3.Connection,
+    transaction_id: str,
+) -> tuple[int, int, str | None]:
+    """Compute has_observation_changes, field_count, and summary JSON for a transaction.
+
+    Returns (has_changes_flag, field_count, summary_json or None).
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            tfo.field_name, tfo.field_value, tfo.field_value_numeric, tfo.filing_date,
+            td.filing_type, td.document_title
+        FROM transaction_field_observation tfo
+        LEFT JOIN transaction_document td ON td.document_id = tfo.source_document_id
+        WHERE tfo.transaction_id = ? AND tfo.is_current = 1
+        ORDER BY tfo.field_name, tfo.filing_date
+        """,
+        (transaction_id,),
+    ).fetchall()
+
+    by_field: dict[str, list] = {}
+    for r in rows:
+        by_field.setdefault(r["field_name"], []).append(r)
+
+    fields_with_changes: list[dict] = []
+    for field_name, observations in by_field.items():
+        distinct_values = {o["field_value"] for o in observations}
+        if len(distinct_values) <= 1:
+            continue
+
+        ordered = sorted(observations, key=lambda o: o["filing_date"] or "")
+        earliest = ordered[0]
+        latest = ordered[-1]
+
+        change: dict[str, Any] = {
+            "field": field_name,
+            "values": [
+                {
+                    "value": o["field_value"],
+                    "filing_date": o["filing_date"],
+                    "filing_type": o["filing_type"],
+                    "document_title": o["document_title"],
+                }
+                for o in ordered
+            ],
+        }
+
+        e_num = earliest["field_value_numeric"]
+        l_num = latest["field_value_numeric"]
+        if e_num is not None and l_num is not None:
+            delta = l_num - e_num
+            change["delta"] = delta
+            change["delta_pct"] = round((delta / e_num) * 100, 2) if e_num != 0 else None
+            if delta > 0:
+                change["change_type"] = "INCREASE"
+            elif delta < 0:
+                change["change_type"] = "DECREASE"
+            else:
+                change["change_type"] = "IDENTICAL"
+        else:
+            change["change_type"] = "DIFFERENT"
+
+        fields_with_changes.append(change)
+
+    if not fields_with_changes:
+        return 0, 0, None
+
+    return 1, len(fields_with_changes), json.dumps(fields_with_changes)
 
 
 # ---------------------------------------------------------------------------
@@ -167,9 +369,10 @@ def _apply_recitals(
     txn_id: str,
     result: dict,
     now: str,
+    filing_type: str | None,
+    field_priority_state: dict,
     log: Any,
 ) -> None:
-    """Update transaction_record with recitals extraction results."""
     updates: dict[str, Any] = {}
     if result.get("parent_acquirer_name"):
         updates["acquirer_merger_sub_name"] = result.get("merger_sub_name")
@@ -177,7 +380,9 @@ def _apply_recitals(
         updates["merger_structure"] = result["merger_structure"]
     if not updates:
         return
-    _update_transaction_record(conn, txn_id, updates, now, "RECITALS", result, log)
+    _update_transaction_record(
+        conn, txn_id, updates, now, "RECITALS", result, log, filing_type, field_priority_state
+    )
 
 
 def _apply_consideration(
@@ -260,9 +465,10 @@ def _apply_termination(
     txn_id: str,
     result: dict,
     now: str,
+    filing_type: str | None,
+    field_priority_state: dict,
     log: Any,
 ) -> None:
-    """Update transaction_record termination fee fields."""
     updates: dict[str, Any] = {}
     if result.get("target_termination_fee") is not None:
         updates["target_fee_amount"] = result["target_termination_fee"]
@@ -278,7 +484,9 @@ def _apply_termination(
         updates["go_shop_period_days"] = result["go_shop_period_days"]
     if not updates:
         return
-    _update_transaction_record(conn, txn_id, updates, now, "TERMINATION_FEES", result, log)
+    _update_transaction_record(
+        conn, txn_id, updates, now, "TERMINATION_FEES", result, log, filing_type, field_priority_state
+    )
 
 
 def _apply_conditions(
@@ -286,9 +494,10 @@ def _apply_conditions(
     txn_id: str,
     result: dict,
     now: str,
+    filing_type: str | None,
+    field_priority_state: dict,
     log: Any,
 ) -> None:
-    """Update transaction_record closing conditions fields."""
     updates: dict[str, Any] = {}
     if result.get("has_mac_clause") is not None:
         updates["has_mac_clause"] = 1 if result["has_mac_clause"] else 0
@@ -302,7 +511,9 @@ def _apply_conditions(
         updates["closing_conditions_summary"] = result["closing_conditions_summary"][:2000]
     if not updates:
         return
-    _update_transaction_record(conn, txn_id, updates, now, "CONDITIONS_TO_CLOSING", result, log)
+    _update_transaction_record(
+        conn, txn_id, updates, now, "CONDITIONS_TO_CLOSING", result, log, filing_type, field_priority_state
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -317,23 +528,48 @@ def _update_transaction_record(
     section_type: str,
     result: dict,
     log: Any,
+    filing_type: str | None = None,
+    field_priority_state: dict | None = None,
 ) -> None:
+    """Apply updates to transaction_record, respecting FIELD_PRIORITY_RULES.
+
+    For fields listed in _FIELD_PRIORITY_RULES, only applies the update if the
+    current source's filing_type has equal or better priority than any previously
+    applied source for that field.  Fields not in the rules dict always apply
+    (last-write wins; caller controls ordering via ASC date query).
+    """
     if not updates:
         return
+
+    # Filter updates by priority rules
+    allowed: dict[str, Any] = {}
+    for col, new_val in updates.items():
+        if filing_type and field_priority_state is not None and col in _FIELD_PRIORITY_RULES:
+            rule = _FIELD_PRIORITY_RULES[col]
+            new_pri = rule.index(filing_type) if filing_type in rule else len(rule)
+            current_pri, _ = field_priority_state.get(col, (float("inf"), None))
+            if new_pri > current_pri:
+                continue  # current source has lower priority — skip
+            field_priority_state[col] = (new_pri, filing_type)
+        allowed[col] = new_val
+
+    if not allowed:
+        return
+
     existing = conn.execute(
-        f"SELECT {', '.join(updates.keys())} FROM transaction_record WHERE transaction_id=?",
+        f"SELECT {', '.join(allowed.keys())} FROM transaction_record WHERE transaction_id=?",
         (txn_id,),
     ).fetchone()
 
-    set_parts = ", ".join(f"{k}=?" for k in updates)
-    values = list(updates.values()) + [now, txn_id]
+    set_parts = ", ".join(f"{k}=?" for k in allowed)
+    values = list(allowed.values()) + [now, txn_id]
     conn.execute(
         f"UPDATE transaction_record SET {set_parts}, updated_at=? WHERE transaction_id=?",
         values,
     )
 
     if existing:
-        for col, new_val in updates.items():
+        for col, new_val in allowed.items():
             old_val = existing[col] if col in existing.keys() else None
             if old_val is not None and str(old_val) != str(new_val):
                 _log_conflict(conn, txn_id, col, str(old_val), str(new_val), log)
@@ -347,7 +583,6 @@ def _log_conflict(
     new_val: str,
     log: Any,
 ) -> None:
-    """Log a field value change from agreement extraction to aggregation_conflict_log."""
     try:
         obs = [
             {"source": "PR_extraction", "value": old_val},
@@ -377,11 +612,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     -------
     dict
         Keys: transactions_total, transactions_processed, sections_extracted,
-              securities_inserted, no_agreement_linked, agreement_errors
+              securities_inserted, no_agreement_linked, agreement_errors,
+              observations_written
     """
     log = get_logger("agreement_extract", run_id, level=cfg.log_level)
 
-    # Register all prompt versions
     for pname, ver in _VERSIONS.items():
         try:
             p = load_prompt_file(pname)
@@ -402,6 +637,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     log.info("Stage 11: %d transactions to process for agreement extraction", total)
 
     processed = sections_extracted = securities_inserted = no_agreement = error_count = 0
+    observations_written = 0
     now = datetime.now(timezone.utc).isoformat()
 
     for row in rows:
@@ -411,17 +647,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             log.debug("transaction_id=%s already EXTRACTED — skipping", txn_id)
             continue
 
-        # Gather deal-document sections for this transaction
+        # Gather deal-document sections ordered ASC so most-recent is applied last
+        # (last-write wins for non-priority fields)
         section_rows = conn.execute(
             """
             SELECT tds.section_id, tds.section_type, tds.excerpt_text, tds.confidence,
-                   td.document_id, td.filing_type, td.filing_date
+                   td.document_id, td.filing_type, td.filing_date, td.document_title
             FROM transaction_document_section tds
             JOIN transaction_document td ON td.document_id = tds.document_id
             WHERE td.transaction_id = ?
               AND td.filing_type IN ('8K_EXHIBIT_21','DEFM14A','S4','SC_TOT','DEFA14A')
               AND tds.confidence IN ('HIGH','MEDIUM')
-            ORDER BY td.filing_date DESC NULLS LAST, tds.section_id
+            ORDER BY td.filing_date ASC NULLS FIRST, tds.section_id
             """,
             (txn_id,),
         ).fetchall()
@@ -436,14 +673,15 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             log.debug("transaction_id=%s no deal-doc sections — NO_AGREEMENT_LINKED", txn_id)
             continue
 
-        # Group by section_type
         by_type: dict[str, list] = {}
         for sr in section_rows:
             by_type.setdefault(sr["section_type"], []).append(sr)
 
         txn_sections = 0
         txn_securities = 0
+        txn_observations = 0
         all_securities: list[dict] = []
+        field_priority_state: dict[str, tuple[float, str | None]] = {}
 
         for section_type, prompt_name in _SECTION_PROMPT_MAP.items():
             sections = by_type.get(section_type, [])
@@ -470,10 +708,37 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     continue
 
                 txn_sections += 1
+                prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
 
                 try:
+                    # Write observations before applying to transaction_record
+                    obs_before = conn.execute(
+                        "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=?",
+                        (txn_id,),
+                    ).fetchone()[0]
+
+                    _write_observations(
+                        conn,
+                        transaction_id=txn_id,
+                        extraction_results=result,
+                        source_document_id=sec_row["document_id"],
+                        source_section_id=sec_row["section_id"],
+                        filing_date=sec_row["filing_date"],
+                        extraction_prompt_version=prompt_version,
+                    )
+
+                    obs_after = conn.execute(
+                        "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=?",
+                        (txn_id,),
+                    ).fetchone()[0]
+                    txn_observations += obs_after - obs_before
+
+                    # Apply to transaction_record with priority rules
                     if section_type == "RECITALS":
-                        _apply_recitals(conn, txn_id, result, now, log)
+                        _apply_recitals(
+                            conn, txn_id, result, now,
+                            sec_row["filing_type"], field_priority_state, log,
+                        )
                     elif section_type == "CONSIDERATION":
                         _apply_consideration(conn, txn_id, result, now, log)
                     elif section_type == "CAPITALIZATION":
@@ -483,13 +748,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                             now, log,
                         )
                         txn_securities += n
-                        # Accumulate for diluted share rollup
                         if isinstance(result.get("securities"), list):
                             all_securities.extend(result["securities"])
                     elif section_type == "TERMINATION_FEES":
-                        _apply_termination(conn, txn_id, result, now, log)
+                        _apply_termination(
+                            conn, txn_id, result, now,
+                            sec_row["filing_type"], field_priority_state, log,
+                        )
                     elif section_type == "CONDITIONS_TO_CLOSING":
-                        _apply_conditions(conn, txn_id, result, now, log)
+                        _apply_conditions(
+                            conn, txn_id, result, now,
+                            sec_row["filing_type"], field_priority_state, log,
+                        )
                     conn.commit()
                 except Exception as exc:
                     log.warning(
@@ -502,7 +772,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     except Exception:
                         pass
 
-        # Compute diluted shares from all capitalization observations
+        # Diluted shares rollup from capitalization observations
         if all_securities:
             diluted, quality = _compute_diluted_shares(all_securities)
             conn.execute(
@@ -510,7 +780,22 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 (diluted, quality, now, txn_id),
             )
 
-        # Set final status
+        # Observation diff computation (Drop 3.20b)
+        try:
+            has_changes, field_count, summary_json = _compute_observation_changes(conn, txn_id)
+            conn.execute(
+                """
+                UPDATE transaction_record
+                SET has_observation_changes=?, observation_changes_field_count=?,
+                    observation_changes_summary=?, updated_at=?
+                WHERE transaction_id=? AND is_current=1
+                """,
+                (has_changes, field_count, summary_json, now, txn_id),
+            )
+        except Exception as exc:
+            log.warning("transaction_id=%s observation diff computation failed: %s", txn_id, exc)
+
+        # Final status
         status = "EXTRACTED" if txn_sections > 0 else "NO_AGREEMENT_LINKED"
         conn.execute(
             "UPDATE transaction_record SET agreement_extraction_status=?, updated_at=? WHERE transaction_id=?",
@@ -520,24 +805,26 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
         sections_extracted += txn_sections
         securities_inserted += txn_securities
+        observations_written += txn_observations
         processed += 1
 
         log.info(
-            "transaction_id=%s status=%s sections=%d securities=%d",
-            txn_id, status, txn_sections, txn_securities,
+            "transaction_id=%s status=%s sections=%d securities=%d observations=%d",
+            txn_id, status, txn_sections, txn_securities, txn_observations,
         )
 
     log.info(
         "Stage 11 done  total=%d processed=%d sections=%d securities=%d "
-        "no_agreement=%d errors=%d",
+        "observations=%d no_agreement=%d errors=%d",
         total, processed, sections_extracted, securities_inserted,
-        no_agreement, error_count,
+        observations_written, no_agreement, error_count,
     )
     return {
         "transactions_total": total,
         "transactions_processed": processed,
         "sections_extracted": sections_extracted,
         "securities_inserted": securities_inserted,
+        "observations_written": observations_written,
         "no_agreement_linked": no_agreement,
         "agreement_errors": error_count,
     }

@@ -41,6 +41,7 @@ _COLUMNS = [
     "has_mac_clause", "requires_target_shareholder_vote", "target_vote_threshold",
     "target_total_diluted_shares", "fully_diluted_calc_quality",
     "agreement_extraction_status", "linked_securities_count",
+    "has_observation_changes", "observation_changes_field_count",
     "summary_text", "primary_rationale", "secondary_rationales_json",
     "created_at", "updated_at",
 ]
@@ -103,6 +104,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tr.target_total_diluted_shares, tr.fully_diluted_calc_quality,
             tr.agreement_extraction_status,
             (SELECT COUNT(*) FROM transaction_security ts WHERE ts.transaction_id = tr.transaction_id) AS linked_securities_count,
+            tr.has_observation_changes, tr.observation_changes_field_count,
             s.summary_text,
             rt.primary_rationale,
             rt.secondary_rationales           AS secondary_rationales_json,

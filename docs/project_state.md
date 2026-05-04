@@ -261,8 +261,15 @@ Documents stored full-text in `transaction_document`. Heuristic section tagger (
 - `document_title` column on `transaction_document`: heuristic title extraction
 - SEC window tightened: 0 to +180 days post-announcement (no pre-announcement noise)
 
-**NOT shipped (Drop 3.20b+):**
-- Explicit observation tracking / diff surfacing when multiple sources disagree on the same field
+**Drop 3.20b ships cross-source observation tracking and diff surfacing:**
+- `transaction_field_observation` table: one row per (transaction, field, source document); every scalar extracted by any agreement-section prompt is written here with filing_date, filing_type, document_title, source attribution
+- Compound field names for arrays: `shares_outstanding.{type}[.{class}]`, `consideration.{form}.{attr}`
+- `has_observation_changes`, `observation_changes_field_count`, `observation_changes_summary` columns on `transaction_record`
+- `observation_changes_summary` is a JSON array with change_type (INCREASE | DECREASE | DIFFERENT), delta, delta_pct per diffed field
+- Per-field source-type priority rules in `agreement_extract`: termination fees, MAC clause, merger structure prefer `8K_EXHIBIT_21` over later supplemental proxies; per_share_price defaults to most-recent (DEFA14A captures bumps)
+- CSV export adds `has_observation_changes` and `observation_changes_field_count` (~77 columns total)
+
+**NOT shipped (Drop 3.21+):**
 - Agreement-vs-PR conflict report surfacing to operator review queue
 - Per-form-type SEC window sub-ranges (8-K Exhibit 2.1 signing-day vs 8-K Item 2.01 close-day)
 - Long-tail deal sec-retry mode for deals with regulatory review > 180 days
@@ -466,6 +473,7 @@ Recommended first message to a fresh session:
 
 | Version | Date | Change |
 | :--- | :--- | :--- |
+| 0.5 | 2026-05-04 | Drop 3.20b: transaction_field_observation table; observation diff columns on transaction_record; per-field priority rules in agreement_extract; §5.2 SEC source-comprehensiveness workstream marked COMPLETE. |
 | 0.4 | 2026-05-04 | Drop 3.20a: pipeline expanded to 14 stages; agreement_extract stage added; transaction_security and schema v0.9 fields documented; §5.2 updated with what shipped in 3.20a vs 3.20b. |
 | 0.3 | 2026-05-02 | Drop 3.19: sec_documents stage (Stage 10), pipeline expanded to 13 stages, schema v0.8 documented. |
 | 0.2 | 2026-04-23 | Updated post-Stage 8 patch: resolved null-date hash collision, 78/76 cluster gap closed. Added Layer 5 (eval/score.py) and Stage 8 fix to commit log. Updated §3.2 cluster count, §3.3 dedup status, §4.1 immediate items. |

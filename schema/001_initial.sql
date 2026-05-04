@@ -1,6 +1,6 @@
 -- =============================================================================
 -- M&A Collection MVP — Initial Schema
--- Version: 0.9 (reflects Drop 3.20a — agreement extraction, transaction_security, document_title)
+-- Version: 1.0 (reflects Drop 3.20b — transaction_field_observation, observation diff columns)
 -- Target: SQLite 3.x
 -- =============================================================================
 -- Design notes:
@@ -257,6 +257,11 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     fully_diluted_calc_quality  TEXT,              -- COMPLETE | PARTIAL | NOT_AVAILABLE
     agreement_extraction_status TEXT,              -- NOT_TRIGGERED | EXTRACTED | NO_AGREEMENT_LINKED | EXTRACTION_FAILED
 
+    -- Cross-source observation diff fields (populated by Stage 11, Drop 3.20b)
+    has_observation_changes         INTEGER DEFAULT 0,  -- 1 when any tracked field has >1 distinct value across sources
+    observation_changes_field_count INTEGER DEFAULT 0,  -- count of fields with diffs
+    observation_changes_summary     TEXT,               -- JSON array of per-field diff entries; see transaction_field_observation
+
     -- Metadata
     is_current                  INTEGER NOT NULL DEFAULT 1,  -- older versions flipped to 0 on re-aggregation
     aggregation_version         INTEGER NOT NULL DEFAULT 1,
@@ -510,6 +515,40 @@ CREATE TABLE IF NOT EXISTS transaction_security (
 
 CREATE INDEX IF NOT EXISTS idx_security_transaction ON transaction_security(transaction_id);
 CREATE INDEX IF NOT EXISTS idx_security_type        ON transaction_security(security_type);
+
+
+-- -----------------------------------------------------------------------------
+-- 16. transaction_field_observation — one row per (transaction, field, source)
+-- -----------------------------------------------------------------------------
+-- Each row captures one source document's claim about one field value.
+-- Multiple rows per (transaction_id, field_name) when multiple source documents
+-- disclose the same field.  Diff surfacing queries these rows to detect changes
+-- (e.g., per_share_price bumped from $42 to $44.50 in a DEFA14A).
+-- field_name conventions:
+--   Primary scalars   : match transaction_record column names (e.g., "per_share_price")
+--   Share counts      : "shares_outstanding.{security_type}[.{security_class}]"
+--   Consideration     : "consideration.{form}.{attr}"  (e.g., "consideration.CASH.per_share_amount")
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS transaction_field_observation (
+    observation_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id              TEXT NOT NULL,
+    field_name                  TEXT NOT NULL,
+    field_value                 TEXT,                    -- stringified (cross-type compatible)
+    field_value_numeric         REAL,                    -- populated for numeric values
+    source_document_id          INTEGER NOT NULL,        -- FK to transaction_document
+    source_section_id           INTEGER,                 -- FK to transaction_document_section (nullable)
+    observed_as_of_date         TEXT,                    -- "as of" date claimed by source (e.g. cap-table as-of)
+    filing_date                 TEXT,                    -- date document was filed with SEC
+    extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    extraction_prompt_version   TEXT,
+    is_current                  INTEGER DEFAULT 1,
+    FOREIGN KEY (transaction_id) REFERENCES transaction_record(transaction_id),
+    FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
+    FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_observation_txn_field ON transaction_field_observation(transaction_id, field_name);
+CREATE INDEX IF NOT EXISTS idx_observation_filing_date ON transaction_field_observation(filing_date);
 
 
 -- =============================================================================

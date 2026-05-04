@@ -571,6 +571,7 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 | 0.7 | 2026-05-02 | Drop 3.18: multi_transaction_index/total columns in staging_extraction; HC extraction v0.9 returns transactions array. |
 | 0.8 | 2026-05-02 | Drop 3.19: transaction_document and transaction_document_section tables; linked_filings_count on transaction_record; sec_documents stage (Stage 10); pdfminer.six dependency. |
 | 0.9 | 2026-05-04 | Drop 3.20a: transaction_security table; 9 new columns on transaction_record (agreement extraction fields); document_title on transaction_document; agreement_extract stage (Stage 11); 5 agreement extraction prompts; SEC window tightened to 0 to +180 days. |
+| 1.0 | 2026-05-04 | Drop 3.20b: transaction_field_observation table; 3 new columns on transaction_record (has_observation_changes, observation_changes_field_count, observation_changes_summary); observation writing and diff surfacing in agreement_extract stage; per-field source-type priority rules for canonical value selection. |
 
 **Agreement extraction fields — Drop 3.20a / schema v0.9 (transaction_record):**
 - `acquirer_merger_sub_name TEXT` — name of the Merger Sub / acquisition vehicle in 3-party structures; null for direct mergers. Set by agreement_recitals extraction.
@@ -593,3 +594,39 @@ Key columns: `transaction_id`, `security_type` (COMMON_STOCK | PREFERRED_STOCK |
 
 **SEC window tightening — Drop 3.20a:**
 - `query_filings_by_formtype()` date window changed from `announced_date ± 90 days` to `announced_date` through `announced_date + 180 days`. Pre-announcement filings are noise; 180-day post-announcement window covers DEFM14A (+30-60d), S-4 (+45-90d), and 8-K Item 2.01 at typical close timing.
+
+**Cross-source observation tracking and diff surfacing — Drop 3.20b / schema v1.0:**
+
+`transaction_field_observation` table — one row per (transaction, field, source document). Every scalar value extracted by any of the 5 agreement-section prompts is written here with full source attribution (`source_document_id`, `source_section_id`, `filing_date`, `extraction_prompt_version`). Arrays (consideration_components, securities) are written as compound field names:
+- Share counts: `shares_outstanding.{security_type}[.{security_class}]` (e.g., `shares_outstanding.COMMON_STOCK.Class A`)
+- Consideration: `consideration.{form}.{attr}` (e.g., `consideration.CASH.per_share_amount`)
+
+New columns on `transaction_record`:
+- `has_observation_changes INTEGER DEFAULT 0` — 1 when any tracked field has >1 distinct value across all source documents for this transaction.
+- `observation_changes_field_count INTEGER DEFAULT 0` — count of fields with diffs; useful for sorting/filtering.
+- `observation_changes_summary TEXT` — JSON array describing each diffed field: values in chronological order with source attribution, change_type (INCREASE | DECREASE | IDENTICAL | DIFFERENT), delta (numeric fields only), delta_pct. Excluded from CSV export (long, structured); accessible via DB query.
+
+**Observation JSON shape example:**
+```json
+[
+  {
+    "field": "per_share_price",
+    "values": [
+      {"value": "42.00", "filing_date": "2026-04-15", "filing_type": "8K_EXHIBIT_21", "document_title": "Agreement and Plan of Merger"},
+      {"value": "44.50", "filing_date": "2026-05-20", "filing_type": "DEFA14A", "document_title": "Definitive Additional Materials"}
+    ],
+    "change_type": "INCREASE",
+    "delta": 2.5,
+    "delta_pct": 5.95
+  }
+]
+```
+
+**Per-field source-type priority rules (Drop 3.20b):**
+For fields where the legal source-of-truth is the original agreement rather than the most-recently-filed document, `agreement_extract` applies priority rules when selecting which observation populates the canonical `transaction_record` column:
+- Termination fees, go-shop: `8K_EXHIBIT_21` > `DEFM14A` > `DEFA14A` > `S4`
+- MAC clause, shareholder vote: `8K_EXHIBIT_21` > `DEFM14A`
+- Merger structure: `8K_EXHIBIT_21` > `DEFM14A` > `S4`
+- Per-share price and consideration components: no rule — most-recent-filing-date wins (DEFA14As capture bumps)
+
+For non-priority fields, sections are processed in ASC filing_date order so the most recently filed source wins by last-write semantics.
