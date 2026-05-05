@@ -832,7 +832,11 @@ _TITLE_BOILERPLATE = re.compile(
     r"|AMENDMENT NO"
     r"|PROSPECTUS"
     r"|PURSUANT TO"
-    r"|SECTION\s+\d+",
+    r"|SECTION\s+\d+"
+    r"|EXECUTION\s+(VERSION|COPY)"      # signed-copy watermarks
+    r"|CONFORMED\s+COPY"
+    r"|CONFIDENTIAL(\s+TREATMENT\s+REQUESTED)?"
+    r"|\[REDACTED\]|\[\*{1,3}\]|\[[•’‘\*\-]+\]",
     re.IGNORECASE,
 )
 

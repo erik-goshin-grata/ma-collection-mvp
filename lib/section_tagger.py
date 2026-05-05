@@ -77,13 +77,21 @@ _COMPILED: dict[str, list[re.Pattern]] = {
     for stype, pats in _SECTION_PATTERNS.items()
 }
 
+# RECITALS position guard helpers
+_NOW_THEREFORE_RE = re.compile(r"\bNOW[,\s]+THEREFORE\b", re.IGNORECASE)
+# Headings that precede exhibit/schedule preambles — not main recitals
+_RECITALS_EXCLUDE_HEADING = re.compile(
+    r"^(FORM\s+OF|SCHEDULE\s+[A-Z0-9]|EXHIBIT\s+[A-Z0-9]|ANNEX\s+[A-Z0-9])",
+    re.IGNORECASE,
+)
+
 # Heading detector: matches lines that look like section headings.
 _HEADING_RE = re.compile(
     r"(?m)^[ \t]*("
     r"ARTICLE\s+[IVXLCDM\d]+\b"           # ARTICLE I, ARTICLE IV, ...
     r"|Section\s+\d+\.\d+"                 # Section 1.1, Section 8.02
-    r"|\d+\.\s+[A-Z][A-Z\s]{3,}"           # "3.  REPRESENTATIONS..."
-    r"|[A-Z][A-Z\s]{4,}"                   # ALL-CAPS line ≥ 5 chars
+    r"|\d+\.\s+[A-Z][A-Z ]{3,}"            # "3.  REPRESENTATIONS..."
+    r"|[A-Z][A-Z ]{4,}"                    # ALL-CAPS line ≥ 5 chars
     r")[ \t]*$"
 )
 
@@ -106,6 +114,10 @@ def tag_sections(raw_text: str) -> list[SectionMatch]:
     """
     if not raw_text:
         return []
+
+    doc_len = len(raw_text)
+    nt_match = _NOW_THEREFORE_RE.search(raw_text)
+    now_therefore_pos = nt_match.start() if nt_match else doc_len
 
     # Find all heading positions
     heading_spans: list[tuple[int, int, str]] = []
@@ -155,6 +167,15 @@ def tag_sections(raw_text: str) -> list[SectionMatch]:
 
         if matched_type is None:
             continue
+
+        # RECITALS position constraint: must appear in first 15% of document
+        # and before "NOW, THEREFORE" (operative provisions boundary).
+        # Also reject exhibit/schedule preamble headings.
+        if matched_type == "RECITALS":
+            if h_start > doc_len * 0.15 or h_start >= now_therefore_pos:
+                continue
+            if _RECITALS_EXCLUDE_HEADING.match(h_text):
+                continue
 
         results.append(SectionMatch(
             section_type=matched_type,

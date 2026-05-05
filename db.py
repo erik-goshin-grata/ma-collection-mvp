@@ -74,6 +74,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     td_cols = _existing("transaction_document")
     if "document_title" not in td_cols:
         conn.execute("ALTER TABLE transaction_document ADD COLUMN document_title TEXT")
+    # Drop 3.22b — per-document extraction tracking
+    if "agreement_extracted_at" not in td_cols:
+        conn.execute("ALTER TABLE transaction_document ADD COLUMN agreement_extracted_at DATETIME")
 
     # Drop 3.20b: create transaction_field_observation table if not present
     existing_tables = {

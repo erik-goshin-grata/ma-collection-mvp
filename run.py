@@ -13,6 +13,7 @@ Usage:
     python run.py --mode=aggregate                              # stages 8–9
     python run.py --mode=sec-documents                          # stage 10 only (expanded SEC filing fetch)
     python run.py --mode=agreement-extract                      # stage 11 only (agreement extraction)
+    python run.py --mode=agreement-rerun                        # stage 11 re-run on all unextracted docs
     python run.py --mode=generate                               # stages 12–13
     python run.py --mode=export                                 # stage 14
     python run.py --mode=rerun-prompt --prompt=<name> --version=<ver>
@@ -66,6 +67,7 @@ _MODE_STAGES: dict[str, list[types.ModuleType]] = {
     "aggregate":          [_stage_8, _stage_9],
     "sec-documents":      [_stage_10],
     "agreement-extract":  [_stage_11],
+    "agreement-rerun":    [_stage_11],    # same stage; per-doc gate picks up unextracted docs
     "generate":           [_stage_12, _stage_13],
     "export":             [_stage_14],
 }

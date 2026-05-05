@@ -1,6 +1,6 @@
 # Agreement Recitals Extraction Prompt
 
-**Version:** 0.1
+**Version:** 0.2
 **Repo path:** `prompts/agreement_recitals.md`
 
 ---
@@ -69,7 +69,8 @@ Identify from the recitals language:
 - FORWARD_TRIANGULAR: "Target shall merge with and into Merger Sub" (Merger Sub survives, Target disappears)
 - REVERSE_TRIANGULAR: "Merger Sub shall merge with and into Target" (Target survives — most common in modern public M&A)
 - TENDER_OFFER: tender offer mechanics described; often combined with a subsequent second-step merger
-- UNKNOWN: cannot determine from the text
+
+If the merger mechanism cannot be determined from this section, return null for merger_structure. Do not return "UNKNOWN" — null means no observation, "UNKNOWN" is not a valid value.
 
 RESPONSE FORMAT
 
@@ -110,7 +111,7 @@ prompt_version: {prompt_version}
 | `parent_acquirer_name` | string | Ultimate parent acquirer (not Merger Sub) |
 | `merger_sub_name` | string\|null | Acquisition vehicle / shell entity when present |
 | `target_name` | string | The company being acquired |
-| `merger_structure` | enum | DIRECT \| FORWARD_TRIANGULAR \| REVERSE_TRIANGULAR \| TENDER_OFFER \| UNKNOWN |
+| `merger_structure` | enum\|null | DIRECT \| FORWARD_TRIANGULAR \| REVERSE_TRIANGULAR \| TENDER_OFFER \| null (not determinable) |
 | `model_confidence` | enum | HIGH \| MEDIUM \| LOW \| NONE |
 | `notes` | string\|null | Ambiguities, caveats (≤200 chars) |
 | `prompt_version` | string | Echoed from input |
@@ -211,7 +212,7 @@ WHEREAS, the Board of Directors of each of Acquirer and the Company has approved
 
 | Failure | Handling |
 | :--- | :--- |
-| Section contains only boilerplate (page header, no party recitals) | Return all fields null / UNKNOWN; model_confidence = NONE |
+| Section contains only boilerplate (page header, no party recitals) | Return all party fields and merger_structure null; model_confidence = NONE |
 | Merger Sub and Parent names are similar (easy to confuse) | Look for "wholly-owned subsidiary of" language to identify the Sub |
 | Multiple Merger Subs named (step-merger structures) | Use the first / primary Merger Sub; note others in `notes` |
 
@@ -222,3 +223,4 @@ WHEREAS, the Board of Directors of each of Acquirer and the Company has approved
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version — party identification + merger structure |
+| 0.2 | 2026-05-05 | Remove UNKNOWN from merger_structure; null = not determinable |

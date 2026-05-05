@@ -27,6 +27,7 @@ Stage placement: after Stage 10 (sec_documents), before Stage 12 (summarize)
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -54,7 +55,7 @@ _SECTION_PROMPT_MAP = {
 }
 
 _VERSIONS = {
-    "agreement_recitals": "0.1",
+    "agreement_recitals": "0.2",
     "agreement_consideration": "0.1",
     "agreement_capitalization": "0.1",
     "agreement_termination": "0.1",
@@ -90,6 +91,20 @@ _OBSERVATION_SKIP = frozenset({
     "model_confidence", "notes", "prompt_version",
     "consideration_components", "securities",
 })
+
+# Closed-vocab field values treated as non-observations (skip insert + canonical)
+_OBSERVATION_REJECT_VALUES: dict[str, frozenset[str]] = {
+    "merger_structure": frozenset({"UNKNOWN"}),
+}
+
+# Entity-name fields — filtered for defined-term references and draft placeholders
+_ENTITY_NAME_FIELDS = frozenset({"parent_acquirer_name", "target_name", "merger_sub_name", "acquirer_name"})
+_DEFINED_TERM_RE = re.compile(
+    r"^(Parent|Company|Purchaser|Seller|Buyer|Target|Acquirer|SPAC|Sponsor|"
+    r"Issuer|Holdco|Topco|Bidco|Merger\s+Sub|Sub|Acquireco|Acquisitionco|AcquireCo)$",
+    re.IGNORECASE,
+)
+_PLACEHOLDER_RE = re.compile(r"\[|\]|…|\[[A-Z][^\]]*\]", re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +180,14 @@ def _write_observations(
             continue
         if field_value is None:
             continue
+        # Reject closed-vocab non-observations (UNKNOWN treated as absent)
+        if field_name in _OBSERVATION_REJECT_VALUES and str(field_value) in _OBSERVATION_REJECT_VALUES[field_name]:
+            continue
+        # Reject defined-term and placeholder values for entity-name fields
+        if field_name in _ENTITY_NAME_FIELDS:
+            sv = str(field_value).strip()
+            if _DEFINED_TERM_RE.match(sv) or _PLACEHOLDER_RE.search(sv):
+                continue
 
         numeric_value: float | None = None
         if isinstance(field_value, bool):
@@ -267,11 +290,14 @@ def _compute_observation_changes(
 
     fields_with_changes: list[dict] = []
     for field_name, observations in by_field.items():
-        distinct_values = {o["field_value"] for o in observations}
+        reject = _OBSERVATION_REJECT_VALUES.get(field_name, frozenset())
+        # Exclude rejected values (e.g. UNKNOWN) from divergence — treat as non-observations
+        live_obs = [o for o in observations if o["field_value"] not in reject]
+        distinct_values = {o["field_value"] for o in live_obs}
         if len(distinct_values) <= 1:
             continue
 
-        ordered = sorted(observations, key=lambda o: o["filing_date"] or "")
+        ordered = sorted(live_obs, key=lambda o: o["filing_date"] or "")
         earliest = ordered[0]
         latest = ordered[-1]
 
@@ -374,10 +400,14 @@ def _apply_recitals(
     log: Any,
 ) -> None:
     updates: dict[str, Any] = {}
-    if result.get("parent_acquirer_name"):
-        updates["acquirer_merger_sub_name"] = result.get("merger_sub_name")
-    if result.get("merger_structure"):
-        updates["merger_structure"] = result["merger_structure"]
+    # Only write merger_sub_name to TR if it's a real legal entity name (not defined-term)
+    msub = (result.get("merger_sub_name") or "").strip()
+    if msub and not _DEFINED_TERM_RE.match(msub) and not _PLACEHOLDER_RE.search(msub):
+        updates["acquirer_merger_sub_name"] = msub
+    # Only write merger_structure if it's a real value (UNKNOWN is a non-observation)
+    merger_struct = result.get("merger_structure")
+    if merger_struct and merger_struct != "UNKNOWN":
+        updates["merger_structure"] = merger_struct
     if not updates:
         return
     _update_transaction_record(
@@ -624,17 +654,24 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         except Exception as exc:
             log.warning("Could not load/register prompt %s: %s", pname, exc)
 
+    # Select transactions that have at least one unextracted agreement-class document.
+    # This per-document gate (vs. the old transaction-level EXTRACTED skip) allows
+    # re-processing when new documents are added to already-EXTRACTED transactions.
     rows = conn.execute(
         """
-        SELECT tr.transaction_id, tr.agreement_extraction_status
+        SELECT DISTINCT tr.transaction_id
         FROM transaction_record tr
+        JOIN transaction_document td ON td.transaction_id = tr.transaction_id
         WHERE tr.is_current = 1
-        ORDER BY tr.announced_date DESC
+          AND td.is_current = 1
+          AND td.filing_type IN ('8K_EXHIBIT_21','DEFM14A','S4','SC_TOT','DEFA14A')
+          AND td.agreement_extracted_at IS NULL
+        ORDER BY tr.announced_date DESC NULLS LAST
         """
     ).fetchall()
 
     total = len(rows)
-    log.info("Stage 11: %d transactions to process for agreement extraction", total)
+    log.info("Stage 11: %d transactions with unextracted agreement docs", total)
 
     processed = sections_extracted = securities_inserted = no_agreement = error_count = 0
     observations_written = 0
@@ -643,39 +680,20 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     for row in rows:
         txn_id = row["transaction_id"]
 
-        if row["agreement_extraction_status"] == "EXTRACTED":
-            log.debug("transaction_id=%s already EXTRACTED — skipping", txn_id)
-            continue
-
-        # Gather deal-document sections ordered ASC so most-recent is applied last
-        # (last-write wins for non-priority fields)
-        section_rows = conn.execute(
+        # Gather unextracted docs for this transaction, ASC by filing date so most-recent
+        # is applied last (last-write wins for non-priority fields)
+        doc_rows = conn.execute(
             """
-            SELECT tds.section_id, tds.section_type, tds.excerpt_text, tds.confidence,
-                   td.document_id, td.filing_type, td.filing_date, td.document_title
-            FROM transaction_document_section tds
-            JOIN transaction_document td ON td.document_id = tds.document_id
+            SELECT td.document_id, td.filing_type, td.filing_date, td.document_title
+            FROM transaction_document td
             WHERE td.transaction_id = ?
+              AND td.is_current = 1
               AND td.filing_type IN ('8K_EXHIBIT_21','DEFM14A','S4','SC_TOT','DEFA14A')
-              AND tds.confidence IN ('HIGH','MEDIUM')
-            ORDER BY td.filing_date ASC NULLS FIRST, tds.section_id
+              AND td.agreement_extracted_at IS NULL
+            ORDER BY td.filing_date ASC NULLS FIRST, td.document_id
             """,
             (txn_id,),
         ).fetchall()
-
-        if not section_rows:
-            conn.execute(
-                "UPDATE transaction_record SET agreement_extraction_status='NO_AGREEMENT_LINKED', updated_at=? WHERE transaction_id=?",
-                (now, txn_id),
-            )
-            conn.commit()
-            no_agreement += 1
-            log.debug("transaction_id=%s no deal-doc sections — NO_AGREEMENT_LINKED", txn_id)
-            continue
-
-        by_type: dict[str, list] = {}
-        for sr in section_rows:
-            by_type.setdefault(sr["section_type"], []).append(sr)
 
         txn_sections = 0
         txn_securities = 0
@@ -683,94 +701,126 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         all_securities: list[dict] = []
         field_priority_state: dict[str, tuple[float, str | None]] = {}
 
-        for section_type, prompt_name in _SECTION_PROMPT_MAP.items():
-            sections = by_type.get(section_type, [])
-            if not sections:
-                continue
+        for doc_row in doc_rows:
+            doc_id = doc_row["document_id"]
 
-            for sec_row in sections:
-                excerpt = sec_row["excerpt_text"]
-                if not excerpt or not excerpt.strip():
+            # Soft-delete existing observations for this document so re-runs replace
+            # stale data (e.g. UNKNOWN values, defined-term entity names from old passes)
+            conn.execute(
+                "UPDATE transaction_field_observation SET is_current=0 WHERE source_document_id=?",
+                (doc_id,),
+            )
+
+            section_rows = conn.execute(
+                """
+                SELECT tds.section_id, tds.section_type, tds.excerpt_text, tds.confidence,
+                       td.filing_type, td.filing_date, td.document_title
+                FROM transaction_document_section tds
+                JOIN transaction_document td ON td.document_id = tds.document_id
+                WHERE tds.document_id = ?
+                  AND tds.confidence IN ('HIGH','MEDIUM')
+                ORDER BY tds.section_id
+                """,
+                (doc_id,),
+            ).fetchall()
+
+            by_type: dict[str, list] = {}
+            for sr in section_rows:
+                by_type.setdefault(sr["section_type"], []).append(sr)
+
+            for section_type, prompt_name in _SECTION_PROMPT_MAP.items():
+                sections = by_type.get(section_type, [])
+                if not sections:
                     continue
 
-                log.debug(
-                    "transaction_id=%s section=%s doc=%s confidence=%s",
-                    txn_id, section_type, sec_row["document_id"], sec_row["confidence"],
-                )
+                for sec_row in sections:
+                    excerpt = sec_row["excerpt_text"]
+                    if not excerpt or not excerpt.strip():
+                        continue
 
-                result = _call_section_prompt(
-                    prompt_name, excerpt, conn, cfg, run_id, log
-                )
-                time.sleep(_SLEEP)
-
-                if result is None:
-                    error_count += 1
-                    continue
-
-                txn_sections += 1
-                prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
-
-                try:
-                    # Write observations before applying to transaction_record
-                    obs_before = conn.execute(
-                        "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=?",
-                        (txn_id,),
-                    ).fetchone()[0]
-
-                    _write_observations(
-                        conn,
-                        transaction_id=txn_id,
-                        extraction_results=result,
-                        source_document_id=sec_row["document_id"],
-                        source_section_id=sec_row["section_id"],
-                        filing_date=sec_row["filing_date"],
-                        extraction_prompt_version=prompt_version,
+                    log.debug(
+                        "transaction_id=%s section=%s doc=%s confidence=%s",
+                        txn_id, section_type, doc_id, sec_row["confidence"],
                     )
 
-                    obs_after = conn.execute(
-                        "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=?",
-                        (txn_id,),
-                    ).fetchone()[0]
-                    txn_observations += obs_after - obs_before
-
-                    # Apply to transaction_record with priority rules
-                    if section_type == "RECITALS":
-                        _apply_recitals(
-                            conn, txn_id, result, now,
-                            sec_row["filing_type"], field_priority_state, log,
-                        )
-                    elif section_type == "CONSIDERATION":
-                        _apply_consideration(conn, txn_id, result, now, log)
-                    elif section_type == "CAPITALIZATION":
-                        n = _apply_capitalization(
-                            conn, txn_id, result,
-                            sec_row["section_id"], sec_row["document_id"],
-                            now, log,
-                        )
-                        txn_securities += n
-                        if isinstance(result.get("securities"), list):
-                            all_securities.extend(result["securities"])
-                    elif section_type == "TERMINATION_FEES":
-                        _apply_termination(
-                            conn, txn_id, result, now,
-                            sec_row["filing_type"], field_priority_state, log,
-                        )
-                    elif section_type == "CONDITIONS_TO_CLOSING":
-                        _apply_conditions(
-                            conn, txn_id, result, now,
-                            sec_row["filing_type"], field_priority_state, log,
-                        )
-                    conn.commit()
-                except Exception as exc:
-                    log.warning(
-                        "transaction_id=%s section=%s apply error: %s — continuing",
-                        txn_id, section_type, exc,
+                    result = _call_section_prompt(
+                        prompt_name, excerpt, conn, cfg, run_id, log
                     )
-                    error_count += 1
+                    time.sleep(_SLEEP)
+
+                    if result is None:
+                        error_count += 1
+                        continue
+
+                    txn_sections += 1
+                    prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
+
                     try:
-                        conn.rollback()
-                    except Exception:
-                        pass
+                        obs_before = conn.execute(
+                            "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",
+                            (txn_id,),
+                        ).fetchone()[0]
+
+                        _write_observations(
+                            conn,
+                            transaction_id=txn_id,
+                            extraction_results=result,
+                            source_document_id=doc_id,
+                            source_section_id=sec_row["section_id"],
+                            filing_date=sec_row["filing_date"],
+                            extraction_prompt_version=prompt_version,
+                        )
+
+                        obs_after = conn.execute(
+                            "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",
+                            (txn_id,),
+                        ).fetchone()[0]
+                        txn_observations += obs_after - obs_before
+
+                        if section_type == "RECITALS":
+                            _apply_recitals(
+                                conn, txn_id, result, now,
+                                sec_row["filing_type"], field_priority_state, log,
+                            )
+                        elif section_type == "CONSIDERATION":
+                            _apply_consideration(conn, txn_id, result, now, log)
+                        elif section_type == "CAPITALIZATION":
+                            n = _apply_capitalization(
+                                conn, txn_id, result,
+                                sec_row["section_id"], doc_id,
+                                now, log,
+                            )
+                            txn_securities += n
+                            if isinstance(result.get("securities"), list):
+                                all_securities.extend(result["securities"])
+                        elif section_type == "TERMINATION_FEES":
+                            _apply_termination(
+                                conn, txn_id, result, now,
+                                sec_row["filing_type"], field_priority_state, log,
+                            )
+                        elif section_type == "CONDITIONS_TO_CLOSING":
+                            _apply_conditions(
+                                conn, txn_id, result, now,
+                                sec_row["filing_type"], field_priority_state, log,
+                            )
+                        conn.commit()
+                    except Exception as exc:
+                        log.warning(
+                            "transaction_id=%s section=%s apply error: %s — continuing",
+                            txn_id, section_type, exc,
+                        )
+                        error_count += 1
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+
+            # Mark this document as extracted regardless of section count
+            conn.execute(
+                "UPDATE transaction_document SET agreement_extracted_at=? WHERE document_id=?",
+                (now, doc_id),
+            )
+            conn.commit()
 
         # Diluted shares rollup from capitalization observations
         if all_securities:
@@ -780,7 +830,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 (diluted, quality, now, txn_id),
             )
 
-        # Observation diff computation (Drop 3.20b)
+        # Observation diff (Drop 3.20b) — re-compute after all docs processed
         try:
             has_changes, field_count, summary_json = _compute_observation_changes(conn, txn_id)
             conn.execute(
@@ -795,8 +845,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         except Exception as exc:
             log.warning("transaction_id=%s observation diff computation failed: %s", txn_id, exc)
 
-        # Final status
-        status = "EXTRACTED" if txn_sections > 0 else "NO_AGREEMENT_LINKED"
+        # Roll up transaction extraction status
+        # Check if any agreement doc has now been extracted (has sections)
+        any_extracted = conn.execute(
+            """
+            SELECT COUNT(*) FROM transaction_document
+            WHERE transaction_id=? AND is_current=1
+              AND filing_type IN ('8K_EXHIBIT_21','DEFM14A','S4','SC_TOT','DEFA14A')
+              AND agreement_extracted_at IS NOT NULL
+            """,
+            (txn_id,),
+        ).fetchone()[0]
+        status = "EXTRACTED" if (txn_sections > 0 or any_extracted > 0) else "NO_AGREEMENT_LINKED"
         conn.execute(
             "UPDATE transaction_record SET agreement_extraction_status=?, updated_at=? WHERE transaction_id=?",
             (status, now, txn_id),
@@ -807,6 +867,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         securities_inserted += txn_securities
         observations_written += txn_observations
         processed += 1
+        if txn_sections == 0:
+            no_agreement += 1
 
         log.info(
             "transaction_id=%s status=%s sections=%d securities=%d observations=%d",
@@ -815,7 +877,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     log.info(
         "Stage 11 done  total=%d processed=%d sections=%d securities=%d "
-        "observations=%d no_agreement=%d errors=%d",
+        "observations=%d no_sections=%d errors=%d",
         total, processed, sections_extracted, securities_inserted,
         observations_written, no_agreement, error_count,
     )
