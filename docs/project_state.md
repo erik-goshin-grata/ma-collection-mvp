@@ -1,6 +1,6 @@
 # M&A Collection MVP — Project State
 
-**As of:** 2026-04-23
+**As of:** 2026-05-05
 **Repo:** `ma-collection-mvp` (private GitHub)
 **Operator:** Erik (independent)
 **Implementation:** Claude Code (Sonnet 4.6 in VS Code)
@@ -23,7 +23,7 @@ Read this first. Then `README.md` for the repo overview. Then the spec files ref
 A single-operator, laptop-scale M&A data collection pipeline. Intent: demonstrate a pipeline that beats incumbent event-capture quality by combining authoritative source tiering, deterministic clustering, and LLM-assisted aggregation.
 
 - **Entry point:** `run.py` with 8 run modes (full, resume, scrape, extract, aggregate, generate, export, rerun-prompt)
-- **Storage:** SQLite, WAL mode, 12 tables (v0.2 schema)
+- **Storage:** SQLite, WAL mode, 16 tables (v1.0 schema)
 - **Execution:** sequential, no concurrency, idempotent, resumable
 - **Sources:** PR Newswire (scrape-only) + sec-api.io (API, $55/mo tier) for enrichment
 - **Models:** Claude Haiku 4.5 (relevancy filter only); Claude Opus 4.7 (all other LLM stages)
@@ -48,9 +48,9 @@ A single-operator, laptop-scale M&A data collection pipeline. Intent: demonstrat
 | 13 | `rationale_tag` | `AGGREGATED` | new `rationale_tag` row | Opus |
 | 14 | `export` | `is_current = true` | CSV | — |
 
-### 2.3 Schema (v0.9)
+### 2.3 Schema (v1.0)
 
-Twelve tables. Key decisions:
+Sixteen tables. Key decisions:
 
 - **`deal_type` enum (7 values):** `ACQUISITION`, `MERGER`, `SPIN_SPLIT`, `REVERSE_MERGER`, `JOINT_VENTURE`, `MINORITY_INVESTMENT`, `UNKNOWN`. Take-Private, Add-On, Carve-Out-as-IPO, Reverse-Merger are **feature flags on base types**, not separate enum values. Rationale: `target_status = PUBLIC + acquirer_type = PRIVATE_EQUITY` captures Take-Private without a dedicated enum value.
 - **`value_type` enum (4 values):** `EQUITY_VALUE`, `TRANSACTION_VALUE`, `ENTERPRISE_VALUE`, `UNDISCLOSED`. Default: `TRANSACTION_VALUE`.
@@ -93,27 +93,27 @@ Spec: `specs/evaluation.md`.
 
 ## 3. Current State
 
-### 3.1 Commits (most recent first)
+### 3.1 Commits (Drops 3.9–3.21)
 
-| Commit | Drop | Content |
+| SHA | Drop | Content |
 | :--- | :--- | :--- |
-| `d3e4720` | Stage 8 fix | Name-only matching and hash stabilization for null-date rows (resolves Servier hash-collision false-singleton and 78/76 transaction count gap) |
-| `c4f5077` | Layer 5 | eval/score.py: gold set scoring and scorecard generation |
-| (most recent before) | — | 100-PR production run export `transactions_run_20260423_153828.csv` |
-| `a7a3f60` | Layer 4d | Stages 10/11/12: summary, rationale, export |
-| (several) | Layer 4c | Stages 8/9: clustering, aggregation |
-| (several) | Layer 4b | Stages 5/6/7: SEC trigger, SEC enrich, LC extract |
-| `8cf20b1` | Drop 3.5 | `relevancy_filter` v0.3: CRITICAL enum discipline block |
-| (subsequent) | Drop 3.6 | `relevancy_filter` v0.4: suffix-pattern guard |
-| (subsequent) | Drop 3.7 | Removed "carve-out" terminology leak from summary + rationale prompts |
-| `e02269d` | Drop 3.3 | `high_confidence_extraction` v0.4: simultaneous announce-and-close date rule |
-| `29502eb` | Drop 3.2 | Inline RESPONSE FORMAT blocks in all 7 prompt files |
-| `3277ad8` | Layer 2.1 | sec-api.io adapter v0.2 (expanded items, Exhibit 99) |
-| `5c66958` | Layer 1 | config, db, logger, run.py + 12 stage stubs |
-| `a00806c` | Cleanup | `sec_lookup_status` column, 3 prompt_version columns, model env vars |
-| `7c6034a` | Drop 3 | Pipeline, entity resolution, evaluation, DDL, README, env, gitignore |
+| `2f9ee8e` | 3.9 | Schema baseline + party descriptions |
+| `d91916e` | 3.10 | Sponsor capture + add-on detection |
+| `1e9f1d0` | 3.11 | Equity vs transaction value rules |
+| `db2569f` | 3.12 | Multiples derivation |
+| `59f4f9a` | 3.13 | Summary narrative rewrite |
+| `169c063` | 3.14/3.15/3.17 | Date format / transaction_status / de-SPAC |
+| `69dc23a` | 3.16 | Earnouts / CVRs |
+| `f37ad41` | 3.18 | Multi-transaction PR splitting |
+| `dd3aedaa` | 3.19 | SEC filing expansion + storage + section tagging |
+| `4852935e` | 3.20a | Agreement extraction with party resolution |
+| `17722894` | 3.20b | Cross-source observation tracking + diff surfacing |
+| `f730349` | hotfix | `_apply_migrations()` completeness — Drops 3.16/3.18/3.19 column additions back-ported to existing-DB upgrade path |
+| `7c8a8166` | 3.21 | SEC adapter cleaned-text fix + document_title heuristic fix |
 
-### 3.2 100-PR Production Run Results (run_20260423_153828)
+### 3.2 Production Run Results
+
+#### Baseline run (run_20260423_153828)
 
 **Runtime:** 49m 07s (PASS < 2h target)
 **API cost:** ~$3-4
@@ -147,6 +147,31 @@ Spec: `specs/evaluation.md`.
 - `data/ma_mvp_validation_20260423.db` (15-PR validation run, 3.5MB)
 - `exports/archive/validation_20260423.csv` (13 transactions, 8.3KB)
 
+#### Cycle-close run (run_20260505_112348) — MAX_FETCHES=100, Drops 3.9–3.21
+
+**Runtime:** 1h 50m  **API cost:** ~$25  **Transactions exported:** 226
+
+**Validation findings by drop:**
+
+- **Drops 3.9–3.17:** Confirmed working on real data. Deal type distribution, consideration derivation, flags, summaries, rationales all producing expected output.
+- **Drop 3.18 (multi-transaction PR splitting):** 5 of 168 `source_raw` rows produced multi-row splits on real PRs. Validated.
+- **Drop 3.19 (SEC filing fetch):** 45 staging_extraction rows TRIGGERED → 18 unique transactions in Stage 10 → 4 documents fetched (2× S-4, 1× DEFM14A, 1× 8K_ITEM_201). Architectural defect confirmed: `fetch_filing_full_text()` stored raw SGML submission package instead of cleaned plain text for the DEFM14A and both S-4s, producing `sections=0` on all three. Fixed by Drop 3.21.
+- **Drop 3.21 (SEC cleaned-text fix):** Reprocess of 3 documents post-fix. Two S-4s yielded 937K and 1.2M chars of extracted text, 3 and 4 sections respectively. Agreement-extract (`--mode=agreement-extract`) ran on all 226 transactions; 2 extracted, 7 observations written. Section coverage limited to `agreement_conditions` prompt — CONDITIONS_TO_CLOSING is the only section type the tagger reliably finds in S-4 shells. CONSIDERATION and TERMINATION_FEE excerpts not yet tagged (see Drop 3.23 queue).
+
+**Stage 10 filing yield (18 triggered transactions):**
+
+| Outcome | Count | Notes |
+| :--- | :--- | :--- |
+| Documents fetched | 4 | 2× S4, 1× DEFM14A, 1× 8K_ITEM_201 |
+| No filings returned | 14 | Mostly April 2026 announcements — DEFM14A/S-4 lag 30–90 days post-announcement; several are private-target deals with no applicable filing type |
+| Errors | 0 | |
+
+**Confirmed test cases for next drops:**
+- Stellar Bancorp / Prosperity Bancshares — S-4 (accession 0001193125-26-161751) — S4 with embedded merger agreement; 3 sections tagged, conditions extracted
+- Essential Utilities / American Water Works — S-4 (accession 0001193125-25-332292) — same structure; 4 sections, conditions extracted
+- Electronic Arts / Oak-Eagle — DEFM14A (accession 0001140361-25-042872) — trafilatura extracted only 4,697 chars from inner HTML; sections=0; low-yield case for section tagger
+- Essential Utilities / AWK — 8-K filed 2025-10-26 has **Exhibit 2.1** at `https://www.sec.gov/Archives/edgar/data/1410636/000119312525250643/d866666dex21.htm` — confirmed available but `_find_exhibits()` produced 0 recoveries (Drop 3.22)
+
 ### 3.3 Acceptance Criteria (from `specs/pipeline.md` §10) — status
 
 | Metric | Target | 100-PR run | Status |
@@ -162,32 +187,43 @@ Spec: `specs/evaluation.md`.
 
 The 4.5% prompt failure rate is driven by the `reason_code` enum discipline tail (3 of 4 failures). Two of the three were RELEVANT deals the pipeline dropped. Prompt revision to close this tail is a known deferred item (§4.2).
 
+### 3.4 Cost Calibration
+
+| Metric | Value |
+| :--- | :--- |
+| Cumulative project spend | ~$150–190 |
+| Latest single-day spend (2026-05-02) | ~$25 |
+| Per iteration day at current velocity | $20–30 |
+| Per drop inclusive of validation | $5–10 |
+| Production cost per 100-PR run (current model mix) | $8–15 |
+
+Cost optimization A/B (Sonnet substitution on summarize/rationale stages) is queued but not yet run — see §4.1 and §8.
+
 ---
 
 ## 4. What Needs to Be Addressed
 
 Ordered by priority for a fresh session.
 
-### 4.1 Immediate (before or during next session)
+### 4.1 Next-Phase Drops (surfaced from cycle-close validation)
 
-**A. Gold set labeling.** Operator task. Plan 3 focused hours. Label all 76 transactions on full-coverage fields; 20/76 on spot-check fields; 9/9 NOT_RELEVANT rows for false-negative check; cluster `tc_182e231b4059` explicitly.
+Three bounded drops, all in `adapters/sec_api.py` or `stages/sec_documents.py`. All independently scoped; no inter-drop dependencies.
 
-Suggested labels for `tc_182e231b4059`:
-- target: Allcryo
-- acquirer: Cryogenic Technology Resources
-- acquirer_type: PE_PORTFOLIO
-- parent_seller_name: null
-- deal_type: ACQUISITION
-- target_type: STANDALONE_COMPANY
-- announced_date: 2026-04-21
-- closed_date: 2026-04-21
-- event_type: CLOSE
-- consideration_type: null
-- primary_rationale: GEOGRAPHIC_EXPANSION
+**Drop 3.22 — Fix `_find_exhibits()` (8-K Exhibit 2.1 fetch gap)**
 
-Note in the gold set CSV's notes column: "acquirer is PE portfolio co; sponsor is Bridge Industries; intermediate platform is TransTech Group; schema collapses to single acquirer field."
+The 8K_EXHIBIT_21 job produced 0 recoveries across all 18 triggered transactions in the cycle-close run. Exhibit 2.1 is the merger agreement document — filed at announcement day for all deal types (cash, stock, mixed, tender). Highest-priority remaining gap in the SEC workstream. Confirmed test case: Essential Utilities / AWK 8-K filed 2025-10-26 has Exhibit 2.1 at `https://www.sec.gov/Archives/edgar/data/1410636/000119312525250643/d866666dex21.htm` but adapter didn't fetch it. Estimated: ~half day.
 
-**B. Run the scorecard.** `python eval/score.py --gold eval/gold_set_<date>.csv --run-id run_20260423_153828`. Review against acceptance criteria.
+**Drop 3.23 — Section tagger navigation for embedded merger agreements**
+
+S-4s and DEFM14As contain a "THE MERGER AGREEMENT" parent section. The current tagger applies CONSIDERATION / CAPITALIZATION / TERMINATION_FEES patterns globally, producing only CONDITIONS_TO_CLOSING coverage (because conditions text is distributed throughout, not scoped to the agreement section). Fix: detect the parent section first, then apply existing patterns within the bounded scope. Validates against the Stellar/Prosperity and Essential/AWWC S-4s already in the production DB — no re-fetch needed. Estimated: ~half to 1 day.
+
+**Drop 3.24 — Adapter efficiency (deal-type gating)**
+
+Every triggered transaction currently runs all 5 SEC API jobs regardless of deal type or announcement recency: ~70 wasted API calls in a 100-PR run. Skip jobs that cannot produce results: private-target deals skip DEFM14A/S-4/SC TO-T/8K_ITEM_201; announcements within 30 days skip DEFM14A/S-4 (typical lag 30–90 days post-announcement); pure-cash deals skip S-4. Estimated: ~half day.
+
+**Operator task — gold set labeling (deferred from prior cycle)**
+
+Still pending. Label all transactions from run_20260423_153828 on full-coverage fields; 20/76 on spot-check fields; 9/9 NOT_RELEVANT for false-negative check. Cluster `tc_182e231b4059` (Allcryo / CTR) explicitly — confirmed correct merge; note in CSV that acquirer is PE portfolio co, sponsor is Bridge Industries, intermediate platform is TransTech Group. Run `python eval/score.py --gold eval/gold_set_<date>.csv --run-id run_20260423_153828` against acceptance criteria.
 
 ### 4.2 Prompt revision candidates (batch for Drop 3.8)
 
@@ -207,6 +243,16 @@ Deferred, to be batched after scorecard review:
 - **Item 2.02 fallback for earnings-release-disclosed deals.** Confirmed pattern via Honeywell AIP divestiture. Fallback to Item 2.02 only after other items NO_MATCH; gate by Haiku content filter confirming the 2.02 text references the specific target transaction. Estimated 1-2 days.
 - **PDF exhibit text extraction.** Currently marked UNREADABLE when Exhibit 2.1 or 99.x returns as PDF. Downstream skips. Implement in v2.
 - **Close-announcement linking (lifecycle management).** Today a CLOSE PR arriving weeks after an announcement creates an orphan CLOSE transaction. The right behavior is to link it to the existing announcement record and update closed_date/status. See §5.
+
+**Lifecycle-adjacent observation (SEC window + deal-matching, surfaced in cycle-close):**
+
+When `transaction_status=CLOSED` on first appearance (the PR is the close announcement, not the signing announcement), the forward-only SEC window misses the signing-era filings (DEFM14A, S-4, Exhibit 2.1) that were filed months earlier. A backward window would address this, BUT the adapter today has no deal-matching filter — it links filings to a transaction by filer identity only. A backward window without deal-matching filtering risks linking unrelated filings (other deals by the same acquirer, unrelated capital actions filed in that window) to the wrong transaction.
+
+Two-step fix required:
+1. **Adapter deal-matching filter** — before linking a filing, verify it references the target name or a deal identifier. Step 1 also retroactively improves the forward window; mis-attribution is possible today for active acquirers within the +180 day window.
+2. **Backward window for close-PR deals** — 180 days backward from closing date, anchored on signing date when extractable from PR text. Step 2 is gated on Step 1.
+
+Decide in a fresh session whether this surfaces as (a) a combined Drop 3.X adapter fix, or (b) deferred to §5.1 lifecycle management scope.
 
 ### 4.4 Not yet done — final MVP steps
 
@@ -269,10 +315,23 @@ Documents stored full-text in `transaction_document`. Heuristic section tagger (
 - Per-field source-type priority rules in `agreement_extract`: termination fees, MAC clause, merger structure prefer `8K_EXHIBIT_21` over later supplemental proxies; per_share_price defaults to most-recent (DEFA14A captures bumps)
 - CSV export adds `has_observation_changes` and `observation_changes_field_count` (~77 columns total)
 
-**NOT shipped (Drop 3.21+):**
+**Drop 3.21 ships SEC adapter cleaned-text fix + document_title heuristic improvements:**
+- `fetch_filing_full_text()`: strips SGML `<TEXT>...</TEXT>` wrapper before running trafilatura — resolves the Drop 3.19 defect where raw SGML was stored as `raw_text`
+- `extract_document_title()`: rejects SGML/HTML tag lines; `_TITLE_BOILERPLATE` extended to filter multi-line SEC cover-page headers (UNITED STATES, SECURITIES AND EXCHANGE COMMISSION, REGISTRATION STATEMENT, THE SECURITIES ACT)
+- `scripts/reprocess_sec_documents.py`: re-fetches SGML-wrapped production docs in-place, re-runs section tagger
+- Validation: 3 docs reprocessed; 2 S-4 transactions reached `agreement_extraction_status=EXTRACTED`; 7 observations written (all from `agreement_conditions` prompt — CONDITIONS_TO_CLOSING only)
+
+**Cycle-close finding: section coverage gap**
+Both S-4 transactions extracted only from the `agreement_conditions` section prompt. CONSIDERATION and TERMINATION_FEE excerpts were not tagged because the section tagger applies patterns globally across the full S-4 text rather than scoping into the embedded "THE MERGER AGREEMENT" parent section. This is the target for Drop 3.23.
+
+**NOT shipped (Drop 3.22+):**
+- **Drop 3.22** — `_find_exhibits()` fix: 8-K Exhibit 2.1 fetch produced 0 recoveries in cycle-close run; highest-priority adapter gap (see §4.1)
+- **Drop 3.23** — Section tagger navigation for embedded merger agreements in S-4s / DEFM14As; prerequisite for CONSIDERATION and TERMINATION_FEE coverage from those filing types (see §4.1)
+- **Drop 3.24** — Adapter efficiency: deal-type gating to skip impossible job/filing-type combinations (see §4.1)
+- Adapter deal-matching filter + backward window for close-PR deals (see §4.3)
 - Agreement-vs-PR conflict report surfacing to operator review queue
 - Per-form-type SEC window sub-ranges (8-K Exhibit 2.1 signing-day vs 8-K Item 2.01 close-day)
-- Long-tail deal sec-retry mode for deals with regulatory review > 180 days
+- Long-tail sec-retry mode for deals with regulatory review > 180 days
 
 ---
 
@@ -458,14 +517,21 @@ Operator: tailor the reset to the stages that will actually re-run. The `advisor
 
 Recommended first message to a fresh session:
 
-> I'm Erik. I'm working on an M&A data collection MVP. Please read `docs/project_state.md` first — it's the handoff document for the project. Then read `README.md` and the `specs/` folder.
+> I'm Erik. I'm working on an M&A data collection MVP. Please read `docs/project_state.md` first — it's the handoff document. Then `README.md` and the `specs/` folder.
 >
-> The pipeline completed a 100-PR production run (`run_20260423_153828`). Stage 8 clustering patch is done. Immediate remaining work:
-> 1. Gold set labeling (operator task — see §4.1A)
-> 2. Scorecard review (see §4.1B)
-> 3. Drop 3.8 — relevancy_filter v0.5 enum discipline tail (see §4.2)
+> Most recent shipped drop: **Drop 3.21** (`7c8a8166`) — SEC adapter cleaned-text fix + document_title heuristic improvements. Iteration cycle is complete through 3.21. The pipeline has run end-to-end at `MAX_FETCHES=100` with 226 transactions exported.
 >
-> After you've read the docs, give me a summary of what you understood and propose the order for the immediate work.
+> Next session is a prioritization decision. Three candidates, all independently startable:
+>
+> 1. **Drop 3.22** — Fix `_find_exhibits()` in `adapters/sec_api.py`. The 8-K Exhibit 2.1 fetch job has 0 recoveries across 18 triggered transactions. Exhibit 2.1 is the merger agreement at signing — available for all deal types, most information-dense document in the SEC workstream. Confirmed test case: Essential Utilities / AWK 8-K, Exhibit 2.1 URL in §3.2. Highest-impact remaining SEC gap. ~half day.
+>
+> 2. **Strategic rationale enhancement** — Two-layer rationale (primary + secondary + deal-specific narrative). Mockup design is well-developed from prior session. Highest-value design gap for data quality. Requires prompt revision + schema addition.
+>
+> 3. **Cost optimization A/B** — Sonnet substitution on summarize and/or rationale stages. Smallest task, fastest turnaround (~$25 total including validation run). Produces real operating economics data (current Opus-only cost per 100-PR run is $8–15; target is meaningful reduction). Results directly inform model-mix decisions for all future drops.
+>
+> After reading the docs, confirm what you understood and state which candidate you'd start with and why.
+
+**Other queued workstreams** (do not start without explicit instruction): Drop 3.23 section tagger navigation, Drop 3.24 adapter efficiency, §5.1 lifecycle management, cross-run dedup foundation, Business Wire adapter, HTML-aware section parsing, gold set labeling + scorecard, operational planning (daily volume sizing, model-mix cost projection).
 
 ---
 
@@ -473,6 +539,7 @@ Recommended first message to a fresh session:
 
 | Version | Date | Change |
 | :--- | :--- | :--- |
+| 0.6 | 2026-05-05 | Iteration cycle closed through Drop 3.21. §3.1 commits updated to full drop list 3.9–3.21 with SHAs. §3.2 cycle-close run results (run_20260505_112348, 226 transactions) + §3.4 cost calibration added. §4.1 replaced with bounded drops 3.22/3.23/3.24. §4.3 lifecycle-adjacent observation (deal-matching filter + backward window prerequisite) added. §5.2 Drop 3.21 shipped + NOT shipped queue updated. §8 next-session kickoff reframed as prioritization among Drop 3.22, strategic rationale, cost optimization A/B. |
 | 0.5 | 2026-05-04 | Drop 3.20b: transaction_field_observation table; observation diff columns on transaction_record; per-field priority rules in agreement_extract; §5.2 SEC source-comprehensiveness workstream marked COMPLETE. |
 | 0.4 | 2026-05-04 | Drop 3.20a: pipeline expanded to 14 stages; agreement_extract stage added; transaction_security and schema v0.9 fields documented; §5.2 updated with what shipped in 3.20a vs 3.20b. |
 | 0.3 | 2026-05-02 | Drop 3.19: sec_documents stage (Stage 10), pipeline expanded to 13 stages, schema v0.8 documented. |
