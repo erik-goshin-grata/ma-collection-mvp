@@ -1,11 +1,12 @@
 """
-Validation script for Drop 3.22b data-quality fixes.
+Validation script for Drop 3.22b and 3.22c data-quality fixes.
 
 Tests (no network, no API cost):
   Change 1 — UNKNOWN treated as non-observation for merger_structure
   Change 2 — Defined-term and bracketed-placeholder rejection for entity-name fields
   Change 3 — document_title watermark skip (EXECUTION VERSION, etc.)
   Change 5 — RECITALS position constraint (>15% rejected) + heading exclusion
+  3.22c — _clear_stale_canonical_fields() NULLs TR fields on empty observation set
 
 Usage:
     python scripts/test_agreement_extract_filters.py
@@ -13,16 +14,20 @@ Usage:
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from stages.agreement_extract import (
+    _CANONICAL_FIELD_OBSERVATION_MAP,
     _DEFINED_TERM_RE,
     _ENTITY_NAME_FIELDS,
     _OBSERVATION_REJECT_VALUES,
     _PLACEHOLDER_RE,
+    _clear_stale_canonical_fields,
 )
 from adapters.sec_api import extract_document_title
 from lib.section_tagger import tag_sections
@@ -186,6 +191,160 @@ C5_CASES = [
 
 
 # ---------------------------------------------------------------------------
+# Change 6 (3.22c) — _clear_stale_canonical_fields: canonical NULL on empty obs
+# ---------------------------------------------------------------------------
+
+_NULL_LOG = SimpleNamespace(debug=lambda *a, **kw: None, warning=lambda *a, **kw: None)
+_NOW = "2026-05-05T00:00:00+00:00"
+
+
+def _make_canonical_db() -> sqlite3.Connection:
+    """In-memory DB with the tables needed by _clear_stale_canonical_fields."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    tr_cols = ", ".join(
+        [f"{col} TEXT" for col in _CANONICAL_FIELD_OBSERVATION_MAP]
+        + ["consideration_components TEXT", "updated_at TEXT"]
+    )
+    conn.execute(f"CREATE TABLE transaction_record (transaction_id TEXT PRIMARY KEY, {tr_cols})")
+    conn.execute(
+        """
+        CREATE TABLE transaction_field_observation (
+            observation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id TEXT NOT NULL,
+            field_name TEXT NOT NULL,
+            field_value TEXT,
+            is_current INTEGER DEFAULT 1
+        )
+        """
+    )
+    return conn
+
+
+def _insert_tr(conn: sqlite3.Connection, txn_id: str, **fields) -> None:
+    cols = ["transaction_id"] + list(fields)
+    vals = [txn_id] + list(fields.values())
+    placeholders = ", ".join("?" * len(vals))
+    conn.execute(f"INSERT INTO transaction_record ({', '.join(cols)}) VALUES ({placeholders})", vals)
+
+
+def _insert_obs(conn: sqlite3.Connection, txn_id: str, field_name: str, field_value: str, is_current: int = 1) -> None:
+    conn.execute(
+        "INSERT INTO transaction_field_observation (transaction_id, field_name, field_value, is_current) VALUES (?, ?, ?, ?)",
+        (txn_id, field_name, field_value, is_current),
+    )
+
+
+def _get_tr(conn: sqlite3.Connection, txn_id: str, col: str):
+    row = conn.execute(f"SELECT {col} FROM transaction_record WHERE transaction_id=?", (txn_id,)).fetchone()
+    return row[col] if row else None
+
+
+def run_canonical_clear_tests() -> bool:
+    all_pass = True
+
+    print("--- 3.22c: _clear_stale_canonical_fields ---")
+
+    # Test 1: soft-deleted observation → canonical field becomes NULL
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn1", merger_structure="REVERSE_TRIANGULAR")
+    _insert_obs(conn, "txn1", "merger_structure", "REVERSE_TRIANGULAR", is_current=0)
+    _clear_stale_canonical_fields(conn, "txn1", _NOW, _NULL_LOG)
+    got = _get_tr(conn, "txn1", "merger_structure")
+    ok = got is None
+    print(f"  {'PASS' if ok else 'FAIL'}  soft-deleted obs → merger_structure becomes NULL (got {got!r})")
+    all_pass = all_pass and ok
+
+    # Test 2: filter-rejection case (no observation written; stale TR value present)
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn2", acquirer_merger_sub_name="Merger Sub")
+    # No observation for merger_sub_name (filtered before insert — never written)
+    _clear_stale_canonical_fields(conn, "txn2", _NOW, _NULL_LOG)
+    got = _get_tr(conn, "txn2", "acquirer_merger_sub_name")
+    ok = got is None
+    print(f"  {'PASS' if ok else 'FAIL'}  no obs for merger_sub_name → acquirer_merger_sub_name becomes NULL (got {got!r})")
+    all_pass = all_pass and ok
+
+    # Test 3: multiple observations, all soft-deleted → field NULLed
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn3", has_mac_clause="1")
+    for _ in range(3):
+        _insert_obs(conn, "txn3", "has_mac_clause", "1", is_current=0)
+    _clear_stale_canonical_fields(conn, "txn3", _NOW, _NULL_LOG)
+    got = _get_tr(conn, "txn3", "has_mac_clause")
+    ok = got is None
+    print(f"  {'PASS' if ok else 'FAIL'}  3 soft-deleted obs → has_mac_clause becomes NULL (got {got!r})")
+    all_pass = all_pass and ok
+
+    # Test 4: mix of current and soft-deleted → current wins, field not NULLed
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn4", merger_structure="FORWARD_TRIANGULAR")
+    _insert_obs(conn, "txn4", "merger_structure", "REVERSE_TRIANGULAR", is_current=0)
+    _insert_obs(conn, "txn4", "merger_structure", "FORWARD_TRIANGULAR", is_current=1)
+    _clear_stale_canonical_fields(conn, "txn4", _NOW, _NULL_LOG)
+    got = _get_tr(conn, "txn4", "merger_structure")
+    ok = got == "FORWARD_TRIANGULAR"
+    print(f"  {'PASS' if ok else 'FAIL'}  1 current + 1 soft-deleted → merger_structure preserved (got {got!r})")
+    all_pass = all_pass and ok
+
+    # Test 5: all canonical fields NULLed when no observations exist (clean-slate transaction)
+    conn = _make_canonical_db()
+    _insert_tr(
+        conn, "txn5",
+        merger_structure="DIRECT",
+        acquirer_merger_sub_name="Sub Inc.",
+        has_mac_clause="1",
+        requires_target_shareholder_vote="1",
+        target_fee_amount="50000000",
+        closing_conditions_summary="Some summary",
+    )
+    # No observations at all
+    _clear_stale_canonical_fields(conn, "txn5", _NOW, _NULL_LOG)
+    stale = [
+        col for col in ["merger_structure", "acquirer_merger_sub_name", "has_mac_clause",
+                         "requires_target_shareholder_vote", "target_fee_amount", "closing_conditions_summary"]
+        if _get_tr(conn, "txn5", col) is not None
+    ]
+    ok = not stale
+    print(f"  {'PASS' if ok else 'FAIL'}  no observations → all 6 stale fields become NULL (still set: {stale})")
+    all_pass = all_pass and ok
+
+    # Test 6: consideration_components NULLed when no consideration.* observations
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn6", consideration_components='[{"form":"CASH"}]')
+    # No consideration.* observations
+    _clear_stale_canonical_fields(conn, "txn6", _NOW, _NULL_LOG)
+    got = _get_tr(conn, "txn6", "consideration_components")
+    ok = got is None
+    print(f"  {'PASS' if ok else 'FAIL'}  no consideration.* obs → consideration_components becomes NULL (got {got!r})")
+    all_pass = all_pass and ok
+
+    # Test 7: consideration_components preserved when consideration.* observation exists
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn7", consideration_components='[{"form":"CASH"}]')
+    _insert_obs(conn, "txn7", "consideration.CASH.per_share_amount", "34.00", is_current=1)
+    _clear_stale_canonical_fields(conn, "txn7", _NOW, _NULL_LOG)
+    got = _get_tr(conn, "txn7", "consideration_components")
+    ok = got == '[{"form":"CASH"}]'
+    print(f"  {'PASS' if ok else 'FAIL'}  consideration.* obs present → consideration_components preserved (got {got!r})")
+    all_pass = all_pass and ok
+
+    # Test 8: unrelated fields untouched (fields with current observations are NOT NULLed)
+    conn = _make_canonical_db()
+    _insert_tr(conn, "txn8", has_mac_clause="1", merger_structure="DIRECT")
+    _insert_obs(conn, "txn8", "has_mac_clause", "1", is_current=1)
+    # No merger_structure observation
+    _clear_stale_canonical_fields(conn, "txn8", _NOW, _NULL_LOG)
+    mac = _get_tr(conn, "txn8", "has_mac_clause")
+    ms = _get_tr(conn, "txn8", "merger_structure")
+    ok = mac == "1" and ms is None
+    print(f"  {'PASS' if ok else 'FAIL'}  has_mac_clause preserved (obs current); merger_structure NULLed (no obs) (mac={mac!r}, ms={ms!r})")
+    all_pass = all_pass and ok
+
+    return all_pass
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -245,16 +404,24 @@ def run_tests() -> bool:
                 print(f"       heading={s.heading_text!r}  offset={s.excerpt_start_offset}")
             all_pass = False
 
+    print()
+    ok_canonical = run_canonical_clear_tests()
+    if not ok_canonical:
+        all_pass = False
+
     return all_pass
 
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("Drop 3.22b: agreement-extract data-quality filter tests")
+    print("Drop 3.22b/c: agreement-extract data-quality filter tests")
     print("=" * 60)
     print()
     ok = run_tests()
-    n_total = len(C1_CASES) + len(C2_DEFINED_TERM_CASES) + len(C2_PLACEHOLDER_CASES) + len(C3_CASES) + len(C5_CASES)
+    n_total = (
+        len(C1_CASES) + len(C2_DEFINED_TERM_CASES) + len(C2_PLACEHOLDER_CASES)
+        + len(C3_CASES) + len(C5_CASES) + 8  # 8 canonical-clear tests
+    )
     print()
     print(f"{'All tests passed.' if ok else 'SOME TESTS FAILED.'}")
     sys.exit(0 if ok else 1)

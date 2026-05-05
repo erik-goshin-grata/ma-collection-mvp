@@ -106,6 +106,26 @@ _DEFINED_TERM_RE = re.compile(
 )
 _PLACEHOLDER_RE = re.compile(r"\[|\]|…|\[[A-Z][^\]]*\]", re.IGNORECASE)
 
+# Maps transaction_record column → observation field_name that populates it.
+# Used by _clear_stale_canonical_fields() to NULL canonical fields whose current
+# observation set is empty (e.g. after soft-delete on re-run or filter rejection).
+# consideration_components is excluded: it has no direct observation field_name
+# (individual components are stored as consideration.{form}.{attr}).
+_CANONICAL_FIELD_OBSERVATION_MAP: dict[str, str] = {
+    "merger_structure":                  "merger_structure",
+    "acquirer_merger_sub_name":          "merger_sub_name",
+    "target_fee_amount":                 "target_termination_fee",
+    "target_fee_percentage":             "target_termination_fee_pct",
+    "acquirer_fee_amount":               "acquirer_termination_fee",
+    "acquirer_fee_percentage":           "acquirer_termination_fee_pct",
+    "has_go_shop":                       "has_go_shop",
+    "go_shop_period_days":               "go_shop_period_days",
+    "has_mac_clause":                    "has_mac_clause",
+    "requires_target_shareholder_vote":  "requires_target_shareholder_vote",
+    "target_vote_threshold":             "target_vote_threshold",
+    "closing_conditions_summary":        "closing_conditions_summary",
+}
+
 
 # ---------------------------------------------------------------------------
 # Diluted shares computation
@@ -154,6 +174,56 @@ def _compute_diluted_shares(securities: list[dict]) -> tuple[int | None, str]:
         quality = "NOT_AVAILABLE"
 
     return total if total > 0 else None, quality
+
+
+# ---------------------------------------------------------------------------
+# Canonical field cleanup (Drop 3.22c)
+# ---------------------------------------------------------------------------
+
+def _clear_stale_canonical_fields(
+    conn: sqlite3.Connection,
+    txn_id: str,
+    now: str,
+    log: Any,
+) -> None:
+    """NULL canonical transaction_record fields whose observation set is empty.
+
+    When observations are soft-deleted (e.g. on re-run after a filter change)
+    and no new observations replace them, the corresponding TR column retains its
+    stale value. This pass makes canonical state consistent with the current
+    observation set. Runs once per transaction after all documents are processed.
+    """
+    current_obs_fields: set[str] = {
+        row[0] for row in conn.execute(
+            "SELECT DISTINCT field_name FROM transaction_field_observation "
+            "WHERE transaction_id=? AND is_current=1",
+            (txn_id,),
+        ).fetchall()
+    }
+
+    to_null = [
+        tr_col
+        for tr_col, obs_field in _CANONICAL_FIELD_OBSERVATION_MAP.items()
+        if obs_field not in current_obs_fields
+    ]
+
+    # consideration_components: NULL when no consideration.* observations exist
+    has_consideration = any(f.startswith("consideration.") for f in current_obs_fields)
+    if not has_consideration:
+        to_null.append("consideration_components")
+
+    if not to_null:
+        return
+
+    set_parts = ", ".join(f"{col}=NULL" for col in to_null)
+    conn.execute(
+        f"UPDATE transaction_record SET {set_parts}, updated_at=? WHERE transaction_id=?",
+        (now, txn_id),
+    )
+    log.debug(
+        "transaction_id=%s: nulled %d stale canonical fields: %s",
+        txn_id, len(to_null), to_null,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -829,6 +899,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 "UPDATE transaction_record SET target_total_diluted_shares=?, fully_diluted_calc_quality=?, updated_at=? WHERE transaction_id=?",
                 (diluted, quality, now, txn_id),
             )
+
+        # Clear canonical fields whose observation set has become empty (Drop 3.22c)
+        try:
+            _clear_stale_canonical_fields(conn, txn_id, now, log)
+        except Exception as exc:
+            log.warning("transaction_id=%s canonical-clear failed: %s", txn_id, exc)
 
         # Observation diff (Drop 3.20b) — re-compute after all docs processed
         try:
