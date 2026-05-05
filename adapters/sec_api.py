@@ -558,7 +558,11 @@ def fetch_exhibit(
 
     if "html" in content_type:
         raw_html = resp.text
-        clean = trafilatura.extract(raw_html)
+        inner = raw_html
+        if re.match(r'\s*<DOCUMENT>', raw_html, re.IGNORECASE):
+            m = re.search(r'<TEXT>(.*?)</TEXT>', raw_html, re.DOTALL | re.IGNORECASE)
+            inner = m.group(1).strip() if m else raw_html
+        clean = trafilatura.extract(inner)
         return raw_html, clean or None, "FETCHED"
 
     text = resp.text.strip()
