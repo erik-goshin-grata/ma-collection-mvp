@@ -56,6 +56,14 @@ _MAX_FILINGS_PER_TYPE = 3
 _SLEEP = 2.0  # conservative sec-api.io throttle for this stage
 
 
+def _strip_ticker(ticker_raw: str | None) -> str | None:
+    """Strip exchange prefix from a ticker string ('NYSE:AWK' → 'AWK')."""
+    if not ticker_raw:
+        return None
+    stripped = ticker_raw.split(":")[-1].strip()
+    return stripped or None
+
+
 def _get_ticker_for_transaction(conn: sqlite3.Connection, transaction_id: str) -> tuple[str | None, str | None]:
     """Return (ticker, company_name) for the triggered extraction linked to this transaction."""
     row = conn.execute(
@@ -193,7 +201,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     # Find aggregated transactions that have at least one TRIGGERED extraction
     rows = conn.execute(
         """
-        SELECT DISTINCT tr.transaction_id, tr.announced_date, tr.target_name, tr.acquirer_name
+        SELECT DISTINCT tr.transaction_id, tr.announced_date,
+                        tr.target_name, tr.acquirer_name,
+                        tr.target_ticker, tr.acquirer_ticker
         FROM transaction_record tr
         WHERE tr.is_current = 1
           AND EXISTS (
@@ -223,6 +233,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             txn_id, target_name, acquirer_name, ticker, announced_date,
         )
 
+        # Tickers for 8K_EXHIBIT_21 dual-filer queries (target files the signing 8-K
+        # with near-100% reliability; acquirer often files one too).
+        tgt_ticker = _strip_ticker(row["target_ticker"])
+        acq_ticker = _strip_ticker(row["acquirer_ticker"])
+        _seen_ex21: set[str] = set()
+        exhibit_queries: list[tuple[str | None, str | None]] = []
+        for tk, nm in [(tgt_ticker, target_name), (acq_ticker, acquirer_name)]:
+            key = tk or nm or ""
+            if key and key not in _seen_ex21:
+                _seen_ex21.add(key)
+                exhibit_queries.append((tk, nm))
+        if not exhibit_queries:
+            # Neither TR ticker populated — fall back to trigger ticker
+            exhibit_queries.append((ticker, company_name or target_name))
+
         txn_docs = 0
 
         for db_filing_type, form_type_key, item_code in _FILING_JOBS:
@@ -232,13 +257,34 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
             try:
                 if db_filing_type == "8K_EXHIBIT_21":
-                    # Fetch 8-K first, then look for Exhibit 2.1 attachments
-                    filings_8k = _sec.query_filings(
-                        cfg, session, ticker, company_name or target_name, announced_date, log
-                    )
-                    time.sleep(_SLEEP)
-                    for filing in filings_8k[:_MAX_FILINGS_PER_TYPE]:
-                        for label, ex_url in _sec._find_exhibits(filing, _sec._EX_21_RE):
+                    # Query both target and acquirer for Item 1.01 signing 8-Ks;
+                    # deduplicate by accession so the same filing isn't double-stored.
+                    signing_filings: dict[str, dict] = {}
+                    for ex_ticker, ex_name in exhibit_queries:
+                        filer_filings = _sec.query_8k_signing_filings(
+                            cfg, session, ex_ticker, ex_name, announced_date, log
+                        )
+                        time.sleep(_SLEEP)
+                        for f in filer_filings[:_MAX_FILINGS_PER_TYPE]:
+                            acc = f.get("accessionNo") or f.get("id") or ""
+                            if acc and acc not in signing_filings:
+                                signing_filings[acc] = f
+
+                    for filing in signing_filings.values():
+                        exhibits = _sec._find_exhibits(filing, _sec._EX_21_RE)
+                        if not exhibits:
+                            log.info(
+                                "transaction_id=%s 8K_EXHIBIT_21: 0 exhibits found in accession=%s",
+                                txn_id, filing.get("accessionNo", "?"),
+                            )
+                            continue
+                        for label, ex_url in exhibits:
+                            if ex_url.lower().endswith(".pdf"):
+                                log.info(
+                                    "transaction_id=%s 8K_EXHIBIT_21: skipped PDF exhibit at %s",
+                                    txn_id, ex_url,
+                                )
+                                continue
                             raw_html, ex_text, ex_status = _sec.fetch_exhibit(cfg, session, ex_url, log)
                             time.sleep(_SLEEP)
                             if ex_status == "SKIP":
@@ -253,15 +299,17 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                                     docs_fetched += 1
                                     txn_docs += 1
                                     log.info(
-                                        "transaction_id=%s %s fetched  label=%r  chars=%d  sections=%d",
-                                        txn_id, db_filing_type, label, len(ex_text), secs,
+                                        "transaction_id=%s 8K_EXHIBIT_21 fetched  label=%r"
+                                        "  accession=%s  chars=%d  sections=%d",
+                                        txn_id, label, filing.get("accessionNo", "?"),
+                                        len(ex_text), secs,
                                     )
                                 elif doc_id:
                                     docs_fetched += 1
                                     txn_docs += 1
                                     log.info(
-                                        "transaction_id=%s %s UNREADABLE (label=%r)",
-                                        txn_id, db_filing_type, label,
+                                        "transaction_id=%s 8K_EXHIBIT_21 UNREADABLE  accession=%s",
+                                        txn_id, filing.get("accessionNo", "?"),
                                     )
                             break  # one Exhibit 2.1 per 8-K filing
 

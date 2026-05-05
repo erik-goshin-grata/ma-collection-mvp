@@ -42,8 +42,10 @@ _SEC_LANGUAGE = frozenset([
 ])
 _PUBLIC_BOILERPLATE = frozenset(["publicly traded", "common stock"])
 
-# Exhibit matching — prefix-only, case-insensitive
-_EX_21_RE = re.compile(r"^(EX-?2[-_.]?1|EXHIBIT\s+2\.?1|2\.1)\b", re.IGNORECASE)
+# Exhibit matching — prefix-only, case-insensitive.
+# Require a decimal separator between '2' and '1' so EX-21 (list of subsidiaries)
+# and EX-21.1 are not matched.  Supports EX-2.1 / EX-2.01 / EX 2.1 / EX2.1.
+_EX_21_RE = re.compile(r"^(EX[-\s]?2[._]0?1|EXHIBIT\s+2\.0?1|2\.1)\b", re.IGNORECASE)
 _EX_99_RE = re.compile(
     r"^(EX-?99[-_.]?[1-9]|EXHIBIT\s+99\.[1-9]|99\.[1-9])\b", re.IGNORECASE
 )
@@ -307,6 +309,101 @@ def query_filings(
             log.error("Unexpected Filing Query schema: %s", str(data)[:500])
             return []
 
+        return filings
+
+    return []
+
+
+def query_8k_signing_filings(
+    cfg: Config,
+    session: requests.Session,
+    ticker: str | None,
+    company_name: str | None,
+    announced_date: str,
+    log,
+) -> list[dict]:
+    """Query for 8-K filings reporting Item 1.01 (Entry into Material Definitive Agreement).
+
+    Uses a symmetric ±sec_date_window_days window around announced_date.  Signing 8-Ks
+    are typically filed the same day as or one day before the PR announcement, so the
+    symmetric window (unlike the forward-only window for DEFM14A/S-4) is correct here.
+
+    Call once per public party (target and acquirer) and merge results at the call site.
+
+    Returns up to 10 filing dicts or [] on error.
+    """
+    import logging as _logging
+    log = log or _logging.getLogger(__name__)
+
+    try:
+        anchor = datetime.strptime(announced_date, "%Y-%m-%d")
+    except ValueError:
+        anchor = datetime.now(timezone.utc)
+
+    start = (anchor - timedelta(days=cfg.sec_date_window_days)).strftime("%Y-%m-%d")
+    end = (anchor + timedelta(days=cfg.sec_date_window_days)).strftime("%Y-%m-%d")
+
+    parts = ['formType:"8-K"', 'items:"1.01"']
+    if ticker:
+        parts.append(f'ticker:"{ticker}"')
+    elif company_name:
+        parts.append(f'companyName:"{company_name}"')
+    parts.append(f"filedAt:[{start} TO {end}]")
+    query_str = " AND ".join(parts)
+
+    payload = {
+        "query": {"query_string": {"query": query_str}},
+        "from": "0",
+        "size": "10",
+        "sort": [{"filedAt": {"order": "desc"}}],
+    }
+    log.debug("query_8k_signing_filings payload: %s", json.dumps(payload))
+
+    time.sleep(cfg.sec_api_request_delay_seconds)
+    for attempt in range(2):
+        try:
+            resp = session.post(
+                _FILING_QUERY_URL,
+                json=payload,
+                params={"token": cfg.sec_api_key},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            if attempt == 0:
+                log.warning("Network error on 8K signing query (%s): %s — retry in 10s", ticker or company_name, exc)
+                time.sleep(10)
+                continue
+            log.error("8K signing query failed after retry: %s", exc)
+            return []
+
+        if resp.status_code in (401, 403):
+            raise RuntimeError(
+                f"sec-api.io auth failure ({resp.status_code}) — check SEC_API_KEY"
+            )
+        if resp.status_code == 429:
+            if attempt == 0:
+                log.warning("429 on 8K signing query — sleeping 30s, retry once")
+                time.sleep(30)
+                continue
+            log.warning("Persistent 429 on 8K signing query — skipping")
+            return []
+        if resp.status_code >= 500 and attempt == 0:
+            log.warning("5xx (%s) on 8K signing query — retry in 10s", resp.status_code)
+            time.sleep(10)
+            continue
+        if resp.status_code != 200:
+            log.error("Unexpected status %s on 8K signing query: %s", resp.status_code, resp.text[:500])
+            return []
+
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            log.error("8K signing query returned non-JSON: %s", exc)
+            return []
+
+        filings = data.get("filings") or data.get("hits", {}).get("hits", [])
+        if not isinstance(filings, list):
+            return []
         return filings
 
     return []
