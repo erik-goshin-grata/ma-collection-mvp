@@ -39,6 +39,7 @@ import requests
 import adapters.sec_api as _sec
 from adapters.sec_api import extract_document_title
 from config import Config
+from lib.exhibit_21_navigator import navigate_exhibit_21
 from lib.section_tagger import tag_sections
 from logger import get_logger
 
@@ -154,14 +155,12 @@ def _insert_document(
     return existing["document_id"] if existing else 0
 
 
-def _tag_and_insert_sections(
+def _insert_section_matches(
     conn: sqlite3.Connection,
     document_id: int,
-    raw_text: str,
-    log,
+    matches: list,
 ) -> int:
-    """Run section tagger and insert results; returns count of sections inserted."""
-    matches = tag_sections(raw_text)
+    """Insert pre-computed section matches; returns count inserted."""
     inserted = 0
     for m in matches:
         conn.execute(
@@ -183,6 +182,16 @@ def _tag_and_insert_sections(
         )
         inserted += 1
     return inserted
+
+
+def _tag_and_insert_sections(
+    conn: sqlite3.Connection,
+    document_id: int,
+    raw_text: str,
+    log,
+) -> int:
+    """Run section tagger and insert results; returns count of sections inserted."""
+    return _insert_section_matches(conn, document_id, tag_sections(raw_text))
 
 
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
@@ -293,7 +302,15 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                                 doc_id = _insert_document(conn, txn_id, db_filing_type, filing, ex_text, now)
                                 conn.commit()
                                 if doc_id and ex_text:
-                                    secs = _tag_and_insert_sections(conn, doc_id, ex_text, log)
+                                    ex_matches = navigate_exhibit_21(ex_text)
+                                    if not ex_matches:
+                                        log.info(
+                                            "transaction_id=%s doc_id=%d exhibit_21_navigator empty url=%s"
+                                            " — falling back to section_tagger",
+                                            txn_id, doc_id, ex_url,
+                                        )
+                                        ex_matches = tag_sections(ex_text)
+                                    secs = _insert_section_matches(conn, doc_id, ex_matches)
                                     conn.commit()
                                     sections_tagged += secs
                                     docs_fetched += 1
