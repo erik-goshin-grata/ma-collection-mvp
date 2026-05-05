@@ -27,12 +27,33 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     Uses PRAGMA table_info to check existence before ALTER TABLE so each
     migration is idempotent.  New columns are also added to the CREATE TABLE
     definitions in schema/001_initial.sql so fresh databases never need these.
+    Listed in drop order so migrations always run in dependency sequence.
     """
     def _existing(table: str) -> set:
         return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
+    # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
+    # Drop 3.18 — multi_transaction_index/total on staging_extraction
+    # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document
+    # Drop 3.20a — 9 agreement-extraction columns on transaction_record
+    # Drop 3.20b — 3 observation-diff columns on transaction_record
+
+    se_cols = _existing("staging_extraction")
+    for col, col_type in [
+        ("multi_transaction_index", "INTEGER DEFAULT 0"),
+        ("multi_transaction_total", "INTEGER DEFAULT 1"),
+    ]:
+        if col not in se_cols:
+            conn.execute(f"ALTER TABLE staging_extraction ADD COLUMN {col} {col_type}")
+
     tr_cols = _existing("transaction_record")
     for col, col_type in [
+        # Drop 3.16
+        ("has_earnout",                      "INTEGER DEFAULT 0"),
+        ("has_cvr",                          "INTEGER DEFAULT 0"),
+        # Drop 3.19
+        ("linked_filings_count",             "INTEGER DEFAULT 0"),
+        # Drop 3.20a
         ("acquirer_merger_sub_name",         "TEXT"),
         ("merger_structure",                 "TEXT"),
         ("has_mac_clause",                   "INTEGER DEFAULT 0"),
@@ -42,6 +63,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("target_total_diluted_shares",      "INTEGER"),
         ("fully_diluted_calc_quality",       "TEXT"),
         ("agreement_extraction_status",      "TEXT"),
+        # Drop 3.20b
+        ("has_observation_changes",          "INTEGER DEFAULT 0"),
+        ("observation_changes_field_count",  "INTEGER DEFAULT 0"),
+        ("observation_changes_summary",      "TEXT"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
@@ -49,15 +74,6 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     td_cols = _existing("transaction_document")
     if "document_title" not in td_cols:
         conn.execute("ALTER TABLE transaction_document ADD COLUMN document_title TEXT")
-
-    # Drop 3.20b: observation diff columns on transaction_record
-    for col, col_type in [
-        ("has_observation_changes",          "INTEGER DEFAULT 0"),
-        ("observation_changes_field_count",  "INTEGER DEFAULT 0"),
-        ("observation_changes_summary",      "TEXT"),
-    ]:
-        if col not in tr_cols:
-            conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
 
     # Drop 3.20b: create transaction_field_observation table if not present
     existing_tables = {
