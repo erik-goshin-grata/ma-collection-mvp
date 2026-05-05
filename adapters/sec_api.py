@@ -702,19 +702,29 @@ def fetch_filing_full_text(
         return None, "UNREADABLE"
 
     if "html" in content_type or html_url.lower().endswith((".htm", ".html")):
-        raw_html = resp.text
-        clean = trafilatura.extract(raw_html)
+        raw_content = resp.text
+        # SEC SGML submission packages wrap the actual document in <TEXT>...</TEXT>;
+        # trafilatura fails on the outer SGML envelope — strip it first.
+        if re.match(r'\s*<DOCUMENT>', raw_content, re.IGNORECASE):
+            text_match = re.search(r'<TEXT>(.*?)</TEXT>', raw_content, re.DOTALL | re.IGNORECASE)
+            inner_content = text_match.group(1).strip() if text_match else raw_content
+        else:
+            inner_content = raw_content
+        clean = trafilatura.extract(inner_content)
         if clean:
             return clean.strip(), "FETCHED"
-        # trafilatura gave up; try raw text as last resort
-        return resp.text.strip() or None, "FETCHED" if resp.text.strip() else "SKIP"
+        text = inner_content.strip()
+        return (text, "FETCHED") if text else (None, "SKIP")
 
     text = resp.text.strip()
     return (text, "FETCHED") if text else (None, "SKIP")
 
 
 _TITLE_BOILERPLATE = re.compile(
-    r"UNITED STATES SECURITIES AND EXCHANGE COMMISSION"
+    r"UNITED STATES"                    # catches "UNITED STATES" and the full SEC commission name
+    r"|SECURITIES AND EXCHANGE COMMISSION"  # when split from "UNITED STATES" across lines
+    r"|REGISTRATION STATEMENT"
+    r"|THE SECURITIES ACT"
     r"|WASHINGTON,?\s*D\.?C\.?"
     r"|FORM\s+\d+-?[A-Z]?"
     r"|CURRENT REPORT"
@@ -745,6 +755,9 @@ def extract_document_title(raw_text: str) -> str | None:
         if not line or len(line) < 10 or len(line) > 150:
             continue
         if _TITLE_BOILERPLATE.search(line):
+            continue
+        # Skip SGML/HTML lines — real titles never start with '<'
+        if line.startswith('<'):
             continue
         alpha = [c for c in line if c.isalpha()]
         if not alpha:
