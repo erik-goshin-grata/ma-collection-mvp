@@ -119,6 +119,23 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         WHERE is_current = 1
     """)
 
+    # Drop 3.26 — partial expression unique index on transaction_security.
+    # COALESCE on security_class and shares_outstanding_as_of normalises NULLs to ''
+    # so that identical rows with NULL-valued columns still collide. Plain column
+    # names would not catch the duplicate because SQLite treats NULLs as distinct
+    # in unique indexes. Scoped to is_current=1; soft-deleted history unconstrained.
+    # Wipe transaction_security before migrating if duplicate rows already exist.
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_security_unique_current
+        ON transaction_security (
+            extraction_source_document_id,
+            security_type,
+            COALESCE(security_class, ''),
+            COALESCE(shares_outstanding_as_of, '')
+        )
+        WHERE is_current = 1
+    """)
+
     conn.commit()
 
 

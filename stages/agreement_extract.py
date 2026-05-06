@@ -525,13 +525,23 @@ def _apply_capitalization(
     securities = result.get("securities")
     if not isinstance(securities, list):
         return 0
+
+    # Soft-delete prior rows for this document before reinserting. Inside the
+    # per-document SAVEPOINT doc_extract (Drop 3.25) — rollback on any section
+    # failure atomically restores these rows to is_current=1.
+    conn.execute(
+        "UPDATE transaction_security SET is_current=0 "
+        "WHERE extraction_source_document_id=? AND is_current=1",
+        (document_id,),
+    )
+
     inserted = 0
     for sec in securities:
         if not isinstance(sec, dict) or not sec.get("security_type"):
             continue
         conn.execute(
             """
-            INSERT INTO transaction_security (
+            INSERT OR IGNORE INTO transaction_security (
                 transaction_id, security_type, security_type_as_reported, security_class,
                 shares_outstanding, shares_outstanding_as_of, weighted_avg_strike_price,
                 consideration_treatment, consideration_per_share, consideration_currency,

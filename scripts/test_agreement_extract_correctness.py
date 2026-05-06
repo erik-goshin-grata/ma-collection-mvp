@@ -343,9 +343,197 @@ def run_extracted_on_success_tests() -> None:
     conn.close()
 
 
+def _make_security_conn() -> sqlite3.Connection:
+    """In-memory DB with transaction_security and the Drop 3.26 unique index."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript("""
+        CREATE TABLE transaction_security (
+            security_id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id                TEXT NOT NULL,
+            security_type                 TEXT NOT NULL,
+            security_type_as_reported     TEXT,
+            security_class                TEXT,
+            shares_outstanding            INTEGER,
+            shares_outstanding_as_of      TEXT,
+            weighted_avg_strike_price     REAL,
+            consideration_treatment       TEXT,
+            consideration_per_share       REAL,
+            consideration_currency        TEXT,
+            notes                         TEXT,
+            is_current                    INTEGER DEFAULT 1,
+            extraction_source_section_id  INTEGER,
+            extraction_source_document_id INTEGER,
+            extracted_at                  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX idx_security_unique_current
+        ON transaction_security (
+            extraction_source_document_id,
+            security_type,
+            COALESCE(security_class, ''),
+            COALESCE(shares_outstanding_as_of, '')
+        )
+        WHERE is_current = 1;
+    """)
+    return conn
+
+
+def _count_current_securities(conn: sqlite3.Connection) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM transaction_security WHERE is_current=1"
+    ).fetchone()[0]
+
+
+def _insert_security(conn: sqlite3.Connection, doc_id: int, txn_id: str,
+                     security_type: str, security_class, as_of_date) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO transaction_security "
+        "(transaction_id, security_type, security_class, shares_outstanding_as_of, "
+        "is_current, extraction_source_document_id) "
+        "VALUES (?, ?, ?, ?, 1, ?)",
+        (txn_id, security_type, security_class, as_of_date, doc_id),
+    )
+
+
+# ---------------------------------------------------------------------------
+# H. transaction_security soft-delete and unique index (Drop 3.26)
+# ---------------------------------------------------------------------------
+
+def run_security_idempotency_tests() -> None:
+    print("\n--- H. transaction_security idempotency (Drop 3.26) ---")
+
+    # H1: unique index catches duplicate (doc, type, NULL class, date) via COALESCE
+    conn = _make_security_conn()
+    conn.execute(
+        "INSERT INTO transaction_security (transaction_id, security_type, security_class, "
+        "shares_outstanding_as_of, is_current, extraction_source_document_id) "
+        "VALUES ('t1', 'COMMON_STOCK', NULL, '2026-01-23', 1, 9)"
+    )
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO transaction_security (transaction_id, security_type, security_class, "
+            "shares_outstanding_as_of, is_current, extraction_source_document_id) "
+            "VALUES ('t1', 'COMMON_STOCK', NULL, '2026-01-23', 1, 9)"
+        )
+        conn.commit()
+        _check("H1: NULL-class duplicate raises IntegrityError via COALESCE index", False)
+    except sqlite3.IntegrityError:
+        _check("H1: NULL-class duplicate raises IntegrityError via COALESCE index", True)
+    conn.close()
+
+    # H2: INSERT OR IGNORE on duplicate no-ops; count stable
+    conn = _make_security_conn()
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    conn.commit()
+    count_before = _count_current_securities(conn)
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    conn.commit()
+    _check("H2: INSERT OR IGNORE on duplicate — count stable",
+           _count_current_securities(conn) == count_before)
+    conn.close()
+
+    # H3: different as-of date for same class → two rows (Stellar pattern)
+    conn = _make_security_conn()
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-26")
+    conn.commit()
+    _check("H3: two as-of dates for same class — both rows insert (Stellar pattern)",
+           _count_current_securities(conn) == 2)
+    conn.close()
+
+    # H4: different security types from same document → both rows insert
+    conn = _make_security_conn()
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    _insert_security(conn, 9, "t1", "OPTIONS",      None, "2026-01-23")
+    _insert_security(conn, 9, "t1", "PSU",          None, "2026-01-23")
+    conn.commit()
+    _check("H4: different security types same doc — all rows insert",
+           _count_current_securities(conn) == 3)
+    conn.close()
+
+    # H5: dual-filer same class+date, different source_document_id → both rows insert
+    conn = _make_security_conn()
+    _insert_security(conn, 9,  "t1", "COMMON_STOCK", None, "2026-01-23")  # doc 9
+    _insert_security(conn, 10, "t1", "COMMON_STOCK", None, "2026-01-23")  # doc 10 (other filer)
+    conn.commit()
+    _check("H5: dual-filer rows (different source docs) — both rows insert",
+           _count_current_securities(conn) == 2)
+    conn.close()
+
+    # H6: soft-delete fires; prior rows become is_current=0; fresh inserts succeed
+    conn = _make_security_conn()
+    # Seed prior rows (simulating a previous extraction)
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2025-12-01")
+    _insert_security(conn, 9, "t1", "OPTIONS",      None, "2025-12-01")
+    conn.commit()
+    _check("H6-setup: prior rows present", _count_current_securities(conn) == 2)
+
+    # Soft-delete (mirrors _apply_capitalization())
+    conn.execute(
+        "UPDATE transaction_security SET is_current=0 "
+        "WHERE extraction_source_document_id=9 AND is_current=1"
+    )
+    _check("H6: soft-delete zeroes current count", _count_current_securities(conn) == 0)
+
+    # Fresh inserts with new date
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    conn.commit()
+    _check("H6: fresh inserts after soft-delete succeed", _count_current_securities(conn) == 1)
+    _check("H6: total row count = 3 (2 soft-deleted + 1 new current)",
+           conn.execute("SELECT COUNT(*) FROM transaction_security").fetchone()[0] == 3)
+    conn.close()
+
+    # H7: same document extracted twice within one run — second pass is no-op
+    conn = _make_security_conn()
+    conn.execute(
+        "UPDATE transaction_security SET is_current=0 "
+        "WHERE extraction_source_document_id=9 AND is_current=1"
+    )
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    conn.commit()
+    count_after_first = _count_current_securities(conn)
+    # Simulate second extraction of same doc (soft-delete already fired above)
+    conn.execute(
+        "UPDATE transaction_security SET is_current=0 "
+        "WHERE extraction_source_document_id=9 AND is_current=1"
+    )
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    conn.commit()
+    _check("H7: idempotent — same doc extracted twice yields same row count",
+           _count_current_securities(conn) == count_after_first)
+    conn.close()
+
+    # H8: savepoint rollback restores prior security rows alongside observations
+    conn = _make_security_conn()
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2025-12-01")
+    conn.commit()
+    prior_count = _count_current_securities(conn)
+
+    conn.execute("SAVEPOINT doc_extract")
+    conn.execute(
+        "UPDATE transaction_security SET is_current=0 "
+        "WHERE extraction_source_document_id=9 AND is_current=1"
+    )
+    _insert_security(conn, 9, "t1", "COMMON_STOCK", None, "2026-01-23")
+    _check("H8: new insert visible inside savepoint", _count_current_securities(conn) == 1)
+
+    # Simulate section failure — rollback
+    conn.execute("ROLLBACK TO SAVEPOINT doc_extract")
+    conn.execute("RELEASE SAVEPOINT doc_extract")
+    _check("H8: after rollback, prior securities restored",
+           _count_current_securities(conn) == prior_count)
+    _check("H8: new insert (2026-01-23) gone after rollback",
+           conn.execute(
+               "SELECT COUNT(*) FROM transaction_security WHERE shares_outstanding_as_of='2026-01-23'",
+           ).fetchone()[0] == 0)
+    conn.close()
+
+
 def run_tests() -> None:
     print("=" * 60)
-    print("test_agreement_extract_correctness.py  (Drop 3.25)")
+    print("test_agreement_extract_correctness.py  (Drop 3.25 / 3.26)")
     print("=" * 60)
 
     run_unique_index_tests()
@@ -353,6 +541,7 @@ def run_tests() -> None:
     run_savepoint_tests()
     run_pending_on_failure_tests()
     run_extracted_on_success_tests()
+    run_security_idempotency_tests()
 
     total = _PASS + _FAIL
     print(f"\n{'=' * 60}")
