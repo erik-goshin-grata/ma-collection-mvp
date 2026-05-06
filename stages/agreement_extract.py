@@ -267,7 +267,7 @@ def _write_observations(
 
         conn.execute(
             """
-            INSERT INTO transaction_field_observation (
+            INSERT OR IGNORE INTO transaction_field_observation (
                 transaction_id, field_name, field_value, field_value_numeric,
                 source_document_id, source_section_id, observed_as_of_date,
                 filing_date, extraction_prompt_version
@@ -290,7 +290,7 @@ def _write_observations(
         fname = f"shares_outstanding.{stype}" + (f".{sclass}" if sclass else "")
         conn.execute(
             """
-            INSERT INTO transaction_field_observation (
+            INSERT OR IGNORE INTO transaction_field_observation (
                 transaction_id, field_name, field_value, field_value_numeric,
                 source_document_id, source_section_id, observed_as_of_date,
                 filing_date, extraction_prompt_version
@@ -315,7 +315,7 @@ def _write_observations(
             numeric = float(val) if isinstance(val, (int, float)) else None
             conn.execute(
                 """
-                INSERT INTO transaction_field_observation (
+                INSERT OR IGNORE INTO transaction_field_observation (
                     transaction_id, field_name, field_value, field_value_numeric,
                     source_document_id, source_section_id, observed_as_of_date,
                     filing_date, extraction_prompt_version
@@ -773,124 +773,162 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
         for doc_row in doc_rows:
             doc_id = doc_row["document_id"]
+            doc_all_succeeded = True
+            doc_sections = 0
+            doc_observations = 0
+            doc_securities = 0
+            doc_securities_list: list[dict] = []
 
-            # Soft-delete existing observations for this document so re-runs replace
-            # stale data (e.g. UNKNOWN values, defined-term entity names from old passes)
-            conn.execute(
-                "UPDATE transaction_field_observation SET is_current=0 WHERE source_document_id=?",
-                (doc_id,),
-            )
+            try:
+                conn.execute("SAVEPOINT doc_extract")
 
-            section_rows = conn.execute(
-                """
-                SELECT tds.section_id, tds.section_type, tds.excerpt_text, tds.confidence,
-                       td.filing_type, td.filing_date, td.document_title
-                FROM transaction_document_section tds
-                JOIN transaction_document td ON td.document_id = tds.document_id
-                WHERE tds.document_id = ?
-                  AND tds.confidence IN ('HIGH','MEDIUM')
-                ORDER BY tds.section_id
-                """,
-                (doc_id,),
-            ).fetchall()
+                # Soft-delete existing observations inside savepoint so rollback
+                # on section failure atomically restores prior is_current=1 rows.
+                conn.execute(
+                    "UPDATE transaction_field_observation SET is_current=0 WHERE source_document_id=?",
+                    (doc_id,),
+                )
 
-            by_type: dict[str, list] = {}
-            for sr in section_rows:
-                by_type.setdefault(sr["section_type"], []).append(sr)
+                section_rows = conn.execute(
+                    """
+                    SELECT tds.section_id, tds.section_type, tds.excerpt_text, tds.confidence,
+                           td.filing_type, td.filing_date, td.document_title
+                    FROM transaction_document_section tds
+                    JOIN transaction_document td ON td.document_id = tds.document_id
+                    WHERE tds.document_id = ?
+                      AND tds.confidence IN ('HIGH','MEDIUM')
+                    ORDER BY tds.section_id
+                    """,
+                    (doc_id,),
+                ).fetchall()
 
-            for section_type, prompt_name in _SECTION_PROMPT_MAP.items():
-                sections = by_type.get(section_type, [])
-                if not sections:
-                    continue
+                by_type: dict[str, list] = {}
+                for sr in section_rows:
+                    by_type.setdefault(sr["section_type"], []).append(sr)
 
-                for sec_row in sections:
-                    excerpt = sec_row["excerpt_text"]
-                    if not excerpt or not excerpt.strip():
+                for section_type, prompt_name in _SECTION_PROMPT_MAP.items():
+                    if not doc_all_succeeded:
+                        break
+                    sections = by_type.get(section_type, [])
+                    if not sections:
                         continue
 
-                    log.debug(
-                        "transaction_id=%s section=%s doc=%s confidence=%s",
-                        txn_id, section_type, doc_id, sec_row["confidence"],
-                    )
+                    for sec_row in sections:
+                        if not doc_all_succeeded:
+                            break
+                        excerpt = sec_row["excerpt_text"]
+                        if not excerpt or not excerpt.strip():
+                            continue
 
-                    result = _call_section_prompt(
-                        prompt_name, excerpt, conn, cfg, run_id, log
-                    )
-                    time.sleep(_SLEEP)
-
-                    if result is None:
-                        error_count += 1
-                        continue
-
-                    txn_sections += 1
-                    prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
-
-                    try:
-                        obs_before = conn.execute(
-                            "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",
-                            (txn_id,),
-                        ).fetchone()[0]
-
-                        _write_observations(
-                            conn,
-                            transaction_id=txn_id,
-                            extraction_results=result,
-                            source_document_id=doc_id,
-                            source_section_id=sec_row["section_id"],
-                            filing_date=sec_row["filing_date"],
-                            extraction_prompt_version=prompt_version,
+                        log.debug(
+                            "transaction_id=%s section=%s doc=%s confidence=%s",
+                            txn_id, section_type, doc_id, sec_row["confidence"],
                         )
 
-                        obs_after = conn.execute(
-                            "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",
-                            (txn_id,),
-                        ).fetchone()[0]
-                        txn_observations += obs_after - obs_before
-
-                        if section_type == "RECITALS":
-                            _apply_recitals(
-                                conn, txn_id, result, now,
-                                sec_row["filing_type"], field_priority_state, log,
-                            )
-                        elif section_type == "CONSIDERATION":
-                            _apply_consideration(conn, txn_id, result, now, log)
-                        elif section_type == "CAPITALIZATION":
-                            n = _apply_capitalization(
-                                conn, txn_id, result,
-                                sec_row["section_id"], doc_id,
-                                now, log,
-                            )
-                            txn_securities += n
-                            if isinstance(result.get("securities"), list):
-                                all_securities.extend(result["securities"])
-                        elif section_type == "TERMINATION_FEES":
-                            _apply_termination(
-                                conn, txn_id, result, now,
-                                sec_row["filing_type"], field_priority_state, log,
-                            )
-                        elif section_type == "CONDITIONS_TO_CLOSING":
-                            _apply_conditions(
-                                conn, txn_id, result, now,
-                                sec_row["filing_type"], field_priority_state, log,
-                            )
-                        conn.commit()
-                    except Exception as exc:
-                        log.warning(
-                            "transaction_id=%s section=%s apply error: %s — continuing",
-                            txn_id, section_type, exc,
+                        result = _call_section_prompt(
+                            prompt_name, excerpt, conn, cfg, run_id, log
                         )
-                        error_count += 1
+                        time.sleep(_SLEEP)
+
+                        if result is None:
+                            error_count += 1
+                            doc_all_succeeded = False
+                            break
+
+                        doc_sections += 1
+                        prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
+
                         try:
-                            conn.rollback()
-                        except Exception:
-                            pass
+                            obs_before = conn.execute(
+                                "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",
+                                (txn_id,),
+                            ).fetchone()[0]
 
-            # Mark this document as extracted regardless of section count
-            conn.execute(
-                "UPDATE transaction_document SET agreement_extracted_at=? WHERE document_id=?",
-                (now, doc_id),
-            )
-            conn.commit()
+                            _write_observations(
+                                conn,
+                                transaction_id=txn_id,
+                                extraction_results=result,
+                                source_document_id=doc_id,
+                                source_section_id=sec_row["section_id"],
+                                filing_date=sec_row["filing_date"],
+                                extraction_prompt_version=prompt_version,
+                            )
+
+                            obs_after = conn.execute(
+                                "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",
+                                (txn_id,),
+                            ).fetchone()[0]
+                            doc_observations += obs_after - obs_before
+
+                            if section_type == "RECITALS":
+                                _apply_recitals(
+                                    conn, txn_id, result, now,
+                                    sec_row["filing_type"], field_priority_state, log,
+                                )
+                            elif section_type == "CONSIDERATION":
+                                _apply_consideration(conn, txn_id, result, now, log)
+                            elif section_type == "CAPITALIZATION":
+                                n = _apply_capitalization(
+                                    conn, txn_id, result,
+                                    sec_row["section_id"], doc_id,
+                                    now, log,
+                                )
+                                doc_securities += n
+                                if isinstance(result.get("securities"), list):
+                                    doc_securities_list.extend(result["securities"])
+                            elif section_type == "TERMINATION_FEES":
+                                _apply_termination(
+                                    conn, txn_id, result, now,
+                                    sec_row["filing_type"], field_priority_state, log,
+                                )
+                            elif section_type == "CONDITIONS_TO_CLOSING":
+                                _apply_conditions(
+                                    conn, txn_id, result, now,
+                                    sec_row["filing_type"], field_priority_state, log,
+                                )
+                        except Exception as exc:
+                            log.warning(
+                                "transaction_id=%s section=%s apply error: %s — rolling back doc",
+                                txn_id, section_type, exc,
+                            )
+                            error_count += 1
+                            doc_all_succeeded = False
+                            break
+
+                if doc_all_succeeded:
+                    # agreement_extracted_at only set on full per-document success
+                    conn.execute(
+                        "UPDATE transaction_document SET agreement_extracted_at=? WHERE document_id=?",
+                        (now, doc_id),
+                    )
+                    conn.execute("RELEASE SAVEPOINT doc_extract")
+                    conn.commit()
+                    txn_sections += doc_sections
+                    txn_observations += doc_observations
+                    txn_securities += doc_securities
+                    all_securities.extend(doc_securities_list)
+                else:
+                    # Rollback restores soft-deleted observations and undoes any
+                    # partial inserts; document stays PENDING for next rerun.
+                    conn.execute("ROLLBACK TO SAVEPOINT doc_extract")
+                    conn.execute("RELEASE SAVEPOINT doc_extract")
+                    log.warning(
+                        "transaction_id=%s doc_id=%d rolled back due to section failure; "
+                        "prior observations restored, document remains PENDING",
+                        txn_id, doc_id,
+                    )
+
+            except Exception as exc:
+                log.exception(
+                    "transaction_id=%s doc_id=%d rolled back due to exception: %s",
+                    txn_id, doc_id, exc,
+                )
+                error_count += 1
+                try:
+                    conn.execute("ROLLBACK TO SAVEPOINT doc_extract")
+                    conn.execute("RELEASE SAVEPOINT doc_extract")
+                except Exception:
+                    pass
 
         # Diluted shares rollup from capitalization observations
         if all_securities:

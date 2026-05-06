@@ -109,6 +109,16 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
                 ON transaction_field_observation(filing_date);
         """)
 
+    # Drop 3.25 — partial unique index on (source_section_id, field_name, field_value)
+    # for idempotent observation inserts. Scoped to is_current=1 so soft-deleted
+    # history rows are unconstrained. If existing rows contain duplicates the CREATE
+    # will fail — wipe transaction_field_observation first, then run migrations.
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current
+        ON transaction_field_observation (source_section_id, field_name, field_value)
+        WHERE is_current = 1
+    """)
+
     conn.commit()
 
 
