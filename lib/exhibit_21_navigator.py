@@ -28,9 +28,12 @@ Design notes:
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from lib.section_tagger import SectionMatch
+
+_log = logging.getLogger(__name__)
 
 # Matches an ARTICLE N line with nothing after the numeral.
 ARTICLE_ANCHOR_RE = re.compile(
@@ -62,6 +65,34 @@ _HEADING_MAP: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bTERMINATION\b", re.I), "TERMINATION_FEES"),
 ]
 
+# Matches the company's Representations and Warranties article heading.
+# Negative lookahead excludes parent/buyer/seller/merger-sub variants so we only
+# descend into the company reps article, not acquiror reps.
+_COMPANY_REPS_HEADING_RE = re.compile(
+    r"\bREPRESENTATIONS\s+AND\s+WARRANTIES\s+OF\s+"
+    r"(?!PARENT\b|BUYER\b|PURCHASER\b|SELLER\b|MERGER\s+SUB\b|ACQUI)",
+    re.IGNORECASE,
+)
+
+# Three rendering patterns observed across corpus docs 8, 9, 10, 13:
+#   "Section 3.02.Capitalization."
+#   "3.2 Capitalization."
+#   "Section 3.2 Capitalization."
+# MULTILINE + line-anchor rejects inline cross-references
+# ("the company's capitalization described in Section 3.2 Capitalization").
+_CAPITALIZATION_SUBSECTION_RE = re.compile(
+    r"(?m)^[ \t]*(?:Section\s+)?\d+\.\d+\.?\s*"
+    r"(?:Capitaliz(?:ation)?|Capital\s+Structure)\.?",
+    re.IGNORECASE,
+)
+
+# Matches the next sub-section heading to delimit the capitalization excerpt end.
+# Requires the numeral to be followed by a capital letter or end-of-line so that
+# cross-references like "(a)" after a numeral are not treated as headings.
+_NEXT_SUBSECTION_HEADING_RE = re.compile(
+    r"(?m)^[ \t]*(?:Section\s+)?\d+\.\d+(?:[.\s][A-Z]|[ \t]*$)",
+)
+
 _TOC_ONLY_PCT = 0.05  # anchors all within first 5% → ToC-only
 _MIN_ANCHORS = 3       # fewer surviving anchors → structure too sparse to navigate
 
@@ -85,6 +116,31 @@ def _map_heading(heading: str) -> str | None:
         if pat.search(heading):
             return stype
     return None
+
+
+def _extract_capitalization_subsection(
+    article_text: str,
+    article_start_offset: int,
+) -> SectionMatch | None:
+    """Find the Capitalization sub-section within a company Reps article span.
+
+    Returns None when no matching sub-section heading is found (caller logs).
+    """
+    cap_match = _CAPITALIZATION_SUBSECTION_RE.search(article_text)
+    if not cap_match:
+        return None
+    sub_start = cap_match.start()
+    heading_text = cap_match.group(0).strip()
+    next_match = _NEXT_SUBSECTION_HEADING_RE.search(article_text, cap_match.end())
+    sub_end = next_match.start() if next_match else len(article_text)
+    return SectionMatch(
+        section_type="CAPITALIZATION",
+        heading_text=heading_text,
+        excerpt_text=article_text[sub_start:sub_end],
+        excerpt_start_offset=article_start_offset + sub_start,
+        excerpt_end_offset=article_start_offset + sub_end,
+        confidence="HIGH",
+    )
 
 
 def navigate_exhibit_21(raw_text: str) -> list[SectionMatch]:
@@ -172,15 +228,26 @@ def navigate_exhibit_21(raw_text: str) -> list[SectionMatch]:
     for i, (start, num, heading) in enumerate(articles):
         next_start = articles[i + 1][0] if i + 1 < len(articles) else doc_len
         section_type = _map_heading(heading)
-        if section_type is None:
+        if section_type is not None:
+            results.append(SectionMatch(
+                section_type=section_type,
+                heading_text=heading[:200],
+                excerpt_text=raw_text[start:next_start],
+                excerpt_start_offset=start,
+                excerpt_end_offset=next_start,
+                confidence="HIGH",
+            ))
             continue
-        results.append(SectionMatch(
-            section_type=section_type,
-            heading_text=heading[:200],
-            excerpt_text=raw_text[start:next_start],
-            excerpt_start_offset=start,
-            excerpt_end_offset=next_start,
-            confidence="HIGH",
-        ))
+        if _COMPANY_REPS_HEADING_RE.search(heading):
+            article_text = raw_text[start:next_start]
+            cap_section = _extract_capitalization_subsection(article_text, start)
+            if cap_section:
+                results.append(cap_section)
+            else:
+                _log.info(
+                    "company reps article scanned, no Capitalization sub-section matched. "
+                    "heading=%r first200=%r",
+                    heading[:200], article_text[:200],
+                )
 
     return results

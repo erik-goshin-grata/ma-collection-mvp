@@ -1,5 +1,5 @@
 """
-Drop 3.24 — Tests for lib/exhibit_21_navigator.navigate_exhibit_21().
+Drop 3.24 / 3.24a — Tests for lib/exhibit_21_navigator.navigate_exhibit_21().
 
 No network. No API cost. All tests use synthetic text.
 
@@ -11,6 +11,7 @@ Test groups:
   E. RECITALS detection
   F. Section span and content
   G. Return-type contract
+  H. Capitalization sub-section descent (Drop 3.24a)
 
 Usage:
     python scripts/test_exhibit_21_navigator.py
@@ -22,7 +23,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from lib.exhibit_21_navigator import navigate_exhibit_21
+from lib.exhibit_21_navigator import (
+    navigate_exhibit_21,
+    _COMPANY_REPS_HEADING_RE,
+    _CAPITALIZATION_SUBSECTION_RE,
+    _NEXT_SUBSECTION_HEADING_RE,
+    _extract_capitalization_subsection,
+)
 from lib.section_tagger import SectionMatch
 
 _PASS = 0
@@ -386,9 +393,147 @@ def run_return_type_tests() -> None:
     _check("G2: empty input list is empty", empty == [])
 
 
+def run_capitalization_subsection_tests() -> None:
+    print("\n--- H. Capitalization sub-section descent (Drop 3.24a) ---")
+
+    # H1: _COMPANY_REPS_HEADING_RE — positive matches (company variants)
+    positive_headings = [
+        "REPRESENTATIONS AND WARRANTIES OF THE COMPANY",
+        "Representations and Warranties of the Company",
+        "REPRESENTATIONS AND WARRANTIES OF COMPANY",
+        "REPRESENTATIONS AND WARRANTIES OF THE COMPANY AND ITS SUBSIDIARIES",
+    ]
+    for h in positive_headings:
+        _check(f"H1: company reps positive: {h[:55]}", bool(_COMPANY_REPS_HEADING_RE.search(h)))
+
+    # H2: _COMPANY_REPS_HEADING_RE — negative matches (acquiror/parent variants)
+    negative_headings = [
+        "REPRESENTATIONS AND WARRANTIES OF PARENT",
+        "REPRESENTATIONS AND WARRANTIES OF BUYER",
+        "REPRESENTATIONS AND WARRANTIES OF PURCHASER",
+        "REPRESENTATIONS AND WARRANTIES OF SELLER",
+        "REPRESENTATIONS AND WARRANTIES OF MERGER SUB",
+        "REPRESENTATIONS AND WARRANTIES OF ACQUIROR",
+        "REPRESENTATIONS AND WARRANTIES OF ACQUIRER",
+    ]
+    for h in negative_headings:
+        _check(f"H2: acquiror reps excluded: {h[:55]}", not bool(_COMPANY_REPS_HEADING_RE.search(h)))
+
+    # H3: _CAPITALIZATION_SUBSECTION_RE — three corpus rendering patterns
+    patterns = [
+        "Section 3.02.Capitalization.",
+        "3.2 Capitalization.",
+        "Section 3.2 Capitalization.",
+        "3.02 Capital Structure.",
+        "Section 3.5 Capitalization",
+    ]
+    for p in patterns:
+        _check(f"H3: cap subsection pattern: {p}", bool(_CAPITALIZATION_SUBSECTION_RE.match(p.strip())))
+
+    # H4: _CAPITALIZATION_SUBSECTION_RE — inline cross-reference rejected (line-anchored)
+    inline = "  As set forth in Section 3.2 Capitalization, the Company has 1,000 shares."
+    _check("H4: inline cross-reference not matched by MULTILINE pattern",
+           not bool(_CAPITALIZATION_SUBSECTION_RE.search(inline)))
+
+    # H5: _extract_capitalization_subsection — found, next heading delimits span
+    article_text = (
+        "ARTICLE III\nREPRESENTATIONS AND WARRANTIES OF THE COMPANY\n\n"
+        "3.1 Organization.\n  The Company is a corporation.\n\n"
+        "3.2 Capitalization.\n  The Company has 1,000 shares of common stock.\n\n"
+        "3.3 Authority.\n  The Company has all necessary authority.\n"
+    )
+    sm = _extract_capitalization_subsection(article_text, 0)
+    _check("H5: cap sub-section found", sm is not None)
+    _check("H5: section_type is CAPITALIZATION", sm is not None and sm.section_type == "CAPITALIZATION")
+    _check("H5: confidence HIGH", sm is not None and sm.confidence == "HIGH")
+    _check("H5: excerpt contains capitalization content",
+           sm is not None and "1,000 shares" in sm.excerpt_text)
+    _check("H5: excerpt does NOT contain 3.3 Authority body",
+           sm is not None and "The Company has all necessary authority" not in sm.excerpt_text)
+
+    # H6: _extract_capitalization_subsection — no next heading → spans to end of article
+    article_text_last = (
+        "ARTICLE III\nREPRESENTATIONS AND WARRANTIES OF THE COMPANY\n\n"
+        "3.1 Organization.\n  The Company is a corporation.\n\n"
+        "3.2 Capitalization.\n  The Company has 1,000 shares outstanding.\n"
+    )
+    sm_last = _extract_capitalization_subsection(article_text_last, 0)
+    _check("H6: no next sub-section heading → cap excerpt spans to end of article",
+           sm_last is not None and sm_last.excerpt_end_offset == len(article_text_last))
+
+    # H7: _extract_capitalization_subsection — no capitalization heading → returns None
+    article_no_cap = (
+        "ARTICLE III\nREPRESENTATIONS AND WARRANTIES OF THE COMPANY\n\n"
+        "3.1 Organization.\n  Body.\n\n"
+        "3.2 Authority.\n  Body.\n"
+    )
+    _check("H7: no capitalization heading → returns None",
+           _extract_capitalization_subsection(article_no_cap, 0) is None)
+
+    # H8: article_start_offset propagated correctly to absolute offsets
+    offset = 5000
+    sm_offset = _extract_capitalization_subsection(article_text, offset)
+    _check("H8: excerpt_start_offset includes article_start_offset",
+           sm_offset is not None and sm_offset.excerpt_start_offset >= offset)
+    if sm is not None and sm_offset is not None:
+        _check("H8: relative offsets consistent (delta equals article offset)",
+               sm_offset.excerpt_start_offset - sm.excerpt_start_offset == offset)
+
+    # H9: end-to-end via navigate_exhibit_21 — company reps article yields CAPITALIZATION
+    full_doc = (
+        _PREAMBLE +
+        "\nARTICLE I\nTHE MERGER\n\n  Body.\n\n"
+        "ARTICLE II\nCONVERSION OF SHARES\n\n  Body.\n\n"
+        "ARTICLE III\nREPRESENTATIONS AND WARRANTIES OF THE COMPANY\n\n"
+        "  3.1 Organization.\n  The Company is duly organized.\n\n"
+        "  3.2 Capitalization.\n  There are 10,000,000 shares authorized.\n\n"
+        "  3.3 Authority.\n  The board has approved.\n\n"
+        "ARTICLE IV\nCONDITIONS TO THE MERGER\n\n  Body.\n\n"
+        "ARTICLE V\nTERMINATION\n\n  Body.\n"
+    )
+    result = navigate_exhibit_21(full_doc)
+    types = [r.section_type for r in result]
+    cap_sections = [r for r in result if r.section_type == "CAPITALIZATION"]
+    _check("H9: navigate_exhibit_21 emits CAPITALIZATION from company reps sub-section",
+           "CAPITALIZATION" in types)
+    _check("H9: exactly one CAPITALIZATION section emitted", len(cap_sections) == 1)
+    _check("H9: CAPITALIZATION excerpt contains authorized shares text",
+           cap_sections[0].excerpt_text is not None and "10,000,000" in cap_sections[0].excerpt_text if cap_sections else False)
+    _check("H9: CONSIDERATION also emitted", "CONSIDERATION" in types)
+    _check("H9: CONDITIONS_TO_CLOSING also emitted", "CONDITIONS_TO_CLOSING" in types)
+
+    # H10: parent reps article does NOT yield CAPITALIZATION via sub-section descent
+    full_doc_parent_reps = (
+        _PREAMBLE +
+        "\nARTICLE I\nTHE MERGER\n\n  Body.\n\n"
+        "ARTICLE II\nCONVERSION OF SHARES\n\n  Body.\n\n"
+        "ARTICLE III\nREPRESENTATIONS AND WARRANTIES OF PARENT\n\n"
+        "  3.1 Organization.\n  Parent is duly organized.\n\n"
+        "  3.2 Capitalization.\n  Parent has 500,000,000 shares authorized.\n\n"
+        "ARTICLE IV\nCONDITIONS TO THE MERGER\n\n  Body.\n\n"
+        "ARTICLE V\nTERMINATION\n\n  Body.\n"
+    )
+    result_parent = navigate_exhibit_21(full_doc_parent_reps)
+    cap_from_parent = [r for r in result_parent if r.section_type == "CAPITALIZATION"]
+    _check("H10: parent reps article not descended — no CAPITALIZATION emitted",
+           len(cap_from_parent) == 0)
+
+    # H11: Capital Structure variant recognised
+    article_cap_struct = (
+        "ARTICLE III\nREPRESENTATIONS AND WARRANTIES OF THE COMPANY\n\n"
+        "3.1 Organization.\n  Body.\n\n"
+        "3.2 Capital Structure.\n  The Company has 1,000 shares.\n\n"
+        "3.3 Authority.\n  Body.\n"
+    )
+    sm_cs = _extract_capitalization_subsection(article_cap_struct, 0)
+    _check("H11: 'Capital Structure' variant matched", sm_cs is not None)
+    _check("H11: Capital Structure → CAPITALIZATION section_type",
+           sm_cs is not None and sm_cs.section_type == "CAPITALIZATION")
+
+
 def run_tests() -> None:
     print("=" * 60)
-    print("test_exhibit_21_navigator.py  (Drop 3.24)")
+    print("test_exhibit_21_navigator.py  (Drop 3.24 / 3.24a)")
     print("=" * 60)
 
     run_anchor_detection_tests()
@@ -398,6 +543,7 @@ def run_tests() -> None:
     run_recitals_tests()
     run_span_and_content_tests()
     run_return_type_tests()
+    run_capitalization_subsection_tests()
 
     total = _PASS + _FAIL
     print(f"\n{'=' * 60}")
