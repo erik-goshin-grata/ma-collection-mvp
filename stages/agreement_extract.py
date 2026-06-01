@@ -13,9 +13,9 @@ specific prompts against HIGH/MEDIUM-confidence sections from deal documents
 
 Multi-source: when multiple source documents contain the same section type,
 all are extracted.  For transaction_security, all rows are kept.  For scalar
-fields on transaction_record, FIELD_PRIORITY_RULES determine which source type
-populates each canonical column; fields without explicit rules use most-recent-
-filing-date wins.  Conflicts are logged to aggregation_conflict_log.
+fields on transaction_record, FIELD_FILING_TYPE_PRIORITY determines which
+source type populates each canonical column; fields without explicit rules use
+most-recent-filing-date wins.  Conflicts are logged to aggregation_conflict_log.
 
 Diff surfacing (Drop 3.20b): after all sections are processed for a transaction,
 observation_changes_summary on transaction_record is populated with a structured
@@ -34,6 +34,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import Config
+from lib.field_priority import FIELD_FILING_TYPE_PRIORITY, filing_type_rank
 from logger import get_logger
 from prompts.base import (
     PromptFailure,
@@ -63,28 +64,6 @@ _VERSIONS = {
 }
 
 _SLEEP = 1.0  # between LLM calls
-
-# Per-field source-type priority rules.  First entry in each list is the most
-# preferred source type.  Fields not listed here default to most-recent-filing-
-# date wins (controlled by section query ORDER BY filing_date ASC, so last write
-# = most recent = winner).
-_FIELD_PRIORITY_RULES: dict[str, list[str]] = {
-    # Termination / go-shop: legal source-of-truth is original agreement
-    "target_fee_amount":                ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
-    "target_fee_percentage":            ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
-    "acquirer_fee_amount":              ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
-    "acquirer_fee_percentage":          ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
-    "has_go_shop":                      ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A"],
-    "go_shop_period_days":              ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A"],
-    # Closing conditions: agreement is legal source
-    "has_mac_clause":                   ["8K_EXHIBIT_21", "DEFM14A", "S4"],
-    "requires_target_shareholder_vote": ["8K_EXHIBIT_21", "DEFM14A"],
-    "target_vote_threshold":            ["8K_EXHIBIT_21", "DEFM14A"],
-    # Merger structure: agreement establishes
-    "merger_structure":                 ["8K_EXHIBIT_21", "DEFM14A", "S4"],
-    # per_share_price / consideration_components: most-recent wins (DEFA14A captures bumps)
-    # no explicit rule = default behaviour
-}
 
 # Fields in extraction results that are not written as observations
 _OBSERVATION_SKIP = frozenset({
@@ -641,9 +620,9 @@ def _update_transaction_record(
     filing_type: str | None = None,
     field_priority_state: dict | None = None,
 ) -> None:
-    """Apply updates to transaction_record, respecting FIELD_PRIORITY_RULES.
+    """Apply updates to transaction_record, respecting FIELD_FILING_TYPE_PRIORITY.
 
-    For fields listed in _FIELD_PRIORITY_RULES, only applies the update if the
+    For fields listed in FIELD_FILING_TYPE_PRIORITY, only applies the update if the
     current source's filing_type has equal or better priority than any previously
     applied source for that field.  Fields not in the rules dict always apply
     (last-write wins; caller controls ordering via ASC date query).
@@ -654,9 +633,8 @@ def _update_transaction_record(
     # Filter updates by priority rules
     allowed: dict[str, Any] = {}
     for col, new_val in updates.items():
-        if filing_type and field_priority_state is not None and col in _FIELD_PRIORITY_RULES:
-            rule = _FIELD_PRIORITY_RULES[col]
-            new_pri = rule.index(filing_type) if filing_type in rule else len(rule)
+        if filing_type and field_priority_state is not None and col in FIELD_FILING_TYPE_PRIORITY:
+            new_pri = filing_type_rank(col, filing_type)
             current_pri, _ = field_priority_state.get(col, (float("inf"), None))
             if new_pri > current_pri:
                 continue  # current source has lower priority — skip

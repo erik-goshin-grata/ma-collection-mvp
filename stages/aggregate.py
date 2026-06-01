@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from config import Config
+from lib.field_priority import TIER_ORDER
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
@@ -40,7 +41,7 @@ _PROMPT_NAME = "aggregation"
 _VERSION = "0.2"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
-_TIER_ORDER = ("T1", "T2", "T3")
+_CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
 # Fields aggregated from staging_extraction → transaction_record.
 # Each entry: (field_name, field_type)
@@ -277,7 +278,7 @@ def _pick_value(
                 return str(v)
         return str(v)
 
-    for tier in _TIER_ORDER:
+    for tier in TIER_ORDER:
         tier_obs = by_tier.get(tier, [])
         if not tier_obs:
             continue
@@ -286,6 +287,16 @@ def _pick_value(
         canonical_vals = [_canonical(obs["value"]) for obs in tier_obs]
         if all(v == canonical_vals[0] for v in canonical_vals):
             return tier_obs[0]["value"], False, []
+        # Confidence tiebreak before LLM conflict resolution.
+        # LLM is invoked only when confidence is tied within the same tier.
+        ranked = sorted(
+            tier_obs,
+            key=lambda o: _CONF_RANK.get(o.get("model_confidence") or "MEDIUM", 1),
+        )
+        top_rank = _CONF_RANK.get(ranked[0].get("model_confidence") or "MEDIUM", 1)
+        second_rank = _CONF_RANK.get(ranked[1].get("model_confidence") or "MEDIUM", 1)
+        if top_rank < second_rank:
+            return ranked[0]["value"], False, []
         # Same-tier conflict — needs LLM
         return None, True, tier_obs
 
