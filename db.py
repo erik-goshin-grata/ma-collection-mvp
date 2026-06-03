@@ -20,6 +20,154 @@ from pathlib import Path
 
 _SCHEMA_PATH = Path(__file__).parent / "schema" / "001_initial.sql"
 
+_OBSERVATION_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS transaction_field_observation (
+    observation_id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    transaction_id              TEXT,
+    field_name                  TEXT NOT NULL,
+    field_value                 TEXT,
+    field_value_numeric         REAL,
+    source_document_id          INTEGER,
+    source_section_id           INTEGER,
+    staging_extraction_id       INTEGER,
+    source_raw_id               INTEGER,
+    source_type                 TEXT,
+    source_tier                 TEXT,
+    model_confidence            TEXT,
+    source_published_date       TEXT,
+    filing_type                 TEXT,
+    agreement_dated_as_of       TEXT,
+    observed_as_of_date         TEXT,
+    filing_date                 TEXT,
+    extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    extraction_prompt_version   TEXT,
+    observation_source_stage    TEXT,
+    is_current                  INTEGER DEFAULT 1,
+    FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
+    FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id),
+    FOREIGN KEY (staging_extraction_id) REFERENCES staging_extraction(extraction_id),
+    FOREIGN KEY (source_raw_id) REFERENCES source_raw(source_raw_id)
+);
+"""
+
+_OBSERVATION_INDEX_SQL = """
+DROP INDEX IF EXISTS idx_observation_unique_current;
+
+CREATE INDEX IF NOT EXISTS idx_observation_txn_field
+    ON transaction_field_observation(transaction_id, field_name);
+CREATE INDEX IF NOT EXISTS idx_observation_filing_date
+    ON transaction_field_observation(filing_date);
+CREATE INDEX IF NOT EXISTS idx_observation_staging
+    ON transaction_field_observation(staging_extraction_id);
+CREATE INDEX IF NOT EXISTS idx_observation_source_raw
+    ON transaction_field_observation(source_raw_id);
+CREATE INDEX IF NOT EXISTS idx_observation_txn_field_current
+    ON transaction_field_observation(transaction_id, field_name, is_current);
+CREATE INDEX IF NOT EXISTS idx_observation_tier_confidence
+    ON transaction_field_observation(transaction_id, field_name, source_tier, model_confidence);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current_section
+    ON transaction_field_observation (source_section_id, field_name, field_value)
+    WHERE is_current = 1 AND source_section_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current_staging
+    ON transaction_field_observation (staging_extraction_id, field_name, field_value)
+    WHERE is_current = 1 AND staging_extraction_id IS NOT NULL;
+"""
+
+_OBSERVATION_COLUMNS = (
+    "observation_id",
+    "transaction_id",
+    "field_name",
+    "field_value",
+    "field_value_numeric",
+    "source_document_id",
+    "source_section_id",
+    "staging_extraction_id",
+    "source_raw_id",
+    "source_type",
+    "source_tier",
+    "model_confidence",
+    "source_published_date",
+    "filing_type",
+    "agreement_dated_as_of",
+    "observed_as_of_date",
+    "filing_date",
+    "extracted_at",
+    "extraction_prompt_version",
+    "observation_source_stage",
+    "is_current",
+)
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table_name,),
+    ).fetchone() is not None
+
+
+def _column_info(conn: sqlite3.Connection, table_name: str) -> dict[str, sqlite3.Row]:
+    return {row[1]: row for row in conn.execute(f"PRAGMA table_info({table_name})")}
+
+
+def _observation_needs_rebuild(conn: sqlite3.Connection) -> bool:
+    if not _table_exists(conn, "transaction_field_observation"):
+        return False
+    cols = _column_info(conn, "transaction_field_observation")
+    required = {
+        "staging_extraction_id",
+        "source_raw_id",
+        "source_type",
+        "source_tier",
+        "model_confidence",
+        "source_published_date",
+        "filing_type",
+        "agreement_dated_as_of",
+        "observation_source_stage",
+    }
+    if required - set(cols):
+        return True
+    for fk in conn.execute("PRAGMA foreign_key_list(transaction_field_observation)"):
+        if fk["from"] == "transaction_id":
+            return True
+    return bool(cols["transaction_id"][3]) or bool(cols["source_document_id"][3])
+
+
+def _create_observation_indexes(conn: sqlite3.Connection) -> None:
+    conn.executescript(_OBSERVATION_INDEX_SQL)
+
+
+def _rebuild_observation_table_for_331b(conn: sqlite3.Connection) -> None:
+    tmp_table = "transaction_field_observation_331b_old"
+    if _table_exists(conn, tmp_table):
+        raise RuntimeError(f"{tmp_table} already exists; resolve interrupted 3.31b migration first")
+
+    conn.executescript("""
+        DROP INDEX IF EXISTS idx_observation_txn_field;
+        DROP INDEX IF EXISTS idx_observation_filing_date;
+        DROP INDEX IF EXISTS idx_observation_staging;
+        DROP INDEX IF EXISTS idx_observation_source_raw;
+        DROP INDEX IF EXISTS idx_observation_txn_field_current;
+        DROP INDEX IF EXISTS idx_observation_tier_confidence;
+        DROP INDEX IF EXISTS idx_observation_unique_current;
+        DROP INDEX IF EXISTS idx_observation_unique_current_section;
+        DROP INDEX IF EXISTS idx_observation_unique_current_staging;
+    """)
+    conn.execute(f"ALTER TABLE transaction_field_observation RENAME TO {tmp_table}")
+    conn.executescript(_OBSERVATION_TABLE_SQL)
+
+    old_cols = set(_column_info(conn, tmp_table))
+    copy_cols = [col for col in _OBSERVATION_COLUMNS if col in old_cols]
+    col_sql = ", ".join(copy_cols)
+    conn.execute(
+        f"""
+        INSERT INTO transaction_field_observation ({col_sql})
+        SELECT {col_sql}
+        FROM {tmp_table}
+        """
+    )
+    conn.execute(f"DROP TABLE {tmp_table}")
+    _create_observation_indexes(conn)
+
 
 def _apply_migrations(conn: sqlite3.Connection) -> None:
     """Add columns introduced after the initial CREATE TABLE statements.
@@ -78,46 +226,28 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "agreement_extracted_at" not in td_cols:
         conn.execute("ALTER TABLE transaction_document ADD COLUMN agreement_extracted_at DATETIME")
 
-    # Drop 3.20b: create transaction_field_observation table if not present
+    # Drop 3.31b — rebuild transaction_field_observation so source-row
+    # observations can be written before clustering and without a deal document.
     existing_tables = {
         row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         )
     }
     if "transaction_field_observation" not in existing_tables:
-        conn.executescript("""
-            CREATE TABLE transaction_field_observation (
-                observation_id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                transaction_id              TEXT NOT NULL,
-                field_name                  TEXT NOT NULL,
-                field_value                 TEXT,
-                field_value_numeric         REAL,
-                source_document_id          INTEGER NOT NULL,
-                source_section_id           INTEGER,
-                observed_as_of_date         TEXT,
-                filing_date                 TEXT,
-                extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                extraction_prompt_version   TEXT,
-                is_current                  INTEGER DEFAULT 1,
-                FOREIGN KEY (transaction_id) REFERENCES transaction_record(transaction_id),
-                FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
-                FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_observation_txn_field
-                ON transaction_field_observation(transaction_id, field_name);
-            CREATE INDEX IF NOT EXISTS idx_observation_filing_date
-                ON transaction_field_observation(filing_date);
-        """)
+        conn.executescript(_OBSERVATION_TABLE_SQL)
+    elif _observation_needs_rebuild(conn):
+        _rebuild_observation_table_for_331b(conn)
+    _create_observation_indexes(conn)
 
-    # Drop 3.25 — partial unique index on (source_section_id, field_name, field_value)
-    # for idempotent observation inserts. Scoped to is_current=1 so soft-deleted
-    # history rows are unconstrained. If existing rows contain duplicates the CREATE
-    # will fail — wipe transaction_field_observation first, then run migrations.
-    conn.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current
-        ON transaction_field_observation (source_section_id, field_name, field_value)
-        WHERE is_current = 1
-    """)
+    from lib.observation_writer import (
+        backfill_agreement_observation_provenance,
+        backfill_observation_transaction_ids,
+        backfill_staging_observations,
+    )
+
+    backfill_agreement_observation_provenance(conn)
+    backfill_staging_observations(conn)
+    backfill_observation_transaction_ids(conn)
 
     # Drop 3.26 — partial expression unique index on transaction_security.
     # COALESCE on security_class and shares_outstanding_as_of normalises NULLs to ''
@@ -153,6 +283,7 @@ def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     ddl = _SCHEMA_PATH.read_text(encoding="utf-8")
     conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     try:
         conn.executescript(ddl)
         _apply_migrations(conn)

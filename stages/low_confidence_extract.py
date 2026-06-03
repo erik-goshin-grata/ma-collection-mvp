@@ -37,6 +37,7 @@ import time
 from datetime import datetime, timezone
 
 from config import Config
+from lib.observation_writer import write_staging_observations_for_extraction
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
@@ -232,6 +233,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 now,
                 eid,
             ),
+        )
+        write_staging_observations_for_extraction(
+            conn,
+            eid,
+            observation_source_stage="LC_EXTRACT",
+            include_lc=True,
         )
         conn.commit()
 

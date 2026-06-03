@@ -531,20 +531,30 @@ CREATE INDEX IF NOT EXISTS idx_security_type        ON transaction_security(secu
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS transaction_field_observation (
     observation_id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    transaction_id              TEXT NOT NULL,
+    transaction_id              TEXT,                    -- nullable until Stage 8 cluster backfill
     field_name                  TEXT NOT NULL,
     field_value                 TEXT,                    -- stringified (cross-type compatible)
     field_value_numeric         REAL,                    -- populated for numeric values
-    source_document_id          INTEGER NOT NULL,        -- FK to transaction_document
+    source_document_id          INTEGER,                 -- FK to transaction_document; NULL for source_raw observations
     source_section_id           INTEGER,                 -- FK to transaction_document_section (nullable)
+    staging_extraction_id       INTEGER,                 -- FK to staging_extraction for Stage 3/4/7 observations
+    source_raw_id               INTEGER,                 -- FK to source_raw for Stage 3/4/7 observations
+    source_type                 TEXT,                    -- denormalized source_raw.source_type or filing type
+    source_tier                 TEXT,                    -- denormalized source_raw.source_tier
+    model_confidence            TEXT,                    -- observation-level model confidence
+    source_published_date       TEXT,                    -- source_raw.published_date for source-row observations
+    filing_type                 TEXT,                    -- transaction_document.filing_type or SEC source type
+    agreement_dated_as_of       TEXT,                    -- deterministic agreement date when available
     observed_as_of_date         TEXT,                    -- "as of" date claimed by source (e.g. cap-table as-of)
     filing_date                 TEXT,                    -- date document was filed with SEC
     extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     extraction_prompt_version   TEXT,
+    observation_source_stage    TEXT,                    -- DT_CLASSIFY | HC_EXTRACT | LC_EXTRACT | AGREEMENT_EXTRACT | BACKFILL
     is_current                  INTEGER DEFAULT 1,
-    FOREIGN KEY (transaction_id) REFERENCES transaction_record(transaction_id),
     FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
-    FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id)
+    FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id),
+    FOREIGN KEY (staging_extraction_id) REFERENCES staging_extraction(extraction_id),
+    FOREIGN KEY (source_raw_id) REFERENCES source_raw(source_raw_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_observation_txn_field ON transaction_field_observation(transaction_id, field_name);

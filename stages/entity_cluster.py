@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from rapidfuzz import fuzz
 
 from config import Config
+from lib.observation_writer import backfill_observation_transaction_ids
 from logger import get_logger
 
 
@@ -148,6 +149,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     n = len(eligible)
     if n == 0:
+        observation_updates = backfill_observation_transaction_ids(conn)
+        if observation_updates:
+            conn.commit()
+            log.info("Stage 8: populated transaction_id on %d pending observations", observation_updates)
         log.info("Stage 8 done  total=%d eligible=0", total)
         return {
             "eligible_total": total, "clusters_formed": 0, "singletons": 0,
@@ -228,6 +233,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 cid, member_rows[0]["extraction_id"],
                 norm_t[member_indices[0]], norm_a[member_indices[0]],
             )
+
+    observation_updates = backfill_observation_transaction_ids(conn)
+    if observation_updates:
+        conn.commit()
+        log.info("Stage 8: populated transaction_id on %d pending observations", observation_updates)
 
     log.info(
         "Stage 8 done  total=%d eligible=%d clusters=%d singletons=%d multi=%d",

@@ -35,6 +35,7 @@ from typing import Any
 
 from config import Config
 from lib.field_priority import FIELD_FILING_TYPE_PRIORITY, filing_type_rank
+from lib.observation_writer import extract_agreement_dated_as_of, insert_observation
 from logger import get_logger
 from prompts.base import (
     PromptFailure,
@@ -217,6 +218,9 @@ def _write_observations(
     source_section_id: int | None,
     filing_date: str | None,
     extraction_prompt_version: str,
+    filing_type: str | None = None,
+    model_confidence: str | None = None,
+    agreement_dated_as_of: str | None = None,
 ) -> None:
     """Write transaction_field_observation rows for all scalar fields in extraction_results.
 
@@ -238,25 +242,21 @@ def _write_observations(
             if _DEFINED_TERM_RE.match(sv) or _PLACEHOLDER_RE.search(sv):
                 continue
 
-        numeric_value: float | None = None
-        if isinstance(field_value, bool):
-            numeric_value = 1.0 if field_value else 0.0
-        elif isinstance(field_value, (int, float)):
-            numeric_value = float(field_value)
-
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO transaction_field_observation (
-                transaction_id, field_name, field_value, field_value_numeric,
-                source_document_id, source_section_id, observed_as_of_date,
-                filing_date, extraction_prompt_version
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
-            """,
-            (
-                transaction_id, field_name, str(field_value), numeric_value,
-                source_document_id, source_section_id,
-                filing_date, extraction_prompt_version,
-            ),
+        insert_observation(
+            conn,
+            transaction_id=transaction_id,
+            field_name=field_name,
+            field_value=field_value,
+            source_document_id=source_document_id,
+            source_section_id=source_section_id,
+            source_type=filing_type,
+            source_tier="T1",
+            model_confidence=model_confidence,
+            filing_type=filing_type,
+            agreement_dated_as_of=agreement_dated_as_of,
+            filing_date=filing_date,
+            extraction_prompt_version=extraction_prompt_version,
+            observation_source_stage="AGREEMENT_EXTRACT",
         )
 
     # Compound: securities → shares_outstanding.{type}[.{class}]
@@ -267,20 +267,22 @@ def _write_observations(
         if shares is None:
             continue
         fname = f"shares_outstanding.{stype}" + (f".{sclass}" if sclass else "")
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO transaction_field_observation (
-                transaction_id, field_name, field_value, field_value_numeric,
-                source_document_id, source_section_id, observed_as_of_date,
-                filing_date, extraction_prompt_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                transaction_id, fname, str(shares), float(shares),
-                source_document_id, source_section_id,
-                sec.get("shares_outstanding_as_of"),
-                filing_date, extraction_prompt_version,
-            ),
+        insert_observation(
+            conn,
+            transaction_id=transaction_id,
+            field_name=fname,
+            field_value=shares,
+            source_document_id=source_document_id,
+            source_section_id=source_section_id,
+            source_type=filing_type,
+            source_tier="T1",
+            model_confidence=model_confidence,
+            filing_type=filing_type,
+            agreement_dated_as_of=agreement_dated_as_of,
+            observed_as_of_date=sec.get("shares_outstanding_as_of"),
+            filing_date=filing_date,
+            extraction_prompt_version=extraction_prompt_version,
+            observation_source_stage="AGREEMENT_EXTRACT",
         )
 
     # Compound: consideration_components → consideration.{form}.{attr}
@@ -291,20 +293,21 @@ def _write_observations(
             if val is None:
                 continue
             fname = f"consideration.{form}.{attr}"
-            numeric = float(val) if isinstance(val, (int, float)) else None
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO transaction_field_observation (
-                    transaction_id, field_name, field_value, field_value_numeric,
-                    source_document_id, source_section_id, observed_as_of_date,
-                    filing_date, extraction_prompt_version
-                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
-                """,
-                (
-                    transaction_id, fname, str(val), numeric,
-                    source_document_id, source_section_id,
-                    filing_date, extraction_prompt_version,
-                ),
+            insert_observation(
+                conn,
+                transaction_id=transaction_id,
+                field_name=fname,
+                field_value=val,
+                source_document_id=source_document_id,
+                source_section_id=source_section_id,
+                source_type=filing_type,
+                source_tier="T1",
+                model_confidence=model_confidence,
+                filing_type=filing_type,
+                agreement_dated_as_of=agreement_dated_as_of,
+                filing_date=filing_date,
+                extraction_prompt_version=extraction_prompt_version,
+                observation_source_stage="AGREEMENT_EXTRACT",
             )
 
 
@@ -742,7 +745,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         # is applied last (last-write wins for non-priority fields)
         doc_rows = conn.execute(
             """
-            SELECT td.document_id, td.filing_type, td.filing_date, td.document_title
+            SELECT td.document_id, td.filing_type, td.filing_date, td.document_title, td.raw_text
             FROM transaction_document td
             WHERE td.transaction_id = ?
               AND td.is_current = 1
@@ -761,6 +764,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
         for doc_row in doc_rows:
             doc_id = doc_row["document_id"]
+            agreement_dated_as_of = extract_agreement_dated_as_of(doc_row["raw_text"])
             doc_all_succeeded = True
             doc_sections = 0
             doc_observations = 0
@@ -840,6 +844,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                                 source_section_id=sec_row["section_id"],
                                 filing_date=sec_row["filing_date"],
                                 extraction_prompt_version=prompt_version,
+                                filing_type=sec_row["filing_type"],
+                                model_confidence=result.get("model_confidence"),
+                                agreement_dated_as_of=agreement_dated_as_of,
                             )
 
                             obs_after = conn.execute(
