@@ -2,7 +2,7 @@
 
 **As of:** 2026-06-03  
 **Repo:** `elgoshin11215/ma-collection-mvp`  
-**Current commit:** `bfdfba5 docs: update project state and handoff`
+**Current commit:** `577364d drop 3.32a: add multi-party organization participant model`
 **Current default aggregation read path:** `AGGREGATION_READ_SOURCE=staging`
 
 ## Purpose
@@ -35,16 +35,16 @@ The observation path is limited to source-row observations from
 observations are intentionally excluded from Stage 9 routing until a separate
 agreement-supersession design is approved.
 
-Drop 3.32a is implemented in the current working tree as participant-centric
-multi-party organization support. It adds normalized organization participant
-tables and an idempotent backfill/validation path without changing Stage 9,
-prompts, exports, advisors, or `transaction_record`.
+Drop 3.32a is committed as participant-centric multi-party organization
+support. It adds normalized organization participant tables and an idempotent
+backfill/validation path without changing Stage 9, prompts, exports, advisors,
+or `transaction_record`.
 
 ## Recent Completed Work
 
 | Commit | Drop / scope | Status |
 |---|---|---|
-| pending | Drop 3.32a: multi-party organization participant model | Implemented and copied-real-DB validated; pending commit |
+| `577364d` | Drop 3.32a: multi-party organization participant model | Implemented and copied-real-DB validated |
 | `bfdfba5` | Documentation state and handoff updates | Committed |
 | `674ab04` | Drop 3.31c: observation-backed Stage 9 read path | Implemented and parity validated |
 | `34c3dff` | Drop 3.31c design | Accepted |
@@ -167,7 +167,7 @@ Recommendation: close 3.31c.
 
 ## Drop 3.32a Status
 
-Implemented in the current working tree and ready for review/commit.
+Implemented and committed in `577364d`.
 
 Design decision:
 
@@ -277,15 +277,13 @@ AGGREGATION_READ_SOURCE=observation
 
 ## Recommended Next Work
 
-1. Review and commit Drop 3.32a with message
-   `drop 3.32a: add multi-party organization participant model`.
-2. Keep staging as default until an accepted observation-backed operational run
+1. Keep staging as default until an accepted observation-backed operational run
    is completed on a copied real DB.
-3. Validate OpenAI live provider behavior when an enterprise API key becomes
+2. Validate OpenAI live provider behavior when an enterprise API key becomes
    available to the local runtime.
-4. Design the agreement observation supersession drop separately; do not fold it
+3. Design the agreement observation supersession drop separately; do not fold it
    back into 3.31c.
-5. Decide later whether to switch the default Stage 9 read path to
+4. Decide later whether to switch the default Stage 9 read path to
    `observation`.
 
 ## Deferred / Known Follow-Ups

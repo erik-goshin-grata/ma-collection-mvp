@@ -4,9 +4,8 @@
 
 - Repo: `elgoshin11215/ma-collection-mvp`
 - Local path: `/Users/erik.goshin/Documents/M&A Data Extraction/ma-collection-mvp`
-- Current commit: `bfdfba5 docs: update project state and handoff`
-- Working tree contains the uncommitted Drop 3.32a implementation and docs
-  updates.
+- Current commit: `577364d drop 3.32a: add multi-party organization participant model`
+- Drop 3.32a is committed.
 
 ## Closed Work This Session
 
@@ -129,8 +128,7 @@ Final recommendation: close 3.31c.
 
 ### Drop 3.32a
 
-Implemented in the current working tree and validation passed on a copied real
-DB. Do not assume this is committed yet.
+Implemented and committed in `577364d`. Validation passed on a copied real DB.
 
 3.32a is participant-centric multi-party organization support. It adds:
 
@@ -292,15 +290,7 @@ Deferred beyond 3.32a:
 
 ## Recommended Resume Point
 
-Review and commit Drop 3.32a if approved.
-
-Recommended commit message:
-
-```text
-drop 3.32a: add multi-party organization participant model
-```
-
-After that, choose the next drop explicitly.
+Choose the next drop explicitly.
 
 Most natural next choices:
 

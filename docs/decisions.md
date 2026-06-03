@@ -117,7 +117,7 @@ Consequences:
 
 ## 2026-06-03 - Participant-Centric Multi-Party Organization Model
 
-Status: accepted.
+Status: accepted and implemented in `577364d`.
 
 Decision:
 
@@ -154,3 +154,6 @@ Consequences:
   transaction participant groups, not synthetic entities.
 - Future relationship or graph-style modeling should be designed separately
   after the participant model is stable.
+- Copied-real-DB validation passed with transaction output unchanged, advisor
+  rows unchanged, zero duplicate participants, zero duplicate groups, zero
+  synthetic group entities, and zero foreign key issues.
