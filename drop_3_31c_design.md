@@ -221,6 +221,16 @@ WHERE json_extract(notes, '$.triggered_by_extraction_id') = ?
 Use the distinct `staging_extraction_id` values from observations for that
 enrichment lookup.
 
+Implementation note:
+
+- Some clustered source rows may contain no non-null Stage 9 aggregate fields.
+  They still need transaction-source links and status transitions.
+- Write a non-aggregate source marker observation, e.g.
+  `field_name = '__source_row_present'`, for every source row materialized into
+  observations.
+- The Stage 9 observation loader should use marker rows for source membership
+  but ignore them for field aggregation.
+
 ## 7. Read-Path Control
 
 3.31c should ship behind an explicit read-source control:

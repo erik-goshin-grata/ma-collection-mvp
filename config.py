@@ -49,6 +49,7 @@ class Config:
     db_path: str
     log_level: str
     run_id_prefix: str
+    aggregation_read_source: str
 
     # --- Model strings ---
     opus_model: str
@@ -148,6 +149,7 @@ def load_config() -> Config:
     db_path = _opt_str("DB_PATH", "data/ma_mvp.db")
     log_level = _opt_str("LOG_LEVEL", "INFO").upper()
     run_id_prefix = _opt_str("RUN_ID_PREFIX", "")
+    aggregation_read_source = _opt_str("AGGREGATION_READ_SOURCE", "staging").lower()
 
     opus_model = _opt_str("OPUS_MODEL", "claude-opus-4-7")
     haiku_model = _opt_str("HAIKU_MODEL", "claude-haiku-4-5-20251001")
@@ -161,6 +163,11 @@ def load_config() -> Config:
     if log_level not in valid_levels:
         raise ConfigurationError(
             f"LOG_LEVEL must be one of {sorted(valid_levels)}, got: {log_level!r}"
+        )
+    if aggregation_read_source not in {"staging", "observation"}:
+        raise ConfigurationError(
+            "AGGREGATION_READ_SOURCE must be one of: 'staging', 'observation'. "
+            f"Got: {aggregation_read_source!r}"
         )
 
     return Config(
@@ -179,6 +186,7 @@ def load_config() -> Config:
         db_path=db_path,
         log_level=log_level,
         run_id_prefix=run_id_prefix,
+        aggregation_read_source=aggregation_read_source,
         opus_model=opus_model,
         haiku_model=haiku_model,
         openai_relevancy_model=openai_relevancy_model,

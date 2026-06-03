@@ -152,6 +152,7 @@ From `.env`:
 | `DB_PATH` | SQLite file location (default `data/ma_mvp.db`) |
 | `LOG_LEVEL` | INFO / DEBUG |
 | `RUN_ID_PREFIX` | Optional, for labeling runs |
+| `AGGREGATION_READ_SOURCE` | Stage 9 read path: `staging` or `observation` |
 
 All pipeline stages log under a shared `run_id` (UTC timestamp + optional prefix). Every log file, every inserted row's audit fields, and the run summary reference the same `run_id`.
 

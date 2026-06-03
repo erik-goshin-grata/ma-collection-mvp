@@ -65,6 +65,8 @@ LC_SCALAR_FIELDS = (
     "acquirer_fee_percentage",
 )
 
+SOURCE_ROW_PRESENT_FIELD = "__source_row_present"
+
 _OBSERVATION_INSERT_ORDER = (
     "transaction_id",
     "field_name",
@@ -290,6 +292,61 @@ def _write_consideration_observations(
     return inserted
 
 
+def _write_consideration_json_observation(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    prompt_version: str | None,
+    observation_source_stage: str,
+    columns: set[str],
+) -> int:
+    raw = _row_value(row, "consideration_components")
+    if raw is None:
+        return 0
+    source_type = _row_value(row, "source_type")
+    return insert_observation(
+        conn,
+        transaction_id=_row_value(row, "transaction_cluster_id"),
+        field_name="consideration_components",
+        field_value=raw,
+        staging_extraction_id=_row_value(row, "extraction_id"),
+        source_raw_id=_row_value(row, "source_raw_id"),
+        source_type=source_type,
+        source_tier=_row_value(row, "source_tier"),
+        model_confidence=_row_value(row, "model_confidence"),
+        source_published_date=_row_value(row, "published_date"),
+        filing_type=_source_filing_type(source_type),
+        extraction_prompt_version=prompt_version,
+        observation_source_stage=observation_source_stage,
+        columns=columns,
+    )
+
+
+def _write_source_marker_observation(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    observation_source_stage: str,
+    columns: set[str],
+) -> int:
+    source_type = _row_value(row, "source_type")
+    return insert_observation(
+        conn,
+        transaction_id=_row_value(row, "transaction_cluster_id"),
+        field_name=SOURCE_ROW_PRESENT_FIELD,
+        field_value="1",
+        staging_extraction_id=_row_value(row, "extraction_id"),
+        source_raw_id=_row_value(row, "source_raw_id"),
+        source_type=source_type,
+        source_tier=_row_value(row, "source_tier"),
+        model_confidence=_row_value(row, "model_confidence") or "MEDIUM",
+        source_published_date=_row_value(row, "published_date"),
+        filing_type=_source_filing_type(source_type),
+        observation_source_stage=observation_source_stage,
+        columns=columns,
+    )
+
+
 def write_staging_observations_for_extraction(
     conn: sqlite3.Connection,
     extraction_id: int,
@@ -314,6 +371,12 @@ def write_staging_observations_for_extraction(
 
     columns = _table_columns(conn, "transaction_field_observation")
     inserted = 0
+    inserted += _write_source_marker_observation(
+        conn,
+        row,
+        observation_source_stage=observation_source_stage,
+        columns=columns,
+    )
     if include_stage3:
         inserted += _write_field_group(
             conn,
@@ -337,6 +400,13 @@ def write_staging_observations_for_extraction(
             conn,
             row,
             fields=LC_SCALAR_FIELDS,
+            prompt_version=_row_value(row, "lc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
+            columns=columns,
+        )
+        inserted += _write_consideration_json_observation(
+            conn,
+            row,
             prompt_version=_row_value(row, "lc_prompt_version"),
             observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
             columns=columns,

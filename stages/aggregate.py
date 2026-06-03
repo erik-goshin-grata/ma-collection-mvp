@@ -43,7 +43,7 @@ _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
-# Fields aggregated from staging_extraction → transaction_record.
+# Fields aggregated into transaction_record.
 # Each entry: (field_name, field_type)
 _FIELDS = [
     ("deal_type", "string"),
@@ -95,6 +95,7 @@ _FIELDS = [
 
 _FIELD_NAMES = {f for f, _ in _FIELDS}
 _FIELD_TYPE = {f: t for f, t in _FIELDS}
+_CONTEXT_FIELDS = ("target_name", "acquirer_name", "deal_type", "announced_date")
 
 
 # ---------------------------------------------------------------------------
@@ -426,25 +427,18 @@ def _log_conflict(
 
 
 # ---------------------------------------------------------------------------
-# Stage entry point
+# Aggregation input loaders
 # ---------------------------------------------------------------------------
 
-def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
-    """Aggregate clustered extractions into canonical transaction records.
+def _empty_cluster() -> dict:
+    return {
+        "field_observations": {field_name: [] for field_name, _ in _FIELDS},
+        "deal_context": {},
+        "sources": [],
+    }
 
-    Returns
-    -------
-    dict
-        Keys: clusters_total, transactions_upserted, conflicts_resolved_by_llm,
-              flagged_for_review, failed, transactions_created (run.py alias)
-    """
-    log = get_logger(_PROMPT_NAME, run_id, level=cfg.log_level)
 
-    prompt = load_prompt_file(_PROMPT_NAME)
-    register_prompt_version(conn, _PROMPT_NAME, _VERSION, prompt["file_hash"])
-    log.info("Loaded %s  hash=%s", _FULL_VERSION, prompt["file_hash"][:12])
-
-    # Load all CLUSTERED rows, grouped by cluster_id
+def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
     rows = conn.execute(
         """
         SELECT se.extraction_id, se.transaction_cluster_id, se.source_raw_id,
@@ -473,10 +467,170 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         """
     ).fetchall()
 
-    # Group by cluster_id
-    clusters: dict[str, list] = defaultdict(list)
+    grouped: dict[str, list] = defaultdict(list)
     for row in rows:
-        clusters[row["transaction_cluster_id"]].append(row)
+        grouped[row["transaction_cluster_id"]].append(row)
+
+    clusters: dict[str, dict] = {}
+    for cluster_id, members in grouped.items():
+        bundle = _empty_cluster()
+        bundle["deal_context"] = {
+            "target_name": members[0]["target_name"],
+            "acquirer_name": members[0]["acquirer_name"],
+            "deal_type": members[0]["deal_type"],
+            "announced_date": members[0]["announced_date"],
+        }
+        for i, member in enumerate(members):
+            bundle["sources"].append({
+                "source_raw_id": member["source_raw_id"],
+                "source_tier": member["source_tier"],
+                "staging_extraction_id": member["extraction_id"],
+            })
+            for field_name, _field_type in _FIELDS:
+                raw_val = member[field_name] if field_name in member.keys() else None
+                bundle["field_observations"][field_name].append({
+                    "observation_id": i + 1,
+                    "source_type": member["source_type"],
+                    "tier": member["source_tier"],
+                    "published_date": member["published_date"] or "",
+                    "value": raw_val,
+                    "model_confidence": member["model_confidence"] or "MEDIUM",
+                    "source_text_excerpt": (member["clean_text"] or "")[:200],
+                })
+        clusters[cluster_id] = bundle
+    return clusters
+
+
+def _value_from_observation(row: sqlite3.Row, field_type: str) -> Any:
+    text_value = row["field_value"]
+    numeric_value = row["field_value_numeric"]
+    if text_value is None and numeric_value is None:
+        return None
+
+    if field_type == "number":
+        if numeric_value is not None:
+            return float(numeric_value)
+        try:
+            return float(text_value)
+        except (TypeError, ValueError):
+            return None
+
+    if field_type == "boolean":
+        if numeric_value is not None:
+            return 1 if float(numeric_value) != 0.0 else 0
+        normalized = str(text_value).strip().lower()
+        if normalized in {"1", "true"}:
+            return 1
+        if normalized in {"0", "false"}:
+            return 0
+        return None
+
+    if field_type == "json":
+        try:
+            return json.loads(text_value)
+        except (TypeError, ValueError):
+            return text_value
+
+    return text_value
+
+
+def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
+    rows = conn.execute(
+        """
+        SELECT
+            tfo.observation_id,
+            tfo.transaction_id,
+            tfo.field_name,
+            tfo.field_value,
+            tfo.field_value_numeric,
+            tfo.staging_extraction_id,
+            tfo.source_raw_id,
+            COALESCE(tfo.source_type, sr.source_type) AS source_type,
+            COALESCE(tfo.source_tier, sr.source_tier) AS source_tier,
+            COALESCE(tfo.source_published_date, sr.published_date) AS published_date,
+            COALESCE(tfo.model_confidence, 'MEDIUM') AS model_confidence,
+            sr.clean_text
+        FROM transaction_field_observation tfo
+        JOIN staging_extraction se
+          ON se.extraction_id = tfo.staging_extraction_id
+        LEFT JOIN source_raw sr
+          ON sr.source_raw_id = tfo.source_raw_id
+        WHERE tfo.is_current = 1
+          AND tfo.transaction_id IS NOT NULL
+          AND tfo.staging_extraction_id IS NOT NULL
+          AND se.status = 'CLUSTERED'
+          AND COALESCE(tfo.observation_source_stage, 'BACKFILL') IN (
+              'DT_CLASSIFY',
+              'HC_EXTRACT',
+              'LC_EXTRACT',
+              'BACKFILL'
+          )
+        ORDER BY tfo.transaction_id, tfo.staging_extraction_id, tfo.observation_id
+        """
+    ).fetchall()
+
+    clusters: dict[str, dict] = {}
+    seen_sources: dict[str, set[tuple[int | None, int | None]]] = defaultdict(set)
+    for row in rows:
+        cluster_id = row["transaction_id"]
+        bundle = clusters.setdefault(cluster_id, _empty_cluster())
+        source_key = (row["staging_extraction_id"], row["source_raw_id"])
+        if source_key not in seen_sources[cluster_id]:
+            seen_sources[cluster_id].add(source_key)
+            bundle["sources"].append({
+                "source_raw_id": row["source_raw_id"],
+                "source_tier": row["source_tier"],
+                "staging_extraction_id": row["staging_extraction_id"],
+            })
+
+        field_name = row["field_name"]
+        if field_name not in _FIELD_TYPE:
+            continue
+
+        field_type = _FIELD_TYPE[field_name]
+        value = _value_from_observation(row, field_type)
+        if field_name in _CONTEXT_FIELDS and bundle["deal_context"].get(field_name) is None:
+            bundle["deal_context"][field_name] = value
+
+        bundle["field_observations"][field_name].append({
+            "observation_id": row["observation_id"],
+            "source_type": row["source_type"],
+            "tier": row["source_tier"],
+            "published_date": row["published_date"] or "",
+            "value": value,
+            "model_confidence": row["model_confidence"] or "MEDIUM",
+            "source_text_excerpt": (row["clean_text"] or "")[:200],
+        })
+    return clusters
+
+
+def _load_aggregation_input(conn: sqlite3.Connection, read_source: str) -> dict[str, dict]:
+    if read_source == "observation":
+        return _load_observation_input(conn)
+    return _load_staging_input(conn)
+
+
+# ---------------------------------------------------------------------------
+# Stage entry point
+# ---------------------------------------------------------------------------
+
+def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
+    """Aggregate clustered extractions into canonical transaction records.
+
+    Returns
+    -------
+    dict
+        Keys: clusters_total, transactions_upserted, conflicts_resolved_by_llm,
+              flagged_for_review, failed, transactions_created (run.py alias)
+    """
+    log = get_logger(_PROMPT_NAME, run_id, level=cfg.log_level)
+    read_source = getattr(cfg, "aggregation_read_source", "staging")
+
+    prompt = load_prompt_file(_PROMPT_NAME)
+    register_prompt_version(conn, _PROMPT_NAME, _VERSION, prompt["file_hash"])
+    log.info("Loaded %s  hash=%s read_source=%s", _FULL_VERSION, prompt["file_hash"][:12], read_source)
+
+    clusters = _load_aggregation_input(conn, read_source)
 
     total_clusters = len(clusters)
     log.info("Stage 9: %d clusters to aggregate", total_clusters)
@@ -484,7 +638,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     upserted = conflicts_llm = flagged = failed = 0
     now = datetime.now(timezone.utc).isoformat()
 
-    for cluster_id, members in clusters.items():
+    for cluster_id, bundle in clusters.items():
         try:
             # Build one observations list per field
             field_values: dict[str, Any] = {}
@@ -494,30 +648,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             pending_conflicts: list[tuple[str, list, Any]] = []
 
             for field_name, field_type in _FIELDS:
-                observations = []
-                for i, m in enumerate(members):
-                    raw_val = m[field_name] if field_name in m.keys() else None
-                    observations.append({
-                        "observation_id": i + 1,
-                        "source_type": m["source_type"],
-                        "tier": m["source_tier"],
-                        "published_date": m["published_date"] or "",
-                        "value": raw_val,
-                        "model_confidence": m["model_confidence"] or "MEDIUM",
-                        "source_text_excerpt": (m["clean_text"] or "")[:200],
-                    })
-
+                observations = bundle["field_observations"].get(field_name, [])
                 chosen, needs_llm, conflict_obs = _pick_value(field_name, field_type, observations)
 
                 if needs_llm:
-                    deal_ctx = {
-                        "target_name": members[0]["target_name"],
-                        "acquirer_name": members[0]["acquirer_name"],
-                        "deal_type": members[0]["deal_type"],
-                        "announced_date": members[0]["announced_date"],
-                    }
                     result = _call_agg_prompt(
-                        field_name, field_type, deal_ctx, conflict_obs,
+                        field_name, field_type, bundle["deal_context"], conflict_obs,
                         prompt, cfg, conn, run_id, cluster_id, log,
                     )
                     pending_conflicts.append((field_name, conflict_obs, result))
@@ -669,20 +805,22 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 _log_conflict(conn, cluster_id, f_name, c_obs, c_result)
 
             # Insert transaction_source rows for each cluster member's source
-            for m in members:
+            for source in bundle["sources"]:
                 # Primary role for the best-tier member; others are confirmatory
-                role = "PRIMARY" if m["source_tier"] == "T1" else "CONFIRMATORY"
+                role = "PRIMARY" if source["source_tier"] == "T1" else "CONFIRMATORY"
                 conn.execute(
                     "INSERT OR IGNORE INTO transaction_source (transaction_id, source_raw_id, role) VALUES (?,?,?)",
-                    (cluster_id, m["source_raw_id"], role),
+                    (cluster_id, source["source_raw_id"], role),
                 )
 
             # Also link any SEC-enriched T1 sources attached to these extractions
-            for m in members:
+            for source in bundle["sources"]:
+                if source["staging_extraction_id"] is None:
+                    continue
                 sec_rows = conn.execute(
                     """SELECT source_raw_id FROM source_raw
                        WHERE json_extract(notes, '$.triggered_by_extraction_id') = ?""",
-                    (m["extraction_id"],),
+                    (source["staging_extraction_id"],),
                 ).fetchall()
                 for sr in sec_rows:
                     conn.execute(
@@ -691,17 +829,19 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     )
 
             # Transition all cluster members to AGGREGATED
-            for m in members:
+            for source in bundle["sources"]:
+                if source["staging_extraction_id"] is None:
+                    continue
                 conn.execute(
                     "UPDATE staging_extraction SET status='AGGREGATED', updated_at=? WHERE extraction_id=?",
-                    (now, m["extraction_id"]),
+                    (now, source["staging_extraction_id"]),
                 )
             conn.commit()
 
             upserted += 1
             log.info(
                 "cluster=%s AGGREGATED  members=%d  deal_type=%s  target=%r  acquirer=%r  v=%d",
-                cluster_id, len(members),
+                cluster_id, len(bundle["sources"]),
                 field_values.get("deal_type"), field_values.get("target_name"),
                 field_values.get("acquirer_name"), agg_version,
             )
