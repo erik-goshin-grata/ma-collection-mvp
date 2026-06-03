@@ -2,7 +2,7 @@
 
 **As of:** 2026-06-03  
 **Repo:** `elgoshin11215/ma-collection-mvp`  
-**Current commit:** `674ab04 drop 3.31c: add observation-backed aggregation read path`  
+**Current commit:** `bfdfba5 docs: update project state and handoff`
 **Current default aggregation read path:** `AGGREGATION_READ_SOURCE=staging`
 
 ## Purpose
@@ -35,10 +35,17 @@ The observation path is limited to source-row observations from
 observations are intentionally excluded from Stage 9 routing until a separate
 agreement-supersession design is approved.
 
+Drop 3.32a is implemented in the current working tree as participant-centric
+multi-party organization support. It adds normalized organization participant
+tables and an idempotent backfill/validation path without changing Stage 9,
+prompts, exports, advisors, or `transaction_record`.
+
 ## Recent Completed Work
 
 | Commit | Drop / scope | Status |
 |---|---|---|
+| pending | Drop 3.32a: multi-party organization participant model | Implemented and copied-real-DB validated; pending commit |
+| `bfdfba5` | Documentation state and handoff updates | Committed |
 | `674ab04` | Drop 3.31c: observation-backed Stage 9 read path | Implemented and parity validated |
 | `34c3dff` | Drop 3.31c design | Accepted |
 | `e63b692` | OpenAI provider support while preserving Anthropic | Implemented; live OpenAI validation deferred |
@@ -158,6 +165,80 @@ Diff and coverage checks:
 
 Recommendation: close 3.31c.
 
+## Drop 3.32a Status
+
+Implemented in the current working tree and ready for review/commit.
+
+Design decision:
+
+- 3.32a is participant-centric, not relationship-centric.
+- `entity_relationship` was removed from the active 3.32a scope.
+- Relationship-style concepts such as `PORTFOLIO_COMPANY_OF`,
+  `SPONSORED_BY`, `CORPORATE_VC_ARM_OF`, `MANAGED_BY`, and `SUBSIDIARY_OF`
+  are not written in 3.32a.
+- Sponsors, platforms, parents, merger subs, investors, and issuers are
+  represented through transaction-context participant roles.
+
+Approved active tables:
+
+- `entity`
+- `entity_alias`
+- `transaction_participant`
+- `transaction_participant_group`
+
+Explicit non-goals preserved:
+
+- No people extraction.
+- No advisor redesign.
+- No generic participant attribute table.
+- No Stage 9 changes.
+- No prompt changes.
+- No export changes.
+- No live API calls.
+
+Copied-real-DB validation:
+
+- Source DB: `/private/tmp/ma_331c_parity_staging_674ab04.db`
+- Validation DB: `/private/tmp/ma_332a_patch3_validation.db`
+- Full JSON report: `/private/tmp/ma_332a_patch3_validation.json`
+- Result: `PASS`
+- Production touched: no
+- Live API calls: no
+
+Validation results:
+
+- `entity` rows inserted: `802`
+- `entity_alias` rows inserted: `802`
+- `transaction_participant` rows inserted: `803`
+- `transaction_participant_group` rows inserted: `20`
+- Duplicate current participants: `0`
+- Duplicate groups: `0`
+- Synthetic group entities: `0`
+- Foreign key issues: `0`
+- `transaction_record` unchanged: `335` rows, digest matched source
+- `advisor` unchanged: `340` rows, digest matched source
+- Idempotency second run inserted: `0`
+
+Role counts:
+
+- `TARGET`: `335`
+- `ACQUIRER`: `278`
+- `BUYER_PLATFORM`: `54`
+- `BUYER_SPONSOR`: `66`
+- `PARENT_SELLER`: `70`
+
+Group counts:
+
+- `CONSORTIUM`: `12`
+- `INVESTOR_GROUP`: `5`
+- `SELLER_GROUP`: `3`
+
+Coverage note:
+
+- Strict acquirer misses: `3`
+- All three are generic consortium-label exceptions stored as group labels, not
+  synthetic entities.
+
 ## OpenAI Provider State
 
 Provider abstraction is implemented and Anthropic support remains available.
@@ -196,7 +277,8 @@ AGGREGATION_READ_SOURCE=observation
 
 ## Recommended Next Work
 
-1. Close Drop 3.31c administratively.
+1. Review and commit Drop 3.32a with message
+   `drop 3.32a: add multi-party organization participant model`.
 2. Keep staging as default until an accepted observation-backed operational run
    is completed on a copied real DB.
 3. Validate OpenAI live provider behavior when an enterprise API key becomes
@@ -215,4 +297,5 @@ AGGREGATION_READ_SOURCE=observation
 - Gold-set labeling remains the path for acceptance scoring beyond parity.
 - OpenAI live validation remains blocked on local API key access.
 - Staging read path should remain available as a rollback path for now.
-
+- 3.32a does not yet extract investors/issuers from new prompts; those roles
+  are reserved for future Growth Equity / Venture Capital support.

@@ -115,3 +115,42 @@ Consequences:
 - A future agreement-supersession drop is still needed before agreement
   observations participate in Stage 9 canonical routing.
 
+## 2026-06-03 - Participant-Centric Multi-Party Organization Model
+
+Status: accepted.
+
+Decision:
+
+- Implement Drop 3.32a as participant-centric multi-party organization support.
+- Use four active tables:
+  - `entity`
+  - `entity_alias`
+  - `transaction_participant`
+  - `transaction_participant_group`
+- Remove `entity_relationship` from active 3.32a scope.
+- Represent transaction context through roles such as `BUYER_SPONSOR`,
+  `SELLER_SPONSOR`, `BUYER_PLATFORM`, `SELLER_PLATFORM`,
+  `PARENT_ACQUIRER`, `PARENT_SELLER`, and `MERGER_SUB`.
+- Do not write abstract relationship rows such as `PORTFOLIO_COMPANY_OF`,
+  `SPONSORED_BY`, `CORPORATE_VC_ARM_OF`, `MANAGED_BY`, or
+  `SUBSIDIARY_OF` in 3.32a.
+
+Context:
+
+- The immediate business problem is representing all disclosed organizations
+  participating in a transaction: multiple buyers, sponsors, investor groups,
+  consortiums, parent sellers/acquirers, platforms, and merger subs.
+- Researchers reason first in transaction terms: target, buyer side, seller
+  side, sponsors, platforms, parents, merger subs, investors, and issuers.
+- Abstract organization relationships are useful later, but they increase
+  review burden and drift away from the collection workflow in this slice.
+
+Consequences:
+
+- 3.32a adds normalized organization participant storage without changing
+  `transaction_record`, advisors, Stage 9, prompts, exports, or pipeline
+  behavior.
+- Consortiums, investor groups, and seller groups are represented as
+  transaction participant groups, not synthetic entities.
+- Future relationship or graph-style modeling should be designed separately
+  after the participant model is stable.

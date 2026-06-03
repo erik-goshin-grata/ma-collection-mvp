@@ -73,6 +73,121 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current_staging
     WHERE is_current = 1 AND staging_extraction_id IS NOT NULL;
 """
 
+_PARTICIPANT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS entity (
+    entity_id              TEXT PRIMARY KEY,
+    entity_kind            TEXT NOT NULL DEFAULT 'ORGANIZATION',
+    canonical_name         TEXT NOT NULL,
+    normalized_name        TEXT NOT NULL,
+    legal_name             TEXT,
+    display_name           TEXT,
+    entity_type            TEXT,
+    entity_subtype         TEXT,
+    domain                 TEXT,
+    ticker                 TEXT,
+    cik                    TEXT,
+    lei                    TEXT,
+    country                TEXT,
+    region                 TEXT,
+    website_url            TEXT,
+    review_status          TEXT DEFAULT 'UNREVIEWED',
+    reviewed_by            TEXT,
+    reviewed_at            TEXT,
+    researcher_notes       TEXT,
+    created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_normalized_name ON entity(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_entity_ticker          ON entity(ticker);
+CREATE INDEX IF NOT EXISTS idx_entity_domain          ON entity(domain);
+CREATE INDEX IF NOT EXISTS idx_entity_cik             ON entity(cik);
+
+CREATE TABLE IF NOT EXISTS entity_alias (
+    alias_id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id              TEXT NOT NULL REFERENCES entity(entity_id),
+    alias_name             TEXT NOT NULL,
+    normalized_alias       TEXT NOT NULL,
+    alias_type             TEXT,
+    source_raw_id          INTEGER REFERENCES source_raw(source_raw_id),
+    source_document_id     INTEGER REFERENCES transaction_document(document_id),
+    source_section_id      INTEGER REFERENCES transaction_document_section(section_id),
+    first_observed_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    is_current             INTEGER DEFAULT 1
+);
+
+CREATE INDEX IF NOT EXISTS idx_entity_alias_entity ON entity_alias(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_alias_norm   ON entity_alias(normalized_alias);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_alias_unique_current
+    ON entity_alias(entity_id, normalized_alias, COALESCE(alias_type, ''))
+    WHERE is_current = 1;
+
+CREATE TABLE IF NOT EXISTS transaction_participant_group (
+    group_id               TEXT PRIMARY KEY,
+    transaction_id         TEXT NOT NULL REFERENCES transaction_record(transaction_id),
+    side                   TEXT NOT NULL,
+    group_type             TEXT NOT NULL,
+    group_label            TEXT,
+    disclosed_group_name   TEXT,
+    source_raw_id          INTEGER REFERENCES source_raw(source_raw_id),
+    source_document_id     INTEGER REFERENCES transaction_document(document_id),
+    source_section_id      INTEGER REFERENCES transaction_document_section(section_id),
+    model_confidence       TEXT,
+    review_status          TEXT DEFAULT 'UNREVIEWED',
+    notes                  TEXT,
+    created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_participant_group_txn
+    ON transaction_participant_group(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_participant_group_type
+    ON transaction_participant_group(transaction_id, group_type);
+
+CREATE TABLE IF NOT EXISTS transaction_participant (
+    participant_id         TEXT PRIMARY KEY,
+    transaction_id         TEXT NOT NULL REFERENCES transaction_record(transaction_id),
+    entity_id              TEXT NOT NULL REFERENCES entity(entity_id),
+    group_id               TEXT REFERENCES transaction_participant_group(group_id),
+    side                   TEXT NOT NULL,
+    participant_role       TEXT NOT NULL,
+    role_detail            TEXT,
+    is_primary             INTEGER,
+    is_lead                INTEGER,
+    is_existing_investor   INTEGER,
+    is_new_investor        INTEGER,
+    source_raw_id          INTEGER REFERENCES source_raw(source_raw_id),
+    source_document_id     INTEGER REFERENCES transaction_document(document_id),
+    source_section_id      INTEGER REFERENCES transaction_document_section(section_id),
+    source_stage           TEXT,
+    model_confidence       TEXT,
+    evidence_text          TEXT,
+    review_status          TEXT DEFAULT 'UNREVIEWED',
+    reviewed_by            TEXT,
+    reviewed_at            TEXT,
+    researcher_notes       TEXT,
+    is_current             INTEGER DEFAULT 1,
+    created_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_participant_txn
+    ON transaction_participant(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_participant_entity
+    ON transaction_participant(entity_id);
+CREATE INDEX IF NOT EXISTS idx_participant_txn_role_side
+    ON transaction_participant(transaction_id, participant_role, side, is_current);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_participant_unique_current
+    ON transaction_participant(
+        transaction_id,
+        entity_id,
+        participant_role,
+        side,
+        COALESCE(group_id, '')
+    )
+    WHERE is_current = 1;
+"""
+
 _OBSERVATION_COLUMNS = (
     "observation_id",
     "transaction_id",
@@ -134,6 +249,10 @@ def _observation_needs_rebuild(conn: sqlite3.Connection) -> bool:
 
 def _create_observation_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript(_OBSERVATION_INDEX_SQL)
+
+
+def _create_participant_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(_PARTICIPANT_SCHEMA_SQL)
 
 
 def _rebuild_observation_table_for_331b(conn: sqlite3.Connection) -> None:
@@ -238,6 +357,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     elif _observation_needs_rebuild(conn):
         _rebuild_observation_table_for_331b(conn)
     _create_observation_indexes(conn)
+
+    # Drop 3.32a — additive organization participant schema, no backfill.
+    _create_participant_schema(conn)
 
     from lib.observation_writer import (
         backfill_agreement_observation_provenance,

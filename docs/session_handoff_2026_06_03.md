@@ -4,10 +4,9 @@
 
 - Repo: `elgoshin11215/ma-collection-mvp`
 - Local path: `/Users/erik.goshin/Documents/M&A Data Extraction/ma-collection-mvp`
-- Current commit: `674ab04 drop 3.31c: add observation-backed aggregation read path`
-- Working tree before this docs draft: clean except for an earlier root-level
-  handoff draft from this session.
-- This handoff draft now lives under `docs/`.
+- Current commit: `bfdfba5 docs: update project state and handoff`
+- Working tree contains the uncommitted Drop 3.32a implementation and docs
+  updates.
 
 ## Closed Work This Session
 
@@ -128,6 +127,106 @@ Diff and coverage results:
 
 Final recommendation: close 3.31c.
 
+### Drop 3.32a
+
+Implemented in the current working tree and validation passed on a copied real
+DB. Do not assume this is committed yet.
+
+3.32a is participant-centric multi-party organization support. It adds:
+
+- `entity`
+- `entity_alias`
+- `transaction_participant`
+- `transaction_participant_group`
+- `lib/participant_backfill.py`
+- `scripts/backfill_332a_participants.py`
+- `scripts/validate_332a_participants.py`
+
+Important design decision:
+
+- `entity_relationship` was removed from active 3.32a scope.
+- Do not write `PORTFOLIO_COMPANY_OF`, `SPONSORED_BY`,
+  `CORPORATE_VC_ARM_OF`, `MANAGED_BY`, or `SUBSIDIARY_OF`.
+- Use transaction-context participant roles instead:
+  - `TARGET`
+  - `ACQUIRER`
+  - `BUYER_SPONSOR`
+  - `SELLER_SPONSOR`
+  - `BUYER_PLATFORM`
+  - `SELLER_PLATFORM`
+  - `PARENT_ACQUIRER`
+  - `PARENT_SELLER`
+  - `MERGER_SUB`
+  - `INVESTOR`
+  - `ISSUER`
+
+Explicitly unchanged:
+
+- No people.
+- No advisor redesign.
+- No generic participant attribute table.
+- No Stage 9 changes.
+- No prompt changes.
+- No export changes.
+
+## 3.32a Validation
+
+Validation was run on a copied real DB only. Production was not touched. No live
+API calls were made.
+
+Source DB:
+
+```text
+/private/tmp/ma_331c_parity_staging_674ab04.db
+```
+
+Validation DB:
+
+```text
+/private/tmp/ma_332a_patch3_validation.db
+```
+
+Full JSON report:
+
+```text
+/private/tmp/ma_332a_patch3_validation.json
+```
+
+Results:
+
+- Overall result: `PASS`
+- `entity` rows inserted: `802`
+- `entity_alias` rows inserted: `802`
+- `transaction_participant` rows inserted: `803`
+- `transaction_participant_group` rows inserted: `20`
+- Duplicate current participants: `0`
+- Duplicate groups: `0`
+- Synthetic group entities: `0`
+- Foreign key issues: `0`
+- `transaction_record` unchanged: `335` rows, digest matched source
+- `advisor` unchanged: `340` rows, digest matched source
+- Idempotency second run inserted: `0`
+
+Participant role counts:
+
+- `TARGET`: `335`
+- `ACQUIRER`: `278`
+- `BUYER_PLATFORM`: `54`
+- `BUYER_SPONSOR`: `66`
+- `PARENT_SELLER`: `70`
+
+Group counts:
+
+- `CONSORTIUM`: `12`
+- `INVESTOR_GROUP`: `5`
+- `SELLER_GROUP`: `3`
+
+Coverage note:
+
+- Strict acquirer misses: `3`
+- All three are generic consortium-label exceptions stored as group labels, not
+  synthetic entities.
+
 ## Current Defaults
 
 Stage 9 defaults to:
@@ -177,9 +276,31 @@ A future stabilization decision can either keep staging as default while
 operators opt into observation reads, or switch default to `observation` after
 an accepted full operational run.
 
+### 3.32a Future Expansion
+
+Deferred beyond 3.32a:
+
+- People extraction.
+- Advisor/accountant redesign.
+- New LLM participant extraction prompts.
+- Export redesign.
+- Researcher UI.
+- Generic participant attribute table.
+- Entity relationship / graph-style modeling.
+- Growth Equity / Venture Capital investor and issuer extraction beyond fields
+  already available in the current flat model.
+
 ## Recommended Resume Point
 
-Close 3.31c administratively, then choose the next drop explicitly.
+Review and commit Drop 3.32a if approved.
+
+Recommended commit message:
+
+```text
+drop 3.32a: add multi-party organization participant model
+```
+
+After that, choose the next drop explicitly.
 
 Most natural next choices:
 
@@ -187,4 +308,3 @@ Most natural next choices:
 2. Observation-backed Stage 9 operational run on a copied real DB with
    `AGGREGATION_READ_SOURCE=observation`.
 3. Design the agreement observation supersession drop.
-
