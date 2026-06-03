@@ -5,6 +5,9 @@
 # Claude API client (Opus 4.7 for extraction/generation, Haiku 4.5 for relevancy filter)
 anthropic>=0.40.0
 
+# OpenAI API client (Responses API provider option)
+openai>=1.82.0
+
 # HTTP client for PR Newswire scraping and sec-api.io calls
 requests>=2.31.0
 

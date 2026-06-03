@@ -3,7 +3,7 @@ Standalone validation script for prompts/base.py.
 
 Validates end-to-end:
   1. load_prompt_file() correctly parses prompts/relevancy_filter.md
-  2. call_prompt() reaches Haiku and returns a response
+  2. call_prompt() reaches the configured relevancy model and returns a response
   3. The returned dict has the expected relevancy_filter shape
 
 Uses an in-memory SQLite DB — no writes to the pipeline database.
@@ -78,7 +78,7 @@ def _make_minimal_db() -> sqlite3.Connection:
 
 def main() -> None:
     print("=" * 60)
-    print("validate_prompt_base — relevancy_filter via Haiku")
+    print("validate_prompt_base — relevancy_filter via configured LLM provider")
     print("=" * 60)
 
     # --- 1. Config ---
@@ -87,7 +87,7 @@ def main() -> None:
     except Exception as exc:
         print(f"FAIL — config error: {exc}")
         sys.exit(1)
-    print(f"Config loaded. haiku_model={cfg.haiku_model}")
+    print(f"Config loaded. provider={cfg.llm_provider} haiku_alias={cfg.haiku_model}")
 
     # --- 2. load_prompt_file ---
     print(f"\nLoading prompts/{_PROMPT_NAME}.md ...")
@@ -116,7 +116,7 @@ def main() -> None:
         title=_DUMMY_TITLE,
         clean_text=_DUMMY_BODY,
     )
-    print(f"\ncall_prompt → model=haiku ({cfg.haiku_model}) ...")
+    print("\ncall_prompt → model alias=haiku ...")
     try:
         result = call_prompt(
             prompt_name=_PROMPT_NAME,

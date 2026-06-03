@@ -27,8 +27,10 @@ class ConfigurationError(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    # --- Required ---
+    # --- Required / provider-selected ---
+    llm_provider: str
     anthropic_api_key: str
+    openai_api_key: str
     sec_api_key: str
     operator_contact_email: str
 
@@ -51,6 +53,11 @@ class Config:
     # --- Model strings ---
     opus_model: str
     haiku_model: str
+    openai_relevancy_model: str
+    openai_classification_model: str
+    openai_extract_model: str
+    openai_legal_extract_model: str
+    openai_reasoning_model: str
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +112,23 @@ def load_config() -> Config:
     Returns a frozen Config dataclass. Raises ConfigurationError if a
     required variable is absent or a value fails validation.
     """
-    anthropic_api_key = _require("ANTHROPIC_API_KEY")
+    llm_provider = _opt_str("LLM_PROVIDER", "anthropic").lower()
+    if llm_provider not in {"anthropic", "openai"}:
+        raise ConfigurationError(
+            "LLM_PROVIDER must be one of: 'anthropic', 'openai'. "
+            f"Got: {llm_provider!r}"
+        )
+
+    anthropic_api_key = (
+        _require("ANTHROPIC_API_KEY")
+        if llm_provider == "anthropic"
+        else _opt_str("ANTHROPIC_API_KEY", "")
+    )
+    openai_api_key = (
+        _require("OPENAI_API_KEY")
+        if llm_provider == "openai"
+        else _opt_str("OPENAI_API_KEY", "")
+    )
     sec_api_key = _require("SEC_API_KEY")
     operator_contact_email = _require("OPERATOR_CONTACT_EMAIL")
 
@@ -128,6 +151,11 @@ def load_config() -> Config:
 
     opus_model = _opt_str("OPUS_MODEL", "claude-opus-4-7")
     haiku_model = _opt_str("HAIKU_MODEL", "claude-haiku-4-5-20251001")
+    openai_relevancy_model = _opt_str("OPENAI_RELEVANCY_MODEL", "gpt-5-nano")
+    openai_classification_model = _opt_str("OPENAI_CLASSIFICATION_MODEL", "gpt-5-mini")
+    openai_extract_model = _opt_str("OPENAI_EXTRACT_MODEL", "gpt-5-mini")
+    openai_legal_extract_model = _opt_str("OPENAI_LEGAL_EXTRACT_MODEL", "gpt-5.2")
+    openai_reasoning_model = _opt_str("OPENAI_REASONING_MODEL", "gpt-5.2")
 
     valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
     if log_level not in valid_levels:
@@ -136,7 +164,9 @@ def load_config() -> Config:
         )
 
     return Config(
+        llm_provider=llm_provider,
         anthropic_api_key=anthropic_api_key,
+        openai_api_key=openai_api_key,
         sec_api_key=sec_api_key,
         operator_contact_email=operator_contact_email,
         max_fetches=max_fetches,
@@ -151,6 +181,11 @@ def load_config() -> Config:
         run_id_prefix=run_id_prefix,
         opus_model=opus_model,
         haiku_model=haiku_model,
+        openai_relevancy_model=openai_relevancy_model,
+        openai_classification_model=openai_classification_model,
+        openai_extract_model=openai_extract_model,
+        openai_legal_extract_model=openai_legal_extract_model,
+        openai_reasoning_model=openai_reasoning_model,
     )
 
 

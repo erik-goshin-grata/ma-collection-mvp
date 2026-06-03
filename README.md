@@ -2,7 +2,7 @@
 
 An independent MVP pipeline for collecting and structuring M&A transactions from public sources.
 
-Discovery from PR Newswire's M&A category; enrichment from SEC 8-K Item 1.01 filings and Exhibit 2.1 merger agreements via sec-api.io; extraction and classification via Claude Opus and Haiku.
+Discovery from PR Newswire's M&A category; enrichment from SEC 8-K Item 1.01 filings and Exhibit 2.1 merger agreements via sec-api.io; extraction and classification via the configured LLM provider.
 
 Target scope for first production run: **100 press releases**, end-to-end in under 2 hours, with operator-graded acceptance criteria.
 
@@ -40,13 +40,13 @@ ma-collection-mvp/
 │   └── evaluation.md                  # Gold set methodology, scoring
 ├── prompts/
 │   ├── prompt_conventions.md          # Shared conventions (JSON I/O, temperature, versioning)
-│   ├── relevancy_filter.md            # Haiku binary relevancy gate
-│   ├── deal_type_classifier.md        # Opus 7-type taxonomy classifier
-│   ├── high_confidence_extraction.md  # Opus — parties, dates, value, target financials
-│   ├── low_confidence_extraction.md   # Opus — advisors, consideration, flags, termination fees
-│   ├── aggregation.md                 # Opus conflict resolution (tier tie-breaking)
-│   ├── deal_summary.md                # Opus 80-150 word natural-language summary
-│   └── strategic_rationale.md         # Opus 8-category rationale classifier
+│   ├── relevancy_filter.md            # Binary relevancy gate
+│   ├── deal_type_classifier.md        # 7-type taxonomy classifier
+│   ├── high_confidence_extraction.md  # Parties, dates, value, target financials
+│   ├── low_confidence_extraction.md   # Advisors, consideration, flags, termination fees
+│   ├── aggregation.md                 # Conflict resolution (tier tie-breaking)
+│   ├── deal_summary.md                # 80-150 word natural-language summary
+│   └── strategic_rationale.md         # 8-category rationale classifier
 ├── schema/
 │   └── 001_initial.sql                # SQLite DDL, 12 tables, v0.2 enums
 ├── eval/
@@ -66,7 +66,7 @@ Generated at runtime (not committed):
 ## Prerequisites
 
 - Python 3.11 or newer
-- An Anthropic API key (for Claude Opus and Haiku calls)
+- An Anthropic API key or OpenAI API key for LLM calls
 - A sec-api.io API key (Personal & Startups tier or better)
 - A working Git installation
 
@@ -89,6 +89,7 @@ source venv/bin/activate
 ### 3. Install dependencies
 Dependencies will be specified in `requirements.txt` at implementation time. Expected:
 - `anthropic` — Claude API client
+- `openai` — OpenAI Responses API client
 - `requests` — HTTP client for PR Newswire and sec-api.io
 - `trafilatura` — HTML-to-clean-text extraction
 - `rapidfuzz` — fuzzy string matching for entity resolution
@@ -105,9 +106,42 @@ cp .env.example .env
 ```
 
 Required variables:
-- `ANTHROPIC_API_KEY` — from console.anthropic.com
+- `LLM_PROVIDER` — `anthropic` or `openai`; defaults to `anthropic`
+- `ANTHROPIC_API_KEY` — required when `LLM_PROVIDER=anthropic`
+- `OPENAI_API_KEY` — required when `LLM_PROVIDER=openai`
 - `SEC_API_KEY` — from sec-api.io dashboard
 - `OPERATOR_CONTACT_EMAIL` — used in the User-Agent header when scraping
+
+To migrate a local run from Anthropic to OpenAI, set:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+Codex Enterprise access does not automatically authenticate this local Python
+pipeline with OpenAI. The pipeline calls the OpenAI API directly through the
+OpenAI SDK and requires an API key in `.env`.
+
+OpenAI model defaults can be overridden per stage:
+
+| Variable | Default | Used for |
+| :--- | :--- | :--- |
+| `OPENAI_RELEVANCY_MODEL` | `gpt-5-nano` | Relevancy filter |
+| `OPENAI_CLASSIFICATION_MODEL` | `gpt-5-mini` | Deal type, aggregation, summaries |
+| `OPENAI_EXTRACT_MODEL` | `gpt-5-mini` | High-confidence extraction |
+| `OPENAI_LEGAL_EXTRACT_MODEL` | `gpt-5.2` | Agreement section extraction |
+| `OPENAI_REASONING_MODEL` | `gpt-5.2` | Low-confidence extraction and rationale tagging |
+
+The OpenAI provider uses the Responses API with Structured Outputs for the
+shared JSON-returning prompt path. Existing prompts, prompt versions, validation
+rules, and aggregation rules remain unchanged.
+
+Offline provider smoke test:
+
+```bash
+python scripts/validate_llm_provider.py
+```
 
 ### 5. Initialize the database
 ```bash

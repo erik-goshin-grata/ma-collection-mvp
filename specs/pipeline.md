@@ -109,7 +109,7 @@ Practical implication: the operator can kill the pipeline at any point and re-ru
 
 **Only halt on infrastructure failures:**
 
-- API authentication failure (401/403 from Anthropic or sec-api.io) — halt with clear error.
+- API authentication failure (401/403 from selected LLM provider or sec-api.io) — halt with clear error.
 - Database connection failure — halt with clear error.
 - Consecutive rate-limit errors beyond configured threshold — halt, log, exit with non-zero status.
 
@@ -137,9 +137,17 @@ From `.env`:
 
 | Variable | Purpose |
 | :--- | :--- |
-| `ANTHROPIC_API_KEY` | Opus and Haiku calls |
+| `LLM_PROVIDER` | LLM provider selector: `anthropic` or `openai` |
+| `ANTHROPIC_API_KEY` | Anthropic calls when `LLM_PROVIDER=anthropic` |
+| `OPENAI_API_KEY` | OpenAI Responses API calls when `LLM_PROVIDER=openai` |
 | `SEC_API_KEY` | sec-api.io |
 | `OPERATOR_CONTACT_EMAIL` | Used in User-Agent string |
+| `OPUS_MODEL`, `HAIKU_MODEL` | Anthropic model IDs |
+| `OPENAI_RELEVANCY_MODEL` | OpenAI model for relevancy filter |
+| `OPENAI_CLASSIFICATION_MODEL` | OpenAI model for deal type, aggregation, and summaries |
+| `OPENAI_EXTRACT_MODEL` | OpenAI model for high-confidence extraction |
+| `OPENAI_LEGAL_EXTRACT_MODEL` | OpenAI model for agreement section extraction |
+| `OPENAI_REASONING_MODEL` | OpenAI model for low-confidence extraction and rationale tagging |
 | `MAX_FETCHES` | PR Newswire cap (default 100) |
 | `DB_PATH` | SQLite file location (default `data/ma_mvp.db`) |
 | `LOG_LEVEL` | INFO / DEBUG |
@@ -180,19 +188,19 @@ The `schema/001_initial.sql` DDL reflects these. If DDL and prompts diverge, pro
                     │ source_status    │
                     │ = FETCHED        │
                     └──────────┬───────┘
-                               │ (Stage 2: Haiku relevancy)
+                               │ (Stage 2: LLM relevancy)
                                ▼
                     ┌──────────────────┐
                     │ RELEVANT rows    │
                     └──────────┬───────┘
-                               │ (Stage 3: Opus deal_type)
+                               │ (Stage 3: LLM deal_type)
                                ▼
                     ┌──────────────────┐
                     │ staging_extract  │
                     │ status =         │
                     │ CLASSIFIED       │
                     └──────────┬───────┘
-                               │ (Stage 4: Opus HC extract)
+                               │ (Stage 4: LLM HC extract)
                                ▼
                     ┌──────────────────┐
                     │ status =         │
@@ -213,7 +221,7 @@ The `schema/001_initial.sql` DDL reflects these. If DDL and prompts diverge, pro
           └─────────┬─────────┘        │
                     │                  │
                     └──────────┬───────┘
-                               │ (Stage 7: Opus LC extract)
+                               │ (Stage 7: LLM LC extract)
                                ▼
                     ┌──────────────────┐
                     │ status =         │

@@ -1,5 +1,5 @@
 """
-prompts/base.py — shared Anthropic API infrastructure.
+prompts/base.py — shared LLM prompt infrastructure.
 
 Every LLM-powered stage imports from here.  Nothing in this module writes to
 staging_extraction; callers own row-status updates.
@@ -20,14 +20,12 @@ import json
 import logging
 import re
 import sqlite3
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import anthropic
-
 from config import Config
+from lib.llm_client import LLMProviderError, LLMRequest, call_llm
 
 _PROMPTS_DIR = Path(__file__).parent
 _FAILURE_LOG_DIR = Path(__file__).parent.parent / "logs" / "prompt_failures"
@@ -245,27 +243,6 @@ def register_prompt_version(
 
 
 # ---------------------------------------------------------------------------
-# Model resolution
-# ---------------------------------------------------------------------------
-
-def _resolve_model(model: str, cfg: Config) -> str:
-    """Map 'opus'/'haiku' shortcuts to full model IDs; passthrough for full IDs."""
-    if model == "opus":
-        return cfg.opus_model
-    if model == "haiku":
-        return cfg.haiku_model
-    return model
-
-
-# Model ID prefixes for which `temperature` is not accepted by the API.
-_NO_TEMPERATURE_PREFIXES = ("claude-opus-4",)
-
-
-def _supports_temperature(model_id: str) -> bool:
-    return not any(model_id.startswith(p) for p in _NO_TEMPERATURE_PREFIXES)
-
-
-# ---------------------------------------------------------------------------
 # Central API call
 # ---------------------------------------------------------------------------
 
@@ -285,7 +262,7 @@ def call_prompt(
     extraction_id: int | None = None,
     log: Any = None,
 ) -> dict:
-    """Call the Anthropic API and return the parsed JSON response.
+    """Call the configured LLM provider and return the parsed JSON response.
 
     On any failure, writes to extraction_failure_log and raises PromptFailure.
     The caller is responsible for updating staging_extraction.status.
@@ -303,7 +280,7 @@ def call_prompt(
     system_prompt:
         System-role instruction text.
     model:
-        ``"opus"`` or ``"haiku"`` (resolved via config) or a full model ID.
+        ``"opus"`` or ``"haiku"`` provider aliases, or a full model ID.
     temperature:
         Sampling temperature.  Default 0.0.
     max_tokens:
@@ -333,8 +310,7 @@ def call_prompt(
     if log is None:
         log = logging.getLogger("prompts.base")
 
-    model_id = _resolve_model(model, cfg)
-    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    model_id = model
 
     def _fail(failure_type: str, message: str, raw: str = "") -> PromptFailure:
         log_prompt_failure(
@@ -365,70 +341,32 @@ def call_prompt(
         )
         return PromptFailure(failure_type, message, raw)
 
-    raw_response = ""
-    message: anthropic.types.Message | None = None
+    request = LLMRequest(
+        prompt_name=prompt_name,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    try:
+        response = call_llm(request, cfg=cfg, log=log)
+    except LLMProviderError as exc:
+        raise _fail(exc.failure_type, str(exc))
 
-    api_kwargs: dict[str, Any] = {
-        "model": model_id,
-        "max_tokens": max_tokens,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_prompt}],
-    }
-    if _supports_temperature(model_id):
-        api_kwargs["temperature"] = temperature
-
-    for attempt in range(2):
-        t0 = time.monotonic()
-        try:
-            message = client.messages.create(**api_kwargs)
-        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
-            # Auth failures are fatal — halt the pipeline immediately.
-            raise _fail("API_ERROR", f"Auth failure ({type(exc).__name__}): {exc}")
-        except anthropic.RateLimitError as exc:
-            if attempt == 0:
-                log.warning("%s: 429 rate limit — retry in 5s", prompt_name)
-                time.sleep(5)
-                continue
-            raise _fail("API_ERROR", f"Rate limit after retry: {exc}")
-        except anthropic.APITimeoutError as exc:
-            if attempt == 0:
-                log.warning("%s: timeout — retry in 10s", prompt_name)
-                time.sleep(10)
-                continue
-            raise _fail("TIMEOUT", f"Timeout after retry: {exc}")
-        except anthropic.APIStatusError as exc:
-            # Covers InternalServerError (5xx) and any other HTTP status errors.
-            if attempt == 0:
-                log.warning(
-                    "%s: API status error %s — retry in 5s", prompt_name, exc.status_code
-                )
-                time.sleep(5)
-                continue
-            raise _fail("API_ERROR", f"HTTP {exc.status_code} after retry: {exc}")
-        except anthropic.APIConnectionError as exc:
-            if attempt == 0:
-                log.warning("%s: connection error — retry in 5s", prompt_name)
-                time.sleep(5)
-                continue
-            raise _fail("API_ERROR", f"Connection error after retry: {exc}")
-        break  # try block completed without exception
-
-    assert message is not None
-
-    latency_ms = int((time.monotonic() - t0) * 1000)
-    in_tokens = message.usage.input_tokens
-    out_tokens = message.usage.output_tokens
-    raw_response = message.content[0].text if message.content else ""
+    model_id = response.model_id
+    raw_response = response.raw_text
 
     log.debug(
-        "%s:%s model=%s temperature=%s in=%d out=%d latency=%dms",
+        "%s:%s provider=%s model=%s temperature=%s in=%d out=%d latency=%dms",
         prompt_name,
         prompt_version,
+        response.provider,
         model_id,
         temperature,
-        in_tokens,
-        out_tokens,
-        latency_ms,
+        response.input_tokens,
+        response.output_tokens,
+        response.latency_ms,
     )
 
     try:
@@ -438,13 +376,14 @@ def call_prompt(
         raise _fail(failure_type, "Response was not parseable JSON", raw_response)
 
     log.info(
-        "%s:%s → %s → OK (tokens: %d/%d, latency: %dms)",
+        "%s:%s → %s/%s → OK (tokens: %d/%d, latency: %dms)",
         prompt_name,
         prompt_version,
+        response.provider,
         model_id,
-        in_tokens,
-        out_tokens,
-        latency_ms,
+        response.input_tokens,
+        response.output_tokens,
+        response.latency_ms,
     )
 
     return result

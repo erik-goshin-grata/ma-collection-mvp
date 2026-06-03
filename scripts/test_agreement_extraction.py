@@ -9,14 +9,14 @@ Five tests, one per section-specific prompt:
   5. agreement_conditions — MAC clause, shareholder vote, conditions summary
 
 Each test constructs a synthetic section excerpt, calls the prompt directly
-via the Anthropic API, and validates the response shape and key field values.
+via the configured LLM provider, and validates the response shape and key field values.
 
 Key assertions:
   - Recitals: Merger Sub is identified separately from parent acquirer
   - Capitalization: two common stock classes + options produce three rows
 
-Skipped if ANTHROPIC_API_KEY is not set.  Estimated API cost: ~$1-3 (short
-synthetic prompts, 5 calls total at Opus pricing).
+Skipped if the selected provider API key is not set. Estimated API cost depends
+on the configured provider and model mapping.
 
 Usage:
     python scripts/test_agreement_extraction.py
@@ -34,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 try:
     from config import get_config
     from prompts.base import call_prompt, load_prompt_file, parse_json_response
-    import anthropic
     import sqlite3
     _IMPORTS_OK = True
 except Exception as _e:
@@ -386,8 +385,11 @@ if __name__ == "__main__":
         print(f"SKIP: could not load config: {exc}")
         sys.exit(0)
 
-    if not cfg.anthropic_api_key:
+    if cfg.llm_provider == "anthropic" and not cfg.anthropic_api_key:
         print("SKIP: ANTHROPIC_API_KEY not set.")
+        sys.exit(0)
+    if cfg.llm_provider == "openai" and not cfg.openai_api_key:
+        print("SKIP: OPENAI_API_KEY not set.")
         sys.exit(0)
 
     conn = _fake_conn()
