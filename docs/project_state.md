@@ -1,8 +1,9 @@
 # M&A Collection MVP - Project State
 
-**As of:** 2026-06-03  
+**As of:** 2026-06-04
 **Repo:** `elgoshin11215/ma-collection-mvp`  
-**Current commit:** `577364d drop 3.32a: add multi-party organization participant model`
+**Current commit:** documentation closeout commit; run `git log --oneline -1`
+for the exact hash.
 **Current default aggregation read path:** `AGGREGATION_READ_SOURCE=staging`
 
 ## Purpose
@@ -44,6 +45,7 @@ or `transaction_record`.
 
 | Commit | Drop / scope | Status |
 |---|---|---|
+| latest | Documentation closeout for 3.32a completion and validation | Committed |
 | `577364d` | Drop 3.32a: multi-party organization participant model | Implemented and copied-real-DB validated |
 | `bfdfba5` | Documentation state and handoff updates | Committed |
 | `674ab04` | Drop 3.31c: observation-backed Stage 9 read path | Implemented and parity validated |
@@ -276,6 +278,9 @@ AGGREGATION_READ_SOURCE=observation
 ```
 
 ## Recommended Next Work
+
+The repository is at a clean handoff point after the 3.32a documentation
+closeout.
 
 1. Keep staging as default until an accepted observation-backed operational run
    is completed on a copied real DB.

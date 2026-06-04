@@ -4,8 +4,10 @@
 
 - Repo: `elgoshin11215/ma-collection-mvp`
 - Local path: `/Users/erik.goshin/Documents/M&A Data Extraction/ma-collection-mvp`
-- Current commit: `577364d drop 3.32a: add multi-party organization participant model`
-- Drop 3.32a is committed.
+- Current commit: documentation closeout commit; run `git log --oneline -1`
+  for the exact hash.
+- Drop 3.32a is committed in `577364d`.
+- This handoff records the final post-3.32a documentation closeout.
 
 ## Closed Work This Session
 
@@ -290,7 +292,8 @@ Deferred beyond 3.32a:
 
 ## Recommended Resume Point
 
-Choose the next drop explicitly.
+The repository is documented through 3.32a and ready for the next design
+discussion. Choose the next drop explicitly.
 
 Most natural next choices:
 

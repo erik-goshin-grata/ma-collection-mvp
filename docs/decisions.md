@@ -117,7 +117,8 @@ Consequences:
 
 ## 2026-06-03 - Participant-Centric Multi-Party Organization Model
 
-Status: accepted and implemented in `577364d`.
+Status: accepted, implemented in `577364d`, and recorded in the post-3.32a
+documentation closeout.
 
 Decision:
 
