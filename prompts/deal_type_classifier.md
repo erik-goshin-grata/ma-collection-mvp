@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.4 (revised)
+**Version:** 0.5 (revised)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -101,12 +101,19 @@ For MINORITY_INVESTMENT and REVERSE_MERGER, target_type = STANDALONE_COMPANY unl
 
 EVENT TYPE:
 
-- ANNOUNCEMENT — First-time announcement of a definitive agreement.
-- CLOSE — The deal has closed or completed.
-- AMENDMENT — Previously announced deal has been amended.
-- TERMINATION — Previously announced deal has been terminated.
+event_type describes the press release / source observation type. It is not only the deal lifecycle status.
 
-Classify based on the event being announced, not the deal structure. A closing release for a Take-Private is CLOSE, not ANNOUNCEMENT.
+- ANNOUNCEMENT — Use when this release is the first public announcement of the transaction. This includes same-day announce-and-close private deal releases using language like "today announced its acquisition of," "has acquired," "acquired," "announced the sale of," or "advises on the sale/acquisition of," unless the release clearly says the transaction was previously announced.
+
+- CLOSE — Use only when this is a separate later release announcing completion of a previously announced transaction. Look for explicit language such as "previously announced," "originally announced on [date]," "completed the previously announced acquisition," or similar.
+
+- AMENDMENT — Use when a previously announced deal has been amended, repriced, extended, restructured, or otherwise changed.
+
+- TERMINATION — Use when a previously announced deal has been terminated or will not close.
+
+Do not classify a release as CLOSE merely because the deal appears completed or uses past-tense acquisition language. If the release does not reference a prior announcement and appears to be the first public disclosure, use ANNOUNCEMENT.
+
+For same-day completed private acquisitions, use ANNOUNCEMENT. The later extraction stage should populate both announced_date and closed_date when the text indicates the deal is already completed.
 
 TARGET STATUS:
 
@@ -119,7 +126,7 @@ TARGET STATUS:
 CLASSIFICATION RULES:
 
 - Use the full text of the release, not just the headline.
-- If the release describes a deal closing, classify based on the original deal structure as described in the release.
+- If the release describes a deal closing, classify based on the original deal structure as described in the release, but use event_type=CLOSE only when this is a later release for a previously announced transaction.
 - If the release describes a termination, classify as the original deal type so the downstream pipeline can link the termination to the original record.
 - If multiple events are announced in one release, classify based on the primary event.
 
@@ -137,7 +144,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -173,7 +180,7 @@ Classify the deal type, discriminators, target type, event type, and target stat
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -215,7 +222,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -239,7 +246,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Take-Private context: public target, PE acquirer. Downstream derives Take-Private flag from target_status + acquirer_type.",
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -263,7 +270,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Business unit divestiture; parent_seller is MegaCorp (extracted downstream)",
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -287,7 +294,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Parent retains 15% residual stake, consistent with SPIN_OFF tax-free treatment",
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -311,7 +318,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Practitioner term 'Split-Off' = SPLIT + EXCHANGE_OFFER in schema",
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -335,7 +342,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "New entity formed; no existing company acquired",
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -359,7 +366,103 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "LOW",
   "notes": "Release lacks structural detail to distinguish between acquisition, merger, JV, or asset combination",
-  "prompt_version": "deal_type_classifier:0.3"
+  "prompt_version": "deal_type_classifier:0.5"
+}
+```
+
+**Example 8 — Same-day completed private acquisition remains ANNOUNCEMENT:**
+
+Input:
+```
+TITLE: BuyerCo Announces Acquisition of TargetCo
+BODY: BuyerCo today announced its acquisition of TargetCo, a privately held provider of specialty software. The acquisition expands BuyerCo's presence in the healthcare market. Financial terms were not disclosed.
+```
+
+Output:
+```json
+{
+  "deal_type": "ACQUISITION",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "target_type": "STANDALONE_COMPANY",
+  "event_type": "ANNOUNCEMENT",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "First public announcement of a completed private acquisition; not a separate later closing release.",
+  "prompt_version": "deal_type_classifier:0.5"
+}
+```
+
+**Example 9 — Advisor tombstone for completed sale remains ANNOUNCEMENT:**
+
+Input:
+```
+TITLE: AdvisorCo Advises Alpha LLC on Sale to Beta Holdings
+BODY: AdvisorCo announced that it served as exclusive financial advisor to Alpha LLC on its sale to Beta Holdings. Alpha is a founder-owned business serving industrial customers. Terms of the transaction were not disclosed.
+```
+
+Output:
+```json
+{
+  "deal_type": "ACQUISITION",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "target_type": "STANDALONE_COMPANY",
+  "event_type": "ANNOUNCEMENT",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "Advisor tombstone describes a completed sale but does not reference a prior announcement; treat as first observed announcement, not CLOSE.",
+  "prompt_version": "deal_type_classifier:0.5"
+}
+```
+
+**Example 10 — Pending take-private agreement is ANNOUNCEMENT, not CLOSE:**
+
+Input:
+```
+TITLE: PublicCo Announces Agreement to Be Acquired by SponsorCo
+BODY: PublicCo (NYSE: PUB) today announced that it has entered into a definitive agreement to be acquired by affiliates of SponsorCo for $40.00 per share in cash. The transaction is expected to close in the fourth quarter, subject to shareholder approval and required regulatory approvals.
+```
+
+Output:
+```json
+{
+  "deal_type": "ACQUISITION",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "target_type": "STANDALONE_COMPANY",
+  "event_type": "ANNOUNCEMENT",
+  "target_status": "PUBLIC",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "Definitive agreement with pending-close language; event is announcement, not close.",
+  "prompt_version": "deal_type_classifier:0.5"
+}
+```
+
+**Example 11 — True later close references prior announcement:**
+
+Input:
+```
+TITLE: BuyerCo Completes Previously Announced Acquisition of TargetCo
+BODY: BuyerCo today announced that it has completed its previously announced acquisition of TargetCo. The transaction was originally announced on March 1, 2026.
+```
+
+Output:
+```json
+{
+  "deal_type": "ACQUISITION",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "target_type": "STANDALONE_COMPANY",
+  "event_type": "CLOSE",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "Separate later completion release explicitly references a previously announced acquisition.",
+  "prompt_version": "deal_type_classifier:0.5"
 }
 ```
 
@@ -386,3 +489,4 @@ Output:
 | 0.2 | 2026-04-22 | Revised to align with agreed schema. 7-type taxonomy. SPIN_SPLIT with spin_split_type + distribution_mechanism discriminators. target_type added as output. TAKE_PRIVATE and CARVE_OUT removed as top-level (derived downstream or out of scope). Target_status enum expanded to include SUBSIDIARY_OF_PUBLIC / SUBSIDIARY_OF_PRIVATE. |
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.4 | 2026-04-23 | Added ASSETS to target_type enum. ASSETS covers discrete asset sets (product lines, physical asset portfolios, contracts) that are not going-concern units. Updated parent_seller rule to include ASSETS alongside SUBSIDIARY and BUSINESS_UNIT. Updated output schema table. |
+| 0.5 | 2026-07-22 | Clarified event_type semantics so CLOSE is reserved for separate later releases that explicitly reference a previously announced transaction. Same-day completed private acquisition and advisor tombstone releases remain ANNOUNCEMENT when they appear to be the first public disclosure. Added examples for completed private acquisition, advisor sale tombstone, pending take-private agreement, and true later close. |

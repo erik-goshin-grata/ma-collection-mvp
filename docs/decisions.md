@@ -158,3 +158,40 @@ Consequences:
 - Copied-real-DB validation passed with transaction output unchanged, advisor
   rows unchanged, zero duplicate participants, zero duplicate groups, zero
   synthetic group entities, and zero foreign key issues.
+
+## 2026-07-22 - Announcement vs Close Prompt Semantics
+
+Status: accepted.
+
+Decision:
+
+- Treat `event_type` as the source observation type, not only the deal lifecycle
+  status.
+- Reserve `CLOSE` for a separate later release that explicitly references a
+  previously announced transaction.
+- Keep first-observed same-day completed private acquisitions and advisor
+  tombstone releases as `ANNOUNCEMENT`.
+- In high-confidence extraction, populate both `announced_date` and
+  `closed_date` for same-day completed-deal announcements when there is no
+  pending-close language.
+- Let pending-close language win over completed-sounding headlines or deal
+  framing.
+
+Context:
+
+- PR/news sources often use completed-deal wording such as "announced its
+  acquisition of," "has acquired," "announced the sale of," "completes
+  acquisition," or "advises on the sale of" when the release is still the
+  first public disclosure available to the pipeline.
+- The prior classifier wording could overclassify those first-observed private
+  deal announcements as `CLOSE`.
+
+Consequences:
+
+- `deal_type_classifier` is versioned to `0.5`.
+- `high_confidence_extraction` is versioned to `0.10`.
+- Transaction status remains derived downstream from extracted dates.
+- Validation on a six-source local DB passed with all original sources
+  classified as `ANNOUNCEMENT`, expected pending deals left without
+  `closed_date`, and expected same-day completed deals populated with
+  `closed_date`.

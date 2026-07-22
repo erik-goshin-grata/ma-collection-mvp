@@ -1,6 +1,6 @@
 # High-Confidence Extraction Prompt
 
-**Version:** 0.9
+**Version:** 0.10
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -152,7 +152,7 @@ TERMINATION: a release reporting that a previously-announced deal will not close
 RUMOR: pre-announcement reporting on potential deals; not formal press releases by parties.
 
 Same-day announce-and-close handling:
-A common private-deal pattern is "[Acquirer] today announced the acquisition of [Target]" using past-tense action language. The deal is announced today AND closed today. Set:
+A common private-deal pattern is "[Acquirer] today announced the acquisition of [Target]" using past-tense action language. Advisor tombstone releases may use similar completed-deal language such as "[Advisor] advises on the sale of [Target] to [Buyer]." The deal is announced today AND closed today when there is no pending-close language. Set:
 - event_type = ANNOUNCEMENT (it IS an announcement-type PR, even though the deal is also closed)
 - announced_date = release date
 - closed_date = release date (same-day close indicated by past-tense action verb)
@@ -160,6 +160,8 @@ A common private-deal pattern is "[Acquirer] today announced the acquisition of 
 Do NOT set event_type=CLOSE for these. CLOSE is reserved for separate, later releases announcing completion of a previously-announced deal.
 
 When in doubt: if the PR is the first time this deal is being publicly announced, event_type=ANNOUNCEMENT regardless of close status.
+
+Pending-close language overrides completed-sounding headlines. If the text says the parties "entered into an agreement," "will acquire," "to be acquired," "expected to close," "subject to regulatory approvals," "subject to shareholder approval," "tender offer will commence," or similar, leave closed_date null unless the text separately states the transaction has already closed.
 
 DATES:
 - announced_date — the date the deal was first announced (ISO 8601, YYYY-MM-DD)
@@ -171,7 +173,7 @@ announced_date rules:
 - For CLOSE, AMENDMENT, or TERMINATION event_type, extract the ORIGINAL announcement date from the text if referenced (e.g., "previously announced on January 15, 2026"). If not referenced in the text, leave announced_date null.
 
 closed_date rules:
-- For ANNOUNCEMENT event_type: null when the deal is pending (future close). Populate closed_date when the PR uses past-tense completive action language indicating the deal is already done ("has acquired," "today acquired," "announced the acquisition of" with past-tense verb) — this is the same-day announce-and-close pattern. Set closed_date = announced_date.
+- For ANNOUNCEMENT event_type: null when the deal is pending (future close). Populate closed_date when the PR uses past-tense completive action language indicating the deal is already done ("has acquired," "today acquired," "announced its acquisition of," "announced the acquisition of," "announced the sale of," "advises on the sale/acquisition of") and no pending-close language is present — this is the same-day announce-and-close pattern. Set closed_date = announced_date.
 - For CLOSE event_type: this is a separate later release reporting completion. Extract the explicit close date if stated. If no separate date is stated, closed_date = published_date.
 - For AMENDMENT or TERMINATION event_type, closed_date is null (the deal is not closed).
 - Do NOT convert prospective phrases like "expected to close in Q3 2026" to a specific date. Leave closed_date null and note the quarter in notes.
@@ -354,7 +356,7 @@ Return a JSON object with a top-level "transactions" array. No prose, no Markdow
       "notes": null
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 
 All fields within each transaction element are required. Use null for optional fields that have no value. "prompt_version" is at the top level (single value for the entire response); it is returned unchanged from the value passed in the user prompt.
@@ -442,7 +444,7 @@ Extract the high-confidence fields.
     "value_amount": "HIGH"
   },
   "notes": null,
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -514,7 +516,7 @@ Output:
   "notes": "Unqualified '$500M in cash' defaults to TRANSACTION_VALUE; revenue qualified 'approximately' but only figure given"
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -572,7 +574,7 @@ Output:
   "notes": "Enterprise value explicitly stated; PUBLIC target + PE acquirer — downstream derives Take-Private flag. No About sections in source; descriptions null."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -630,7 +632,7 @@ Output:
   "notes": "EQUITY_VALUE explicit ('representing the equity value'); debt assumption mentioned separately ($200M) not included in $1.2B. Delta Holdings characterized as 'PE portfolio company' in release. LTM from 'twelve months ended 12/31/2025'. No About sections; descriptions null."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -686,7 +688,7 @@ Output:
   "notes": "Closing release; acquirer_type inferred as STRATEGIC_CORPORATE from context but not stated (low confidence). Original announcement date not stated."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -748,7 +750,79 @@ Output:
   "notes": "Past-tense completive language ('has acquired'); no separate close date stated. Simultaneous announce-and-close: closed_date = announced_date."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
+}
+```
+
+**Example 5A — Pending agreement despite acquisition headline:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: STANDALONE_COMPANY
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PUBLIC
+PUBLISHED DATE: 2026-07-20
+
+TITLE: PublicCo and SponsorCo Announce Agreement to Take PublicCo Private
+BODY: PublicCo today announced that it has entered into a definitive agreement to be acquired by affiliates of SponsorCo. The transaction is expected to close in the fourth quarter, subject to shareholder approval and required regulatory approvals.
+```
+
+Output date guidance:
+```json
+{
+  "dates": {"announced_date": "2026-07-20", "closed_date": null, "signing_date": null},
+  "notes": "Pending-close language ('entered into a definitive agreement,' 'expected to close,' 'subject to shareholder approval and required regulatory approvals') overrides completed-sounding transaction framing."
+}
+```
+
+**Example 5B — Advisor tombstone with completed sale language:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: STANDALONE_COMPANY
+EVENT TYPE: ANNOUNCEMENT
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-07-16
+
+TITLE: AdvisorCo Advises Alpha LLC on Sale to Beta Holdings
+BODY: AdvisorCo announced that it served as exclusive financial advisor to Alpha LLC on its sale to Beta Holdings. Alpha is a founder-owned industrial services business. Terms of the transaction were not disclosed.
+```
+
+Output date guidance:
+```json
+{
+  "dates": {"announced_date": "2026-07-16", "closed_date": "2026-07-16", "signing_date": null},
+  "notes": "Advisor tombstone describes a completed sale and does not include pending-close language; same-day announce-and-close using published date."
+}
+```
+
+**Example 5C — True later close with prior announcement reference:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+DEAL TYPE: ACQUISITION
+SPIN SPLIT TYPE: null
+TARGET TYPE: STANDALONE_COMPANY
+EVENT TYPE: CLOSE
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-07-16
+
+TITLE: BuyerCo Completes Previously Announced Acquisition of TargetCo
+BODY: BuyerCo today announced that it has completed its previously announced acquisition of TargetCo. The transaction was originally announced on March 1, 2026.
+```
+
+Output date guidance:
+```json
+{
+  "dates": {"announced_date": "2026-03-01", "closed_date": "2026-07-16", "signing_date": null},
+  "notes": "Separate later closing release explicitly references prior announcement date."
 }
 ```
 
@@ -821,7 +895,7 @@ Output:
   "notes": "Asset portfolio acquisition (12 mitigation banks); not a going-concern subsidiary. ASSETS target_type appropriate. Terms not disclosed."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -894,7 +968,7 @@ Output:
   "notes": "Partial acquisition (51%) for stock consideration; $17.5M is purchase price for 51% stake (EQUITY_VALUE for the acquired portion). pct_acquired = 51.0."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -968,7 +1042,7 @@ Output:
   "notes": "Add-on acquisition: PE_PORTFOLIO acquirer (PremiStar) backed by Audax Private Equity acquires standalone target."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -1042,7 +1116,7 @@ Output:
   "notes": "Majority recapitalization with co-investor structure. Both sponsors are direct PE acquirers (PRIVATE_EQUITY, not PE_PORTFOLIO) — neither is a portfolio-company shell. acquirer_sponsor_name captures both sponsors comma-delimited. Founders/management likely retain minority equity in this recap structure."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -1105,7 +1179,7 @@ Output:
   "notes": "Partial acquisition (51%); $17.5M consideration is for the acquired equity stake, not whole-company. value_type = EQUITY_VALUE per partial-stake rule (3c). Implies $34.3M total equity value of target."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -1173,7 +1247,7 @@ Output:
   "notes": "Bank holding company acquisition. Financial services convention: banks valued on equity value (P/B, P/TBV), not enterprise value. value_type = EQUITY_VALUE per industry convention rule (3d). Confidence MEDIUM because source text does not explicitly say 'equity value' but industry convention is unambiguous for community banks."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -1236,7 +1310,7 @@ Output:
   "notes": "Take-private at $42/share cash, 35% premium. $2.4B aggregate value reflects equity acquired (per-share price × shares outstanding); value_type = EQUITY_VALUE per per-share rule (3b) and take-private rule (3e). Acquirer is PE; PUBLIC target + PE acquirer → is_take_private derived downstream."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -1312,7 +1386,7 @@ Output:
       "notes": "Multi-transaction PR; deal 2 of 2. M&M Sanitation NYC assets negotiated and closed separately from ADM Environmental deal in same announcement. Same-day announce-and-close."
     }
   ],
-  "prompt_version": "high_confidence_extraction:0.9"
+  "prompt_version": "high_confidence_extraction:0.10"
 }
 ```
 
@@ -1348,3 +1422,4 @@ Output:
 | 0.8 | 2026-05-01 | Revised event_type semantics: event_type reports the kind of PR (source observation type), not deal lifecycle status. Same-day announce-and-close PRs are now event_type=ANNOUNCEMENT with closed_date populated (was CLOSE in v0.4–0.7). transaction_status is derived downstream from closed_date. Added EVENT_TYPE section with explicit ANNOUNCEMENT/CLOSE/AMENDMENT/TERMINATION/RUMOR rules and same-day handling. Updated closed_date rules to handle ANNOUNCEMENT + past-tense completive language. Updated Example 5 (simultaneous announce-and-close): input EVENT TYPE changed from CLOSE to ANNOUNCEMENT; output dates unchanged (closed_date = announced_date). |
 | 0.7 | 2026-04-29 | Tightened value_type determination with priority-ordered rules (UNDISCLOSED → ENTERPRISE_VALUE → EQUITY_VALUE → TRANSACTION_VALUE). Added explicit handling for partial-stake acquisitions (rule 3c: EQUITY_VALUE when pct_acquired < 100%), financial services convention (rule 3d: banks/insurance use equity value), per-share take-privates (rule 3e: aggregate is equity value), and stock-for-stock deals (rule 3f). Refined value_type_confidence guidance: HIGH for explicit text signals, MEDIUM for convention rules (3c–3f), LOW for ambiguous. Added Examples 10 (partial-stake Foresight/VisionWave), 11 (community bank Peoples/Citizens National), 12 (per-share take-private BetaCo). Addresses 3 patterns from 100-PR review where TRANSACTION_VALUE was assigned when EQUITY_VALUE was correct. |
 | 0.9 | 2026-05-02 | Multi-transaction PR splitting: HC extraction now returns {"transactions": [...], "prompt_version": "..."} at the top level. Single-transaction PRs return arrays of length 1 (unified response shape). Multi-transaction PRs (multiple distinct targets in one PR) return one element per transaction. Added MULTI-TRANSACTION DETECTION section with decision rules. Added Example 13 (Action Environmental two-asset NYC acquisition). Wrapped all existing Examples 1–12 in transactions arrays. |
+| 0.10 | 2026-07-22 | Strengthened same-day announce-and-close date handling for completed-deal language including "announced its acquisition of," "announced the sale of," and advisor tombstone releases. Added pending-close override language and examples for pending agreement, advisor tombstone completed sale, and true later close with prior announcement reference. |
