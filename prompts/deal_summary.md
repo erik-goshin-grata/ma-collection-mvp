@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.7
+**Version:** 0.8
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -67,6 +67,7 @@ The orchestrator passes the aggregated transaction record along with derived fie
     {"form": "CASH", "amount": 500000000, "percentage": 100.0, "description": "All-cash at closing"}
   ],
   "flags": {
+    "is_take_private": false,
     "includes_earnout": false,
     "hostile": false,
     "competing_bid": false,
@@ -91,7 +92,7 @@ The orchestrator passes the aggregated transaction record along with derived fie
 - `advisors_summary` — pre-formatted natural-language sentence listing advisors by party. Null if no advisors extracted.
 - `target_revenue_period`, `target_ebitda_period` — pre-formatted human-readable period strings (e.g., `"FY2025"`, `"LTM 2025-12-31"`). Saves the model from reformatting structured period type + end date.
 
-Derived / Take-Private flag (not a separate input field): if `target_status = PUBLIC` and `acquirer_type = PRIVATE_EQUITY`, the summary should describe this as a take-private transaction.
+Derived / Take-Private flag: when `flags.is_take_private = true`, describe the transaction as a take-private or going-private transaction. This flag is derived by the aggregation stage and can include private strategic buyers, sponsor-backed buyers, management/family-style buyers, and private consortiums. Do not infer take-private framing solely from a public target if the flag is false.
 
 ---
 
@@ -174,7 +175,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "word_count": 70,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.7"
+  "prompt_version": "deal_summary:0.8"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -241,7 +242,7 @@ Generate the summary.
   "word_count": 70,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_summary:0.7"
+  "prompt_version": "deal_summary:0.8"
 }
 ```
 
@@ -282,7 +283,7 @@ Output:
   "word_count": 73,
   "model_confidence": "HIGH",
   "notes": "Sparse private deal; PE_PORTFOLIO acquirer with no sponsor name captured. Used party descriptions and source's strategic-rationale language ('clinical capacity in pediatric care') to communicate substance despite undisclosed terms.",
-  "prompt_version": "deal_summary:0.7"
+  "prompt_version": "deal_summary:0.8"
 }
 ```
 
@@ -318,7 +319,7 @@ Output:
   "word_count": 137,
   "model_confidence": "HIGH",
   "notes": "Take-private of public target. Equity value framing per Drop 3.11 rule (per-share price aggregate is equity value). Multiples included with LTM period qualifier per Drop 3.12. All four advisors named with role attribution. Premium and source's own rationale language woven naturally.",
-  "prompt_version": "deal_summary:0.7"
+  "prompt_version": "deal_summary:0.8"
 }
 ```
 
@@ -350,7 +351,7 @@ Output:
   "word_count": 81,
   "model_confidence": "HIGH",
   "notes": "PE add-on; Audax Private Equity sponsor named in opening per add-on framing rule. Add-on framing explicit. Source's strategic-rationale language ('skilled service technicians,' 'customer relationships') woven without literal enum tag.",
-  "prompt_version": "deal_summary:0.7"
+  "prompt_version": "deal_summary:0.8"
 }
 ```
 
@@ -382,7 +383,7 @@ Output:
   "word_count": 81,
   "model_confidence": "HIGH",
   "notes": "Co-investor structure (PRIVATE_EQUITY acquirer with both sponsors named in acquirer_sponsor_name). Source PR's strategic framing ('continued organic growth,' 'deep operating resources') used directly. Single advisor named with role attribution. Majority investment language ('majority investment from') matches source PR framing.",
-  "prompt_version": "deal_summary:0.7"
+  "prompt_version": "deal_summary:0.8"
 }
 ```
 
@@ -397,7 +398,7 @@ Output:
 | Summary includes editorial language | QA sampling catches. |
 | Summary written in wrong tense for event_type | Style rule #3 covers; QA samples check. |
 | Summary states "terms were not disclosed" when value_type ≠ UNDISCLOSED | Style rule under VALUE FRAMING addresses. Indicates upstream data issue if recurrent. |
-| Summary misses take-private framing when target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY | DEAL TYPE FRAMING section addresses. QA samples check. |
+| Summary misses take-private framing when flags.is_take_private=true | DEAL TYPE FRAMING section addresses. QA samples check. |
 | Summary describes SPIN_SPLIT as an acquisition | DEAL TYPE FRAMING and examples address. |
 | Summary omits multiples when multiple_quality=CALCULATED | Principle #5 addresses. |
 | Summary includes multiples when multiple_quality=NM or NOT_CALCULABLE | Principle #5 explicitly prohibits. |
@@ -415,3 +416,4 @@ Output:
 | 0.5 | 2026-04-23 | Added ASSETS to target_type divestiture handling rule (style rule 8). ASSETS targets follow the same summary framing as BUSINESS_UNIT/SUBSIDIARY divestitures. |
 | 0.7 | 2026-05-01 | Date format enforcement: opening sentence uses "On [Month DD, YYYY], ..." consistently. Fixed ~55% of v0.6 summaries that relied on "today announced" without explicit date. Updated all 4 few-shot examples to demonstrate. Documented same-day announce-and-close handling, distinct-announce-and-close (CLOSE event referencing earlier announce), and originally-announced phrasing for CLOSE PRs. |
 | 0.6 | 2026-04-29 | Major rewrite. Replaced template-feeling field-recitation summaries with narrative summaries that weave structured fields into prose. Required: party descriptions in opening (Drop 3.9), PE sponsor names in add-on framing (Drop 3.10), value type framing (Drop 3.11), multiples with period qualifier when CALCULATED (Drop 3.12), all captured advisors named with side and role attribution. Strategic rationale woven from source language rather than enum-tagged. Length follows substance, not artificial floor. Replaced existing few-shot examples with four examples covering: sparse private deal, public take-private with multiples and advisors, PE add-on with sponsor, multi-sponsor co-investor recap. User template extended with target_description, acquirer_description, acquirer_sponsor_name, pct_acquired, multiples columns, parent_seller_description, parent_seller_ticker, target_ticker. |
+| 0.8 | 2026-07-22 | Summary context now receives `flags.is_take_private` from Stage 9. Take-private framing follows the derived flag rather than re-deriving only from `target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY`, allowing private strategic and consortium take-privates while avoiding public-public merger false positives. |

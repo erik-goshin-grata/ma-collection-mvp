@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.7"
+_VERSION = "0.8"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0
@@ -136,6 +136,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         advisors_summary = _build_advisors_summary(conn, tid)
 
         flags_json = json.dumps({
+            "is_take_private": bool(tr["is_take_private"]),
             "includes_earnout": bool(tr["includes_earnout"]),
             "hostile": bool(tr["hostile"]),
             "competing_bid": bool(tr["competing_bid"]),

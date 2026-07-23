@@ -1,6 +1,6 @@
 # Aggregation Prompt (Conflict Resolution)
 
-**Version:** 0.2 (draft)
+**Version:** 0.3 (draft)
 **Repo path:** `prompts/aggregation.md`
 
 ---
@@ -104,7 +104,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.2"
+  "prompt_version": "aggregation:0.3"
 }
 
 All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
@@ -145,7 +145,7 @@ The orchestrator formats `observations_formatted` as a numbered list, one block 
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.2"
+  "prompt_version": "aggregation:0.3"
 }
 ```
 
@@ -203,13 +203,13 @@ Output:
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.2"
+  "prompt_version": "aggregation:0.3"
 }
 ```
 
 **Example 2 — Semantic conflict (EV vs equity value):**
 
-Note: deal_type is ACQUISITION. Take-Private context is inferred downstream from target_status = PUBLIC + acquirer_type = PRIVATE_EQUITY; TAKE_PRIVATE was removed as a top-level type in v0.2.
+Note: deal_type is ACQUISITION. Take-Private context is a derived transaction flag; TAKE_PRIVATE was removed as a top-level type in v0.2.
 
 Input:
 ```
@@ -239,7 +239,7 @@ Output:
   "flagged_for_review": true,
   "conflict_severity": "SEMANTIC",
   "notes": "Orchestrator should populate both value_amount (equity) and enterprise_value (from T2) rather than treating this as a conflict.",
-  "prompt_version": "aggregation:0.2"
+  "prompt_version": "aggregation:0.3"
 }
 ```
 
@@ -273,7 +273,7 @@ Output:
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
   "notes": null,
-  "prompt_version": "aggregation:0.2"
+  "prompt_version": "aggregation:0.3"
 }
 ```
 
@@ -297,3 +297,4 @@ Output:
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
+| 0.3 | 2026-07-22 | Updated take-private note to reference the derived transaction flag rather than the old `target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY` shorthand. No conflict-resolution behavior change. |

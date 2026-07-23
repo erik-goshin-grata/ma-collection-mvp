@@ -195,3 +195,36 @@ Consequences:
   classified as `ANNOUNCEMENT`, expected pending deals left without
   `closed_date`, and expected same-day completed deals populated with
   `closed_date`.
+
+## 2026-07-22 - Take-Private Derived Flag Rule
+
+Status: accepted.
+
+Decision:
+
+- Keep take-private as a derived flag, not a top-level deal type.
+- Derive `is_take_private` in Stage 9 for public standalone company
+  acquisitions where the buyer/ownership outcome is private or non-public.
+- Allow private strategic buyers, sponsor-backed/platform buyers, financial
+  sponsors, management/family-style buyers, and private consortiums to satisfy
+  the buyer side of the rule.
+- Do not derive take-private when the acquirer has a public ticker.
+- Do not derive take-private for public-company mergers, public-acquirer
+  acquisitions, public-target asset sales, carve-outs/business unit sales, or
+  minority investments.
+
+Context:
+
+- The prior shorthand, `target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY`,
+  missed valid take-private transactions led by private strategic buyers.
+- Utz/Intersnack is the motivating example: canonical `deal_type` remains
+  `ACQUISITION`, but the product-facing flag should still identify it as a
+  take-private after aggregation.
+
+Consequences:
+
+- Stage 9 owns the product/export flag.
+- Summary generation receives `flags.is_take_private` directly.
+- Prompt notes now refer to the derived flag rather than a PE-only shorthand.
+- Public-public merger false positives remain guarded by deal type, target
+  type, target status, and public acquirer ticker checks.

@@ -38,7 +38,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "aggregation"
-_VERSION = "0.2"
+_VERSION = "0.3"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -96,6 +96,21 @@ _FIELDS = [
 _FIELD_NAMES = {f for f, _ in _FIELDS}
 _FIELD_TYPE = {f: t for f, t in _FIELDS}
 _CONTEXT_FIELDS = ("target_name", "acquirer_name", "deal_type", "announced_date")
+_PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES = frozenset({
+    "PRIVATE_EQUITY",
+    "PE_PORTFOLIO",
+    "VENTURE_CAPITAL",
+    "SOVEREIGN_WEALTH_FUND",
+    "PENSION_FUND",
+    "HEDGE_FUND",
+    "FAMILY_OFFICE",
+    "INDIVIDUAL",
+    "MANAGEMENT",
+    "EMPLOYEE_GROUP",
+    "CONSORTIUM",
+    "OTHER_FINANCIAL_SPONSOR",
+})
+_PRIVATE_STRATEGIC_ACQUIRER_TYPES = frozenset({"STRATEGIC_CORPORATE"})
 
 
 # ---------------------------------------------------------------------------
@@ -122,16 +137,34 @@ def _derive_consideration_type(components_json: str | None) -> str | None:
     return "OTHER"
 
 
+def _has_value(value: Any) -> bool:
+    return bool(str(value or "").strip())
+
+
+def _derive_is_take_private(fields: dict) -> int:
+    if fields.get("deal_type") != "ACQUISITION":
+        return 0
+    if fields.get("target_status") != "PUBLIC":
+        return 0
+    if fields.get("target_type") != "STANDALONE_COMPANY":
+        return 0
+
+    acquirer_type = fields.get("acquirer_type")
+    if _has_value(fields.get("acquirer_ticker")):
+        return 0
+    if acquirer_type in _PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES:
+        return 1
+    if acquirer_type in _PRIVATE_STRATEGIC_ACQUIRER_TYPES:
+        return 1
+    return 0
+
+
 def _derive_flags(fields: dict) -> dict:
-    target_status = fields.get("target_status")
     acquirer_type = fields.get("acquirer_type")
     target_type = fields.get("target_type")
     deal_type = fields.get("deal_type")
     return {
-        "is_take_private": int(
-            target_status == "PUBLIC"
-            and acquirer_type in ("PRIVATE_EQUITY", "PE_PORTFOLIO")
-        ),
+        "is_take_private": _derive_is_take_private(fields),
         "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
         "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY", "ASSETS")),
         "is_de_spac": int(deal_type == "REVERSE_MERGER" and acquirer_type == "SPAC"),

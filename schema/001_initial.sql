@@ -238,7 +238,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     acquirer_fee_percentage     REAL,
 
     -- Derived flags (computed downstream from deal context)
-    is_take_private             INTEGER,     -- target_status=PUBLIC + acquirer_type=PRIVATE_EQUITY/PE_PORTFOLIO
+    is_take_private             INTEGER,     -- public standalone target acquired into private/non-public ownership; excludes public-acquirer mergers
     is_add_on                   INTEGER,     -- acquirer_type=PE_PORTFOLIO
     is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY, ASSETS)
     is_de_spac                  INTEGER DEFAULT 0,  -- 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC
