@@ -19,7 +19,8 @@ July 28, 2026.
 | High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.12 | 2026-07-28 | V2-2026-07-28 | acquirer_type lowercase; period_type enum enforced; date_precision; rumor_date; financials_disclosure_status; consideration_type |
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section added; LTM/NTM non-interchangeable rule; period type semantic conflict example |
 | Deal Summary | `prompts/deal_summary.md` | 0.9 | 2026-07-28 | V2-2026-07-28 | Input fields updated to V2 names; RECAPITALIZATION framing added; NTM multiples in framing rule |
-| Strategic Rationale | `prompts/strategic_rationale.md` | 0.5 | 2026-07-28 | V2-2026-07-28 | deal_type → v2_event_type; RECAPITALIZATION default rule added; SPIN_OFF/SPLIT_OFF references updated |
+| Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |
+| Funding HC Extraction | `prompts/funding_hc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT. Multi-investment source support. Sparse source handling. |
 
 ---
 
@@ -77,7 +78,13 @@ These are tracked in `pipeline_prompt_todo.md` Phase 3 (Schema / Pipeline Change
 
 ## Pending Work
 
-**Not yet implemented (requires eng enum decisions or separate workstream):**
+**Funding path (new workstream — see `docs/funding_path_design.md`):**
+- `funding_hc_extraction` v0.1 — written, not yet in pipeline
+- `stages/funding_hc_extract.py` — not yet written
+- `run.py` branch on `v2_event_type` for funding routing — not yet implemented
+- `schema/003_funding_path.sql` — not yet written
+- `adapters/sec_api.py` Form D extension — not yet implemented
+- `prompts/deal_summary.md` v0.10 — funding framing block needed
 - VC/funding event types in classifier (`VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`) — pending funding path design
 - Multi-party array output from HC extraction — pending `transaction_party` schema finalization
 - `transaction_participant` → `transaction_party` rename in pipeline
