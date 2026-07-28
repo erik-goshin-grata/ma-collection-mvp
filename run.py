@@ -38,6 +38,7 @@ import stages.scrape_pr_newswire as _stage_1
 import stages.relevancy_filter as _stage_2
 import stages.deal_type_classify as _stage_3
 import stages.high_confidence_extract as _stage_4
+import stages.funding_hc_extract as _stage_4b
 import stages.sec_trigger_detect as _stage_5
 import stages.sec_enrich as _stage_6
 import stages.low_confidence_extract as _stage_7
@@ -51,17 +52,17 @@ import stages.export as _stage_14
 
 # All 14 stages in pipeline order.
 _ALL_STAGES: list[types.ModuleType] = [
-    _stage_1, _stage_2, _stage_3, _stage_4,
+    _stage_1, _stage_2, _stage_3, _stage_4,_stage_4b,
     _stage_5, _stage_6, _stage_7, _stage_8,
     _stage_9, _stage_10, _stage_11, _stage_12, _stage_13, _stage_14,
 ]
 
 _EXTRACTION_STAGES = [
-    _stage_2, _stage_3, _stage_4,
+    _stage_2, _stage_3, _stage_4, stage_4b,
     _stage_5, _stage_6,
     # Stage 6 can queue SEC attached sources with inherited transaction context.
     # Run HC extraction again so those sources reach Stage 7 in the same run.
-    _stage_4,
+    _stage_4, _stage_4b,
     _stage_7,
 ]
 
