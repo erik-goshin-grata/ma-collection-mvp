@@ -42,6 +42,8 @@ class Config:
     # --- sec-api.io adapter ---
     sec_api_request_delay_seconds: float
     sec_date_window_days: int
+    sec_lookup_lookback_days: int
+    sec_lookup_lookahead_days: int
     sec_extractor_max_retries: int
     sec_extractor_retry_delay_ms: int
 
@@ -143,6 +145,8 @@ def load_config() -> Config:
 
     sec_api_request_delay_seconds = _opt_float("SEC_API_REQUEST_DELAY_SECONDS", 0.2)
     sec_date_window_days = _opt_int("SEC_DATE_WINDOW_DAYS", 7)
+    sec_lookup_lookback_days = _opt_int("SEC_LOOKBACK_DAYS", 30)
+    sec_lookup_lookahead_days = _opt_int("SEC_LOOKAHEAD_DAYS", sec_date_window_days)
     sec_extractor_max_retries = _opt_int("SEC_EXTRACTOR_MAX_RETRIES", 3)
     sec_extractor_retry_delay_ms = _opt_int("SEC_EXTRACTOR_RETRY_DELAY_MS", 750)
 
@@ -181,6 +185,8 @@ def load_config() -> Config:
         user_agent_string=user_agent_string,
         sec_api_request_delay_seconds=sec_api_request_delay_seconds,
         sec_date_window_days=sec_date_window_days,
+        sec_lookup_lookback_days=sec_lookup_lookback_days,
+        sec_lookup_lookahead_days=sec_lookup_lookahead_days,
         sec_extractor_max_retries=sec_extractor_max_retries,
         sec_extractor_retry_delay_ms=sec_extractor_retry_delay_ms,
         db_path=db_path,

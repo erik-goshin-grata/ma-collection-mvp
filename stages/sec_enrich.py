@@ -48,7 +48,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     ).fetchall()
 
     total = len(rows)
-    enriched_with_rows = no_match = error_count = 0
+    enriched_with_rows = no_match = error_count = attached_sources_queued = 0
     log.info("Stage 6: %d rows to enrich via SEC", total)
 
     for row in rows:
@@ -114,12 +114,14 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             log.info("extraction_id=%d SEC_ENRICHED (no filings found)", eid)
         else:
             enriched_with_rows += 1
+            attached_sources_queued += int(result.get("attached_sources_queued") or 0)
             log.info(
-                "extraction_id=%d SEC_ENRICHED  accession=%s  rows_inserted=%d  item=%s",
+                "extraction_id=%d SEC_ENRICHED  accession=%s  rows_inserted=%d  item=%s  attached_sources_queued=%d",
                 eid,
                 result.get("filing_accession"),
                 result["rows_inserted"],
                 result.get("item_extracted"),
+                result.get("attached_sources_queued") or 0,
             )
 
     log.info(
@@ -129,6 +131,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     return {
         "triggered_total": total,
         "enriched_with_rows": enriched_with_rows,
+        "attached_sources_queued": attached_sources_queued,
         "no_match": no_match,
         "error": error_count,
     }

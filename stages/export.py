@@ -14,8 +14,10 @@ Spec references: specs/pipeline.md §2 (Stage 14)
 from __future__ import annotations
 
 import csv
+import json
 import os
 import sqlite3
+from collections import defaultdict
 
 from config import Config
 from logger import get_logger
@@ -43,11 +45,150 @@ _COLUMNS = [
     "agreement_extraction_status", "linked_securities_count",
     "has_observation_changes", "observation_changes_field_count",
     "summary_text", "primary_rationale", "secondary_rationales_json",
+    "target_financial_advisors", "target_legal_advisors",
+    "acquirer_financial_advisors", "acquirer_legal_advisors",
+    "parent_seller_financial_advisors", "parent_seller_legal_advisors",
+    "both_advisors", "other_advisors", "unknown_advisors", "advisors_json",
+    "source_urls", "source_titles", "source_categories",
+    "source_party_1_names", "source_party_1_domains",
+    "source_party_2_names", "source_party_2_domains", "source_metadata_json",
     "created_at", "updated_at",
 ]
 
 
 _MULTIPLE_COLS = ("ev_to_revenue_ltm", "ev_to_revenue_ntm", "ev_to_ebitda_ltm", "ev_to_ebitda_ntm")
+
+
+def _append_unique(values: list[str], value: str | None) -> None:
+    value = (value or "").strip()
+    if value and value not in values:
+        values.append(value)
+
+
+def _join(values: list[str]) -> str:
+    return " | ".join(values)
+
+
+def _advisor_label(name: str, advisor_type: str, advised_party: str) -> str:
+    advisor_type = advisor_type or "UNKNOWN"
+    advised_party = advised_party or "UNKNOWN"
+    return f"{name} ({advisor_type}, {advised_party})"
+
+
+def _load_advisor_exports(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Return flattened advisor export fields keyed by transaction_id."""
+    rows = conn.execute(
+        """
+        SELECT
+            se.transaction_cluster_id AS transaction_id,
+            a.name,
+            a.type,
+            a.advised_party
+        FROM advisor a
+        JOIN staging_extraction se
+            ON se.extraction_id = a.extraction_id
+        WHERE se.transaction_cluster_id IS NOT NULL
+        ORDER BY se.transaction_cluster_id, a.advised_party, a.type, a.name
+        """
+    ).fetchall()
+
+    buckets: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    advisor_json: dict[str, list[dict[str, str]]] = defaultdict(list)
+    field_map = {
+        ("TARGET", "FINANCIAL"): "target_financial_advisors",
+        ("TARGET", "LEGAL"): "target_legal_advisors",
+        ("ACQUIRER", "FINANCIAL"): "acquirer_financial_advisors",
+        ("ACQUIRER", "LEGAL"): "acquirer_legal_advisors",
+        ("PARENT_SELLER", "FINANCIAL"): "parent_seller_financial_advisors",
+        ("PARENT_SELLER", "LEGAL"): "parent_seller_legal_advisors",
+    }
+
+    for row in rows:
+        tid = row["transaction_id"]
+        name = (row["name"] or "").strip()
+        advisor_type = (row["type"] or "UNKNOWN").strip()
+        advised_party = (row["advised_party"] or "UNKNOWN").strip()
+        if not tid or not name:
+            continue
+
+        advisor_json[tid].append({
+            "name": name,
+            "type": advisor_type,
+            "advised_party": advised_party,
+        })
+
+        field = field_map.get((advised_party, advisor_type))
+        if field:
+            _append_unique(buckets[tid][field], name)
+        elif advised_party == "BOTH":
+            _append_unique(buckets[tid]["both_advisors"], _advisor_label(name, advisor_type, advised_party))
+        elif advised_party == "UNKNOWN":
+            _append_unique(buckets[tid]["unknown_advisors"], _advisor_label(name, advisor_type, advised_party))
+        else:
+            _append_unique(buckets[tid]["other_advisors"], _advisor_label(name, advisor_type, advised_party))
+
+    out: dict[str, dict] = {}
+    for tid, grouped in buckets.items():
+        out[tid] = {field: _join(values) for field, values in grouped.items()}
+        out[tid]["advisors_json"] = json.dumps(advisor_json[tid], sort_keys=True)
+    return out
+
+
+def _load_source_exports(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Return TSV/source review metadata keyed by transaction_id."""
+    rows = conn.execute(
+        """
+        SELECT
+            ts.transaction_id,
+            ts.role,
+            sr.source_raw_id,
+            sr.url,
+            sr.title,
+            sr.notes
+        FROM transaction_source ts
+        JOIN source_raw sr
+            ON sr.source_raw_id = ts.source_raw_id
+        ORDER BY ts.transaction_id, ts.role, sr.source_raw_id
+        """
+    ).fetchall()
+
+    buckets: dict[str, dict[str, list[str]]] = defaultdict(lambda: defaultdict(list))
+    source_json: dict[str, list[dict[str, str]]] = defaultdict(list)
+
+    for row in rows:
+        tid = row["transaction_id"]
+        if not tid:
+            continue
+        try:
+            notes = json.loads(row["notes"] or "{}")
+        except (TypeError, ValueError):
+            notes = {}
+
+        _append_unique(buckets[tid]["source_urls"], row["url"])
+        _append_unique(buckets[tid]["source_titles"], row["title"])
+        _append_unique(buckets[tid]["source_categories"], notes.get("category"))
+        _append_unique(buckets[tid]["source_party_1_names"], notes.get("party_1_name"))
+        _append_unique(buckets[tid]["source_party_1_domains"], notes.get("party_1_domain"))
+        _append_unique(buckets[tid]["source_party_2_names"], notes.get("party_2_name"))
+        _append_unique(buckets[tid]["source_party_2_domains"], notes.get("party_2_domain"))
+
+        source_json[tid].append({
+            "source_raw_id": row["source_raw_id"],
+            "role": row["role"],
+            "url": row["url"],
+            "title": row["title"],
+            "category": notes.get("category"),
+            "party_1_name": notes.get("party_1_name"),
+            "party_1_domain": notes.get("party_1_domain"),
+            "party_2_name": notes.get("party_2_name"),
+            "party_2_domain": notes.get("party_2_domain"),
+        })
+
+    out: dict[str, dict] = {}
+    for tid, grouped in buckets.items():
+        out[tid] = {field: _join(values) for field, values in grouped.items()}
+        out[tid]["source_metadata_json"] = json.dumps(source_json[tid], sort_keys=True)
+    return out
 
 
 def _format_row(row: dict) -> dict:
@@ -121,6 +262,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     total = len(rows)
     log.info("Stage 13: %d transactions to export", total)
+    advisor_exports = _load_advisor_exports(conn)
+    source_exports = _load_source_exports(conn)
 
     exports_dir = os.path.join(os.path.dirname(cfg.db_path), "..", "exports")
     os.makedirs(exports_dir, exist_ok=True)
@@ -131,7 +274,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         writer = csv.DictWriter(f, fieldnames=_COLUMNS, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
-            writer.writerow(_format_row(dict(row)))
+            out = dict(row)
+            tid = out["transaction_id"]
+            out.update(source_exports.get(tid, {}))
+            out.update(advisor_exports.get(tid, {}))
+            writer.writerow(_format_row(out))
 
     log.info("Stage 14 done  rows=%d  path=%s", total, csv_path)
     return {"transactions_total": total, "rows_exported": total, "export_path": csv_path}

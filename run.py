@@ -56,7 +56,14 @@ _ALL_STAGES: list[types.ModuleType] = [
     _stage_9, _stage_10, _stage_11, _stage_12, _stage_13, _stage_14,
 ]
 
-_EXTRACTION_STAGES = _ALL_STAGES[1:7]   # stages 2–7 (indices 1–6)
+_EXTRACTION_STAGES = [
+    _stage_2, _stage_3, _stage_4,
+    _stage_5, _stage_6,
+    # Stage 6 can queue SEC attached sources with inherited transaction context.
+    # Run HC extraction again so those sources reach Stage 7 in the same run.
+    _stage_4,
+    _stage_7,
+]
 
 # Stages executed per mode, per pipeline.md §4.
 _MODE_STAGES: dict[str, list[types.ModuleType]] = {

@@ -31,7 +31,8 @@ _EXTRACTOR_URL = "https://api.sec-api.io/extractor"
 _ARCHIVE_HOST = "archive.sec-api.io"
 
 _EXCHANGE_TICKER_RE = re.compile(
-    r"\b(NYSE|NASDAQ|NYSE American|OTCQB|OTCQX|AMEX)\s*[:]\s*([A-Z]{1,5})\b"
+    r"\b(NYSE|NASDAQ|NYSE American|OTCQB|OTCQX|AMEX)\s*[:]\s*([A-Z]{1,5})\b",
+    re.IGNORECASE,
 )
 _SEC_LANGUAGE = frozenset([
     "Form 8-K",
@@ -73,6 +74,26 @@ _EVENT_ITEM_PRIORITY: dict[str, tuple[str, list[str]]] = {
 
 # Extracts the numeric item code from full strings like "Item 1.01: Entry into ..."
 _ITEM_CODE_RE = re.compile(r"\b(\d+\.\d+)\b")
+_SEC_CONTEXT_DT_VERSION = "sec_context_inherited:0.1"
+
+_PROCESSABLE_EXHIBIT_99_SUBTYPES = frozenset({
+    "PRESS_RELEASE",
+    "DEAL_NARRATIVE",
+})
+_EXHIBIT_99_PRESENTATION_RE = re.compile(
+    r"\b(investor\s+presentation|presentation|slide\s+deck|supplemental\s+slides|"
+    r"conference\s+call|transcript|prepared\s+remarks|fact\s+sheet)\b",
+    re.IGNORECASE,
+)
+_EXHIBIT_99_PRESS_RE = re.compile(
+    r"\b(press\s+release|news\s+release|joint\s+press\s+release|for\s+immediate\s+release)\b",
+    re.IGNORECASE,
+)
+_EXHIBIT_99_DEAL_RE = re.compile(
+    r"\b(announces?|announced|to\s+acquire|to\s+be\s+acquired|merger\s+agreement|"
+    r"definitive\s+agreement|transaction)\b",
+    re.IGNORECASE,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +113,9 @@ def detect_public_party(
     Side values: TARGET | ACQUIRER | BOTH
     """
     ticker_matches = list(_EXCHANGE_TICKER_RE.finditer(clean_text))
-    sec_hit = next((p for p in _SEC_LANGUAGE if p in clean_text), None)
-    bp_hit = next((p for p in _PUBLIC_BOILERPLATE if p in clean_text), None)
+    lower_text = clean_text.lower()
+    sec_hit = next((p for p in _SEC_LANGUAGE if p.lower() in lower_text), None)
+    bp_hit = next((p for p in _PUBLIC_BOILERPLATE if p.lower() in lower_text), None)
 
     if not ticker_matches and sec_hit is None and bp_hit is None:
         return None
@@ -104,7 +126,7 @@ def detect_public_party(
 
     if ticker_matches:
         m = ticker_matches[0]
-        exchange, tick = m.group(1), m.group(2)
+        exchange, tick = m.group(1).upper(), m.group(2).upper()
         pos = m.start()
 
         near_target = False
@@ -140,6 +162,34 @@ def detect_public_party(
         "side": side,
         "ticker": ticker,
     }
+
+
+def _strip_ticker(ticker_raw: str | None) -> str | None:
+    """Normalize a ticker, including exchange-prefixed values like NASDAQ:ROKU."""
+    if not ticker_raw:
+        return None
+    ticker = ticker_raw.split(":")[-1].strip().upper()
+    return ticker or None
+
+
+def _classify_exhibit_99(label: str | None, text: str | None) -> str:
+    """Classify EX-99.x attachment shape without an LLM.
+
+    Press-release-like and deal-narrative exhibits can safely join the existing
+    extraction path. Presentations and transcripts are captured for research but
+    held out of canonical extraction for now.
+    """
+    label_text = label or ""
+    sample = (text or "")[:4000]
+    haystack = f"{label_text}\n{sample}"
+
+    if _EXHIBIT_99_PRESENTATION_RE.search(haystack):
+        return "INVESTOR_PRESENTATION"
+    if _EXHIBIT_99_PRESS_RE.search(haystack):
+        return "PRESS_RELEASE"
+    if re.search(r"\b99[._-]?1\b", label_text, re.IGNORECASE) and _EXHIBIT_99_DEAL_RE.search(sample):
+        return "DEAL_NARRATIVE"
+    return "OTHER"
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +260,8 @@ def _build_query_string(
     ticker: str | None,
     company_name: str | None,
     announced_date: str,
-    window_days: int,
+    lookback_days: int,
+    lookahead_days: int,
 ) -> tuple[str, str, str]:
     """Build the Elasticsearch query string and date range.
 
@@ -221,9 +272,10 @@ def _build_query_string(
     except ValueError:
         anchor = datetime.now(timezone.utc)
 
-    start = (anchor - timedelta(days=window_days)).strftime("%Y-%m-%d")
-    end = (anchor + timedelta(days=window_days)).strftime("%Y-%m-%d")
+    start = (anchor - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = (anchor + timedelta(days=lookahead_days)).strftime("%Y-%m-%d")
 
+    ticker = _strip_ticker(ticker)
     items_clause = '(items:"1.01" OR items:"2.01" OR items:"8.01" OR items:"1.02")'
     parts = ['formType:"8-K"', items_clause]
     if ticker:
@@ -249,7 +301,11 @@ def query_filings(
     401/403 (auth failure).
     """
     query_str, _, _ = _build_query_string(
-        ticker, company_name, announced_date, cfg.sec_date_window_days
+        ticker,
+        company_name,
+        announced_date,
+        cfg.sec_lookup_lookback_days,
+        cfg.sec_lookup_lookahead_days,
     )
     payload = {
         "query": {"query_string": {"query": query_str}},
@@ -324,9 +380,9 @@ def query_8k_signing_filings(
 ) -> list[dict]:
     """Query for 8-K filings reporting Item 1.01 (Entry into Material Definitive Agreement).
 
-    Uses a symmetric ±sec_date_window_days window around announced_date.  Signing 8-Ks
-    are typically filed the same day as or one day before the PR announcement, so the
-    symmetric window (unlike the forward-only window for DEFM14A/S-4) is correct here.
+    Uses an asymmetric SEC lookup window around announced_date. News-derived
+    announcements may trail the issuer's 8-K by more than a week, while a
+    conservative forward window keeps unrelated later filings out.
 
     Call once per public party (target and acquirer) and merge results at the call site.
 
@@ -340,8 +396,8 @@ def query_8k_signing_filings(
     except ValueError:
         anchor = datetime.now(timezone.utc)
 
-    start = (anchor - timedelta(days=cfg.sec_date_window_days)).strftime("%Y-%m-%d")
-    end = (anchor + timedelta(days=cfg.sec_date_window_days)).strftime("%Y-%m-%d")
+    start = (anchor - timedelta(days=cfg.sec_lookup_lookback_days)).strftime("%Y-%m-%d")
+    end = (anchor + timedelta(days=cfg.sec_lookup_lookahead_days)).strftime("%Y-%m-%d")
 
     parts = ['formType:"8-K"', 'items:"1.01"']
     if ticker:
@@ -606,6 +662,115 @@ def insert_source_raw(
     return cur.lastrowid
 
 
+def _find_source_raw_id(conn: sqlite3.Connection, c_hash: str | None, url: str) -> int | None:
+    """Return an existing source_raw_id by content hash, falling back to URL."""
+    row = None
+    if c_hash:
+        row = conn.execute(
+            "SELECT source_raw_id FROM source_raw WHERE content_hash=? ORDER BY source_raw_id LIMIT 1",
+            (c_hash,),
+        ).fetchone()
+    if row is None and url:
+        row = conn.execute(
+            "SELECT source_raw_id FROM source_raw WHERE url=? ORDER BY source_raw_id LIMIT 1",
+            (url,),
+        ).fetchone()
+    return int(row["source_raw_id"]) if row else None
+
+
+def _queue_contextual_extraction(
+    conn: sqlite3.Connection,
+    *,
+    parent_extraction_id: int,
+    sec_source_raw_id: int,
+    sec_source_type: str,
+    sec_document_subtype: str | None,
+    log,
+) -> bool:
+    """Create a CLASSIFIED staging row for a SEC source attached to a known deal.
+
+    Stage 6 runs after deal classification, so an attached SEC source should not
+    be asked to prove standalone relevancy. It inherits the parent transaction's
+    classification context and then flows through the normal HC/LC extraction
+    stages in the same run.
+    """
+    parent = conn.execute(
+        """
+        SELECT deal_type, spin_split_type, distribution_mechanism,
+               target_type, event_type, target_status, model_confidence,
+               dt_prompt_version
+        FROM staging_extraction
+        WHERE extraction_id=?
+        """,
+        (parent_extraction_id,),
+    ).fetchone()
+    if not parent:
+        log.warning(
+            "Cannot queue SEC source_raw_id=%d: parent extraction_id=%d not found",
+            sec_source_raw_id, parent_extraction_id,
+        )
+        return False
+
+    existing = conn.execute(
+        """
+        SELECT 1
+        FROM staging_extraction
+        WHERE source_raw_id=?
+          AND notes LIKE ?
+        LIMIT 1
+        """,
+        (sec_source_raw_id, f'%"triggered_by_extraction_id": {parent_extraction_id}%'),
+    ).fetchone()
+    if existing:
+        return False
+
+    now = datetime.now(timezone.utc).isoformat()
+    notes = {
+        "dt": (
+            "SEC attached source inherited transaction classification context "
+            f"from extraction_id {parent_extraction_id}"
+        ),
+        "sec_attached_source": {
+            "triggered_by_extraction_id": parent_extraction_id,
+            "source_type": sec_source_type,
+            "document_subtype": sec_document_subtype,
+            "routing": "contextual_attached_source",
+        },
+    }
+    conn.execute(
+        """
+        INSERT INTO staging_extraction (
+            source_raw_id, status,
+            deal_type, spin_split_type, distribution_mechanism,
+            target_type, event_type, target_status,
+            model_confidence, dt_prompt_version, notes,
+            created_at, updated_at
+        )
+        VALUES (?, 'CLASSIFIED', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            sec_source_raw_id,
+            parent["deal_type"],
+            parent["spin_split_type"],
+            parent["distribution_mechanism"],
+            parent["target_type"],
+            parent["event_type"],
+            parent["target_status"],
+            parent["model_confidence"],
+            _SEC_CONTEXT_DT_VERSION,
+            json.dumps(notes),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    log.info(
+        "Queued SEC attached source_raw_id=%d as CLASSIFIED from parent extraction_id=%d",
+        sec_source_raw_id, parent_extraction_id,
+    )
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Per-transaction entry point (Stage 6)
 # ---------------------------------------------------------------------------
@@ -666,6 +831,7 @@ def query_filings_by_formtype(
     import logging as _logging
     log = log or _logging.getLogger(__name__)
     form_str = _FORM_TYPE_QUERY.get(filing_type_key, filing_type_key)
+    ticker = _strip_ticker(ticker)
 
     try:
         anchor = datetime.strptime(announced_date, "%Y-%m-%d")
@@ -906,6 +1072,7 @@ def run_per_transaction(
         "item_extracted": None,
         "exhibit_21_fetched": False,
         "exhibit_99_fetched_count": 0,
+        "attached_sources_queued": 0,
         "exhibits_unreadable_count": 0,
         "rows_inserted": 0,
         "errors": [],
@@ -932,7 +1099,9 @@ def run_per_transaction(
     announced_date = row["announced_date"] or ""
     event_type = row["event_type"]  # may be None; _select_item handles None gracefully
     clean_text = row["clean_text"] or ""
-    ticker = row["target_ticker"] or row["acquirer_ticker"]
+    target_ticker = _strip_ticker(row["target_ticker"])
+    acquirer_ticker = _strip_ticker(row["acquirer_ticker"])
+    ticker = target_ticker or acquirer_ticker
 
     if trigger_info is None:
         trigger_info = detect_public_party(clean_text, target_name, acquirer_name)
@@ -944,23 +1113,74 @@ def run_per_transaction(
     result["trigger_signal"] = trigger_info.get("trigger_signal", "")
 
     if trigger_info.get("ticker"):
-        ticker = trigger_info["ticker"]
+        ticker = _strip_ticker(trigger_info["ticker"])
 
     side = trigger_info.get("side", "BOTH")
+
+    query_candidates: list[tuple[str | None, str | None]] = []
     if side == "TARGET":
-        lookup_name = target_name
+        query_candidates.append((target_ticker or ticker, target_name))
     elif side == "ACQUIRER":
-        lookup_name = acquirer_name
+        query_candidates.append((acquirer_ticker or ticker, acquirer_name))
     else:
-        lookup_name = target_name or acquirer_name
+        query_candidates.extend([
+            (ticker, target_name or acquirer_name),
+            (target_ticker, target_name),
+            (acquirer_ticker, acquirer_name),
+        ])
+
+    seen_candidates: set[tuple[str | None, str | None]] = set()
+    deduped_candidates: list[tuple[str | None, str | None]] = []
+    for candidate_ticker, candidate_name in query_candidates:
+        normalized = (_strip_ticker(candidate_ticker), candidate_name)
+        if normalized in seen_candidates or not (normalized[0] or normalized[1]):
+            continue
+        seen_candidates.add(normalized)
+        deduped_candidates.append(normalized)
 
     # Filing query
+    filings_by_accession: dict[str, dict] = {}
     try:
-        filings = query_filings(cfg, session, ticker, lookup_name, announced_date, log)
+        for candidate_ticker, candidate_name in deduped_candidates:
+            candidate_filings = query_filings(
+                cfg, session, candidate_ticker, candidate_name, announced_date, log
+            )
+            for candidate in candidate_filings:
+                acc = candidate.get("accessionNo") or candidate.get("id") or ""
+                if acc and acc not in filings_by_accession:
+                    filings_by_accession[acc] = candidate
+            if candidate_filings:
+                log.info(
+                    "SEC query candidate ticker=%r name=%r returned %d filings",
+                    candidate_ticker, candidate_name, len(candidate_filings),
+                )
     except RuntimeError as exc:
         result["errors"].append(str(exc))
         log.error("Filing query fatal error for extraction_id=%d: %s", extraction_id, exc)
         return result
+
+    filings = list(filings_by_accession.values())
+    if not filings:
+        fallback_names = [n for n in (target_name, acquirer_name) if n]
+        for fallback_name in dict.fromkeys(fallback_names):
+            try:
+                candidate_filings = query_filings(
+                    cfg, session, None, fallback_name, announced_date, log
+                )
+            except RuntimeError as exc:
+                result["errors"].append(str(exc))
+                log.error("Name fallback filing query fatal error for extraction_id=%d: %s", extraction_id, exc)
+                return result
+            for candidate in candidate_filings:
+                acc = candidate.get("accessionNo") or candidate.get("id") or ""
+                if acc and acc not in filings_by_accession:
+                    filings_by_accession[acc] = candidate
+            if candidate_filings:
+                log.info(
+                    "SEC fallback query name=%r returned %d filings",
+                    fallback_name, len(candidate_filings),
+                )
+        filings = list(filings_by_accession.values())
 
     result["filings_found"] = len(filings)
     if not filings:
@@ -1026,28 +1246,40 @@ def run_per_transaction(
             )
         elif item_text:
             c_hash = _content_hash(item_text)
+            source_type = _ITEM_SOURCE_TYPE[selected_item]
+            sec_source_raw_id: int | None = None
             if not conn.execute(
                 "SELECT 1 FROM source_raw WHERE content_hash=?", (c_hash,)
             ).fetchone():
-                insert_source_raw(
+                sec_source_raw_id = insert_source_raw(
                     conn,
-                    source_type=_ITEM_SOURCE_TYPE[selected_item],
+                    source_type=source_type,
                     url=f"{filing_url}#item={selected_item}",
                     title=f"8-K Item {selected_item} - {filer_name} - {filed_at}",
                     published_date=filed_at or None,
                     raw_html=None,
                     clean_text=item_text,
                     c_hash=c_hash,
-                    notes=_make_notes(selected_item, None),
+                    notes=_make_notes(
+                        selected_item,
+                        None,
+                        {
+                            "sec_document_subtype": "ITEM_NARRATIVE",
+                            "process_as_attached_source": False,
+                        },
+                    ),
                     fetched_at=fetched_at,
                 )
                 result["rows_inserted"] += 1
                 log.info(
                     "Inserted %s for extraction_id=%d",
-                    _ITEM_SOURCE_TYPE[selected_item], extraction_id,
+                    source_type, extraction_id,
                 )
             else:
                 log.debug("Duplicate item content_hash for %s — skipping insert", selected_item)
+                sec_source_raw_id = _find_source_raw_id(
+                    conn, c_hash, f"{filing_url}#item={selected_item}"
+                )
             result["item_extracted"] = selected_item
         else:
             # Extractor returned empty body — insert row with clean_text=NULL per spec §6
@@ -1146,10 +1378,13 @@ def run_per_transaction(
             continue
         if ex_text:
             c_hash = _content_hash(ex_text)
+            subtype = _classify_exhibit_99(label, ex_text)
+            process_as_attached = subtype in _PROCESSABLE_EXHIBIT_99_SUBTYPES
+            sec_source_raw_id = None
             if not conn.execute(
                 "SELECT 1 FROM source_raw WHERE content_hash=?", (c_hash,)
             ).fetchone():
-                insert_source_raw(
+                sec_source_raw_id = insert_source_raw(
                     conn,
                     source_type="SEC_EXHIBIT_99",
                     url=ex_url,
@@ -1158,15 +1393,46 @@ def run_per_transaction(
                     raw_html=raw_html,
                     clean_text=ex_text,
                     c_hash=c_hash,
-                    notes=_make_notes(None, label),
+                    notes=_make_notes(
+                        None,
+                        label,
+                        {
+                            "sec_document_subtype": subtype,
+                            "process_as_attached_source": process_as_attached,
+                        },
+                    ),
                     fetched_at=fetched_at,
+                    source_status="RELEVANT" if process_as_attached else "FETCHED",
                 )
                 result["rows_inserted"] += 1
                 result["exhibit_99_fetched_count"] += 1
-                log.info("Inserted SEC_EXHIBIT_99 (label=%r) for extraction_id=%d", label, extraction_id)
+                log.info(
+                    "Inserted SEC_EXHIBIT_99 (label=%r subtype=%s process=%s) for extraction_id=%d",
+                    label, subtype, process_as_attached, extraction_id,
+                )
             else:
                 log.debug("Duplicate Exhibit 99.x content_hash — skipping")
+                sec_source_raw_id = _find_source_raw_id(conn, c_hash, ex_url)
+                if sec_source_raw_id and process_as_attached:
+                    conn.execute(
+                        "UPDATE source_raw SET source_status='RELEVANT', updated_at=? WHERE source_raw_id=?",
+                        (datetime.now(timezone.utc).isoformat(), sec_source_raw_id),
+                    )
+                    conn.commit()
                 result["exhibit_99_fetched_count"] += 1
+            if (
+                sec_source_raw_id
+                and process_as_attached
+                and _queue_contextual_extraction(
+                    conn,
+                    parent_extraction_id=extraction_id,
+                    sec_source_raw_id=sec_source_raw_id,
+                    sec_source_type="SEC_EXHIBIT_99",
+                    sec_document_subtype=subtype,
+                    log=log,
+                )
+            ):
+                result["attached_sources_queued"] += 1
         else:
             log.warning("Exhibit 99.x fetch returned no text for %s (label=%r)", ex_url, label)
 

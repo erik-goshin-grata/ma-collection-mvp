@@ -112,6 +112,11 @@ Required variables:
 - `SEC_API_KEY` — from sec-api.io dashboard
 - `OPERATOR_CONTACT_EMAIL` — used in the User-Agent header when scraping
 
+SEC 8-K enrichment uses `SEC_LOOKBACK_DAYS` and `SEC_LOOKAHEAD_DAYS` around the
+extracted announcement date. The default is 30 days back and 7 days forward so
+news-derived events can still find issuer filings that predate the article.
+`SEC_DATE_WINDOW_DAYS` remains as a legacy fallback for older local configs.
+
 To migrate a local run from Anthropic to OpenAI, set:
 
 ```bash

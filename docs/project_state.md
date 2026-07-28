@@ -286,9 +286,11 @@ closeout.
    is completed on a copied real DB.
 2. Validate OpenAI live provider behavior when an enterprise API key becomes
    available to the local runtime.
-3. Design the agreement observation supersession drop separately; do not fold it
+3. Design SEC polling, accession inventory, and transaction-source attachment
+   before relying on broad SEC lookup windows.
+4. Design the agreement observation supersession drop separately; do not fold it
    back into 3.31c.
-4. Decide later whether to switch the default Stage 9 read path to
+5. Decide later whether to switch the default Stage 9 read path to
    `observation`.
 
 ## Deferred / Known Follow-Ups
@@ -302,3 +304,13 @@ closeout.
 - Staging read path should remain available as a rollback path for now.
 - 3.32a does not yet extract investors/issuers from new prompts; those roles
   are reserved for future Growth Equity / Venture Capital support.
+- SEC document handling should move toward proactive polling and accession-level
+  source inventory. PR/news-triggered SEC lookup should first check known
+  filings and attach matched sources to existing transaction clusters; date
+  windows should be a constrained fallback for missed polling days, historical
+  backfills, and manual recovery.
+- Transaction matching must prevent duplicate transaction records when multiple
+  sources describe the same deal. SEC filings should attach to an existing
+  transaction when CIK/ticker, party names, target/business description, dates,
+  value, and deal wording strongly match; ambiguous matches should route to
+  review rather than auto-merge.

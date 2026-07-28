@@ -276,6 +276,26 @@ A future stabilization decision can either keep staging as default while
 operators opt into observation reads, or switch default to `observation` after
 an accepted full operational run.
 
+### SEC Polling and Transaction Matching
+
+Future SEC work should prioritize proactive SEC polling and accession-level
+source inventory over broad PR-triggered date-window discovery.
+
+Design goals:
+
+- Store SEC filings once by accession number.
+- When a PR/news source is processed, check known SEC filings before opening a
+  live SEC lookup window.
+- Attach matched SEC sources to existing transaction clusters instead of
+  creating duplicate transaction records.
+- Use CIK/ticker, party names, target/business description, dates, value, and
+  deal wording to match filings to transaction candidates.
+- Route ambiguous matches to review, especially when one public company has
+  multiple transactions in the same period.
+- Keep SEC lookup windows as a constrained fallback for missed polling days,
+  historical backfills, manual recovery, or cases where no accession is already
+  known.
+
 ### 3.32a Future Expansion
 
 Deferred beyond 3.32a:
@@ -300,4 +320,5 @@ Most natural next choices:
 1. OpenAI live-provider validation once the Enterprise API key path is ready.
 2. Observation-backed Stage 9 operational run on a copied real DB with
    `AGGREGATION_READ_SOURCE=observation`.
-3. Design the agreement observation supersession drop.
+3. Design SEC polling, accession inventory, and transaction-source matching.
+4. Design the agreement observation supersession drop.
