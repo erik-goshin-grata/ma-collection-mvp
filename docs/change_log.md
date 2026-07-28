@@ -66,3 +66,79 @@ Validation:
 
 - Script: `scripts/test_take_private_derivation.py`
 - Result: PASS.
+## 2026-07-28 - V2 Prompt Alignment
+
+Commit: *(to be filled on push)*
+
+Changed files:
+
+- `prompts/deal_type_classifier.md` (0.5 → 0.6)
+- `prompts/high_confidence_extraction.md` (0.11 → 0.12)
+- `prompts/aggregation.md` (0.3 → 0.4)
+- `prompts/deal_summary.md` (0.8 → 0.9)
+- `prompts/strategic_rationale.md` (0.4 → 0.5)
+- `docs/prompt_versions.md` (updated)
+- `schema/002_v2_prompt_alignment.sql` (new migration)
+- `stages/deal_type_classify.py` (parser updates for v0.6 output)
+- `stages/high_confidence_extract.py` (parser updates for v0.12 output)
+
+Behavioral changes:
+
+**Classifier (0.6):**
+- `v2_event_type` added as primary deal classification output (V2 EventType
+  vocabulary). `deal_type` retained as transitional alias — same value.
+- `event_type` renamed to `event_history_type` (eliminates V2 field name
+  collision). `event_type` accepted during rollout period.
+- `SPIN_SPLIT` split into `SPIN_OFF` and `SPLIT_OFF` as top-level event types.
+  `spin_split_type` discriminator retained for backward compatibility.
+- `RECAPITALIZATION` added as a top-level event type with `recap_type`
+  discriminator (DIVIDEND | EQUITY | LEVERAGED | SPONSOR_RECAP).
+- `target_type` values lowercased (V2 vocabulary); `spinco` added for
+  spin/split targets. Legacy uppercase values normalized in parser.
+- VC/funding rounds return UNKNOWN with a routing note — pending funding path.
+- `ANNOUNCEMENT` / `CLOSE` renamed to `ANNOUNCED` / `CLOSED` in
+  `event_history_type`.
+
+**HC Extraction (0.12):**
+- `acquirer.type` now uses V2 lowercase vocabulary. Legacy uppercase values
+  normalized in parser during migration.
+- `revenue_period_type` and `ebitda_period_type` aligned to V2 period_type
+  enum (LTM | NTM | ANNUAL | QUARTERLY | INTERIM_YTD). Legacy values (FY,
+  TTM, CY, QUARTER, UNKNOWN) normalized in parser. null explicitly required
+  when period not stated — do NOT assume LTM.
+- `date_precision` fields added for `announced_date`, `closed_date`,
+  `signing_date` (exact | month | quarter | year).
+- `rumor_date` added — date of first media report for rumored deals.
+- `financials_disclosure_status` added as required field
+  (DISCLOSED | UNDISCLOSED | UNKNOWN).
+- `consideration_type` now extracted directly by prompt as interim field
+  pending `consideration_component` table (cash | stock | cash_and_stock |
+  election | other).
+
+**Aggregation (0.4):**
+- V2 vocabulary section added. LTM and NTM explicitly non-interchangeable
+  in conflict resolution — period type disagreement flagged as SEMANTIC.
+
+**Deal Summary (0.9) / Strategic Rationale (0.5):**
+- Input field names updated to V2. RECAPITALIZATION framing added. NTM
+  multiples referenced in framing rules.
+
+Schema changes:
+
+- `staging_extraction`: 12 new nullable columns (v2_event_type,
+  event_history_type, recap_type, target_type_v2, spin_split_type_v2,
+  acquirer_type_v2, target_revenue_period_type_v2,
+  target_ebitda_period_type_v2, announced_date_precision,
+  closed_date_precision, signing_date_precision, rumor_date,
+  financials_disclosure_status).
+- `transaction_record`: 12 matching new nullable columns.
+- Legacy columns retained — no data loss.
+
+Validation:
+
+- *(run prompt validation against a local DB before merging)*
+- Suggested: rerun the July 22 6-source validation DB to confirm no
+  regressions on existing classifier and HC extract behavior.
+- New fields to spot-check: `financials_disclosure_status` populated on
+  all rows; `period_type` null when period not stated in source;
+  `acquirer_type_v2` lowercase on all rows.

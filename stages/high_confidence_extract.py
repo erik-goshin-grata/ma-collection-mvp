@@ -33,21 +33,107 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.10"
+_VERSION = "0.12"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
-_REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal"})
+_REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal", "financials_disclosure_status"})
 _VALID_VALUE_TYPES = frozenset({"EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE", "UNDISCLOSED"})
+_VALID_ACQUIRER_TYPES_V2 = frozenset({
+    "strategic_corporate", "private_equity", "pe_portfolio", "venture_capital",
+    "growth_equity", "sovereign_wealth_fund", "pension_fund", "hedge_fund",
+    "family_office", "individual", "management", "employee_group", "spac",
+    "consortium", "other_financial_sponsor", "unknown",
+})
+_VALID_PERIOD_TYPES_V2 = frozenset({"LTM", "NTM", "ANNUAL", "QUARTERLY", "INTERIM_YTD"})
+_VALID_DATE_PRECISIONS = frozenset({"exact", "month", "quarter", "year"})
+_VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
+_VALID_CONSIDERATION_TYPES = frozenset({"cash", "stock", "cash_and_stock", "election", "other"})
+
+# Normalize legacy uppercase acquirer_type values to V2 lowercase
+_LEGACY_ACQUIRER_TYPE_MAP: dict[str, str] = {
+    "STRATEGIC_CORPORATE": "strategic_corporate",
+    "PRIVATE_EQUITY": "private_equity",
+    "PE_PORTFOLIO": "pe_portfolio",
+    "VENTURE_CAPITAL": "venture_capital",
+    "GROWTH_EQUITY": "growth_equity",
+    "SOVEREIGN_WEALTH_FUND": "sovereign_wealth_fund",
+    "PENSION_FUND": "pension_fund",
+    "HEDGE_FUND": "hedge_fund",
+    "FAMILY_OFFICE": "family_office",
+    "INDIVIDUAL": "individual",
+    "MANAGEMENT": "management",
+    "EMPLOYEE_GROUP": "employee_group",
+    "SPAC": "spac",
+    "CONSORTIUM": "consortium",
+    "OTHER_FINANCIAL_SPONSOR": "other_financial_sponsor",
+    "UNKNOWN": "unknown",
+}
+
+# Normalize legacy period_type values to V2
+_LEGACY_PERIOD_TYPE_MAP: dict[str, str | None] = {
+    "FY": "ANNUAL",
+    "TTM": "LTM",
+    "CY": "ANNUAL",
+    "QUARTER": "QUARTERLY",
+    "UNKNOWN": None,  # unknown period → null in V2
+}
+
 _SLEEP = 1.0  # conservative Opus throttle
+
+
+def _normalize_acquirer_type(raw: str | None) -> str | None:
+    """Normalize acquirer.type to V2 lowercase vocabulary."""
+    if raw is None:
+        return None
+    if raw in _VALID_ACQUIRER_TYPES_V2:
+        return raw
+    return _LEGACY_ACQUIRER_TYPE_MAP.get(raw, raw)
+
+
+def _normalize_period_type(raw: str | None) -> str | None:
+    """Normalize period_type to V2 vocabulary. Returns None for UNKNOWN/unmapped."""
+    if raw is None:
+        return None
+    if raw in _VALID_PERIOD_TYPES_V2:
+        return raw
+    if raw in _LEGACY_PERIOD_TYPE_MAP:
+        return _LEGACY_PERIOD_TYPE_MAP[raw]
+    return raw
 
 
 def _validate(result: dict) -> str | None:
     missing = _REQUIRED_KEYS - result.keys()
     if missing:
         return f"missing required keys: {missing}"
+
     vtype = (result.get("value") or {}).get("type")
     if vtype is not None and vtype not in _VALID_VALUE_TYPES:
         return f"invalid value.type: {vtype!r}"
+
+    # financials_disclosure_status — required, must be valid
+    fds = result.get("financials_disclosure_status")
+    if fds not in _VALID_FINANCIALS_DISCLOSURE:
+        return f"invalid financials_disclosure_status: {fds!r}"
+
+    # consideration_type — optional but must be valid if present
+    ct = result.get("consideration_type")
+    if ct is not None and ct not in _VALID_CONSIDERATION_TYPES:
+        return f"invalid consideration_type: {ct!r}"
+
+    # date_precision fields — optional but must be valid if present
+    dates = result.get("dates") or {}
+    for prec_field in ("announced_date_precision", "closed_date_precision", "signing_date_precision"):
+        prec = dates.get(prec_field)
+        if prec is not None and prec not in _VALID_DATE_PRECISIONS:
+            return f"invalid {prec_field}: {prec!r}"
+
+    # acquirer.type — warn on legacy uppercase but don't reject during migration
+    # (model may still output old values while prompt rolls out)
+    # Normalization happens in _normalize_acquirer_type() below.
+
+    # period_type — warn on legacy values but don't reject; normalized below
+    # Validation of V2 values happens post-normalization at write time.
+
     return None
 
 
@@ -73,8 +159,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     rows = conn.execute(
         """
         SELECT se.extraction_id, se.source_raw_id,
-               se.deal_type, se.spin_split_type, se.distribution_mechanism,
-               se.target_type, se.event_type, se.target_status,
+               se.deal_type, se.v2_event_type,
+               se.spin_split_type, se.spin_split_type_v2,
+               se.distribution_mechanism, se.recap_type,
+               se.target_type, se.target_type_v2,
+               se.event_type, se.event_history_type,
+               se.target_status,
                se.notes, se.dt_prompt_version,
                sr.source_type, sr.source_tier, sr.title, sr.clean_text, sr.published_date
         FROM staging_extraction se
@@ -95,10 +185,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         user_prompt = prompt["user_template"].format(
             source_type=row["source_type"] or "",
             source_tier=row["source_tier"] or "",
-            deal_type=_fmt(row["deal_type"]),
-            spin_split_type=_fmt(row["spin_split_type"]),
-            target_type=_fmt(row["target_type"]),
-            event_type=_fmt(row["event_type"]),
+            # Pass v2_event_type when available, fall back to deal_type
+            deal_type=_fmt(row["v2_event_type"] or row["deal_type"]),
+            spin_split_type=_fmt(row["spin_split_type_v2"] or row["spin_split_type"]),
+            target_type=_fmt(row["target_type_v2"] or row["target_type"]),
+            event_type=_fmt(row["event_history_type"] or row["event_type"]),
             target_status=_fmt(row["target_status"]),
             published_date=_fmt(row["published_date"]),
             title=title,
@@ -180,21 +271,41 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             if hc_notes:
                 nd["hc"] = hc_notes
 
+            # Normalize V2 fields
+            acquirer_type_raw = a.get("type")
+            acquirer_type_v2 = _normalize_acquirer_type(acquirer_type_raw)
+            rev_period_v2 = _normalize_period_type(tf.get("revenue_period_type"))
+            ebitda_period_v2 = _normalize_period_type(tf.get("ebitda_period_type"))
+
             params = (
                 t.get("name"), t.get("domain"), t.get("ticker"),
                 t.get("description"),
-                a.get("name"), a.get("domain"), a.get("ticker"), a.get("type"),
+                a.get("name"), a.get("domain"), a.get("ticker"),
+                acquirer_type_raw,   # acquirer_type — legacy column, keep as-is
+                acquirer_type_v2,    # acquirer_type_v2 — new V2 column
                 a.get("description"),
                 a.get("sponsor_name"),
                 ps.get("name"), ps.get("ticker"),
                 ps.get("description"),
                 (txn.get("deal") or {}).get("pct_acquired"),
                 d.get("announced_date"), d.get("closed_date"), d.get("signing_date"),
+                d.get("announced_date_precision"),   # new
+                d.get("closed_date_precision"),      # new
+                d.get("signing_date_precision"),     # new
+                d.get("rumor_date"),                 # new
                 v.get("amount"), v.get("currency"), v.get("type"),
                 v.get("type_confidence"), v.get("qualifier"), v.get("per_share_price"),
-                tf.get("revenue_amount"), tf.get("revenue_period_type"), tf.get("revenue_period_end"),
-                tf.get("ebitda_amount"), tf.get("ebitda_period_type"), tf.get("ebitda_period_end"),
+                tf.get("revenue_amount"),
+                tf.get("revenue_period_type"),       # legacy column
+                rev_period_v2,                       # new: target_revenue_period_type_v2
+                tf.get("revenue_period_end"),
+                tf.get("ebitda_amount"),
+                tf.get("ebitda_period_type"),        # legacy column
+                ebitda_period_v2,                    # new: target_ebitda_period_type_v2
+                tf.get("ebitda_period_end"),
                 tf.get("currency"),
+                txn.get("financials_disclosure_status"),  # new
+                txn.get("consideration_type"),            # new (direct from prompt)
                 txn.get("model_confidence"), _VERSION, json.dumps(nd) if nd else None,
             )
 
@@ -205,18 +316,27 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         status = 'HC_EXTRACTED',
                         target_name = ?,  target_domain = ?,  target_ticker = ?,
                         target_description = ?,
-                        acquirer_name = ?,  acquirer_domain = ?,  acquirer_ticker = ?,  acquirer_type = ?,
+                        acquirer_name = ?,  acquirer_domain = ?,  acquirer_ticker = ?,
+                        acquirer_type = ?,  acquirer_type_v2 = ?,
                         acquirer_description = ?,
                         acquirer_sponsor_name = ?,
                         parent_seller_name = ?,  parent_seller_ticker = ?,
                         parent_seller_description = ?,
                         pct_acquired = ?,
                         announced_date = ?,  closed_date = ?,  signing_date = ?,
+                        announced_date_precision = ?,  closed_date_precision = ?,  signing_date_precision = ?,
+                        rumor_date = ?,
                         value_amount = ?,  value_currency = ?,  value_type = ?,
                         value_type_confidence = ?,  value_qualifier = ?,  per_share_price = ?,
-                        target_revenue = ?,  target_revenue_period_type = ?,  target_revenue_period_end = ?,
-                        target_ebitda = ?,  target_ebitda_period_type = ?,  target_ebitda_period_end = ?,
+                        target_revenue = ?,
+                        target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
+                        target_revenue_period_end = ?,
+                        target_ebitda = ?,
+                        target_ebitda_period_type = ?,  target_ebitda_period_type_v2 = ?,
+                        target_ebitda_period_end = ?,
                         financials_currency = ?,
+                        financials_disclosure_status = ?,
+                        consideration_type = COALESCE(consideration_type, ?),
                         model_confidence = ?,  hc_prompt_version = ?,  notes = ?,
                         multi_transaction_index = ?,  multi_transaction_total = ?,
                         updated_at = ?
@@ -236,33 +356,50 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     """
                     INSERT INTO staging_extraction (
                         source_raw_id, status,
-                        deal_type, spin_split_type, distribution_mechanism,
-                        target_type, event_type, target_status,
+                        deal_type, v2_event_type,
+                        spin_split_type, spin_split_type_v2,
+                        distribution_mechanism, recap_type,
+                        target_type, target_type_v2,
+                        event_type, event_history_type,
+                        target_status,
                         target_name, target_domain, target_ticker,
                         target_description,
-                        acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type,
+                        acquirer_name, acquirer_domain, acquirer_ticker,
+                        acquirer_type, acquirer_type_v2,
                         acquirer_description,
                         acquirer_sponsor_name,
                         parent_seller_name, parent_seller_ticker,
                         parent_seller_description,
                         pct_acquired,
                         announced_date, closed_date, signing_date,
+                        announced_date_precision, closed_date_precision, signing_date_precision,
+                        rumor_date,
                         value_amount, value_currency, value_type,
                         value_type_confidence, value_qualifier, per_share_price,
-                        target_revenue, target_revenue_period_type, target_revenue_period_end,
-                        target_ebitda, target_ebitda_period_type, target_ebitda_period_end,
+                        target_revenue,
+                        target_revenue_period_type, target_revenue_period_type_v2,
+                        target_revenue_period_end,
+                        target_ebitda,
+                        target_ebitda_period_type, target_ebitda_period_type_v2,
+                        target_ebitda_period_end,
                         financials_currency,
+                        financials_disclosure_status,
+                        consideration_type,
                         model_confidence, hc_prompt_version, notes,
                         dt_prompt_version,
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",
-                     row["deal_type"], row["spin_split_type"], row["distribution_mechanism"],
-                     row["target_type"], row["event_type"], row["target_status"])
+                     row["deal_type"], row["v2_event_type"],
+                     row["spin_split_type"], row["spin_split_type_v2"],
+                     row["distribution_mechanism"], row["recap_type"],
+                     row["target_type"], row["target_type_v2"],
+                     row["event_type"], row["event_history_type"],
+                     row["target_status"])
                     + params
                     + (row["dt_prompt_version"], i, multi_total, now, now),
                 )

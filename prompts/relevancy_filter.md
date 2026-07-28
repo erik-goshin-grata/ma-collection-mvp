@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.4 (revised)
+**Version:** 0.5 (V2 alignment)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -52,6 +52,10 @@ IN SCOPE (classify as RELEVANT):
 - Reverse mergers
 - Joint ventures (new entity formed between parties)
 - Minority investments or growth equity rounds in private companies
+- VC funding rounds (Seed, Series A through Series N, angel, crowdfunding)
+- Growth equity investments by growth equity or late-stage investors
+- Venture debt or venture lending facilities to venture-backed companies
+- Recapitalizations (dividend recap, equity recap, leveraged recap, sponsor recap)
 - Definitive agreements for any of the above
 - Closing or completion of any of the above
 
@@ -61,7 +65,7 @@ OUT OF SCOPE (classify as NOT_RELEVANT):
 - Executive appointments, hires, departures
 - Earnings releases, guidance updates, dividend announcements
 - Share buybacks by a company of its own stock (unless part of a take-private)
-- Debt financings and bond issuances (unless tied to a specific acquisition)
+- Corporate debt financings and bond issuances by mature public companies (venture debt to venture-backed companies IS in scope — see above)
 - Regulatory filings that do not announce a transaction
 - Marketing content, whitepapers, industry commentary
 - Stock split or reverse stock split announcements
@@ -75,7 +79,7 @@ EDGE CASES:
 
 CRITICAL — reason_code MUST be chosen from the enum list
 
-The reason_code field must be exactly one of the 21 values listed in the in-scope and out-of-scope enumerations above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
+The reason_code field must be exactly one of the 23 values listed in the in-scope and out-of-scope enumerations above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
 
 If no listed value fits perfectly:
 - For RELEVANT classifications, use AMBIGUOUS_BUT_LIKELY_DEAL
@@ -93,6 +97,11 @@ Examples of invented values that must NOT be produced:
 - MERGER_REGULATORY_APPROVAL → use DEAL_AMENDMENT_OR_TERMINATION
 - TAKE_PRIVATE_ANNOUNCEMENT → use TAKE_PRIVATE
 - MINORITY_INVESTMENT_ANNOUNCEMENT → use MINORITY_INVESTMENT
+- VC_FUNDING_ROUND → use VC_ROUND_OR_FUNDING
+- SERIES_B_FUNDING → use VC_ROUND_OR_FUNDING
+- GROWTH_EQUITY_INVESTMENT → use VC_ROUND_OR_FUNDING
+- VENTURE_DEBT_FACILITY → use VC_ROUND_OR_FUNDING
+- DIVIDEND_RECAPITALIZATION → use RECAPITALIZATION
 
 Note on suffixes: Do NOT append _ANNOUNCEMENT, _CLOSING, _COMPLETION, _AMENDMENT, or _TERMINATION suffixes to any enum value. Event-type distinctions belong in the deal_type_classifier output, not in reason_code. Use the base enum value only.
 
@@ -159,6 +168,8 @@ Classify this release.
 - `REVERSE_MERGER`
 - `JOINT_VENTURE`
 - `MINORITY_INVESTMENT`
+- `VC_ROUND_OR_FUNDING` — VC round, growth equity investment, or venture debt facility
+- `RECAPITALIZATION` — dividend recap, equity recap, leveraged recap, or sponsor recap
 - `DEAL_CLOSE_OR_COMPLETION`
 - `DEAL_AMENDMENT_OR_TERMINATION`
 - `AMBIGUOUS_BUT_LIKELY_DEAL` — use when release references an in-scope event but framing is unclear
@@ -236,7 +247,29 @@ Output:
 }
 ```
 
-**Example 4 — Edge case, deal termination:**
+**Example 4 — VC funding round:**
+
+Input:
+```
+TITLE: TechCo Raises $50 Million Series B Led by Venture Partners
+BODY: TechCo today announced the closing of a $50 million Series B funding
+round led by Venture Partners, with participation from existing investors
+Seed Capital and Growth Fund I. The proceeds will be used to accelerate
+product development and geographic expansion.
+```
+
+Output:
+```json
+{
+  "classification": "RELEVANT",
+  "reason_code": "VC_ROUND_OR_FUNDING",
+  "model_confidence": "HIGH",
+  "notes": null,
+  "prompt_version": "relevancy_filter:0.5"
+}
+```
+
+**Example 5 — Edge case, deal termination:**
 
 Input:
 ```
@@ -251,7 +284,7 @@ Output:
   "reason_code": "DEAL_AMENDMENT_OR_TERMINATION",
   "model_confidence": "HIGH",
   "notes": "Termination of a previously announced deal — in scope for completeness",
-  "prompt_version": "relevancy_filter:0.4"
+  "prompt_version": "relevancy_filter:0.5"
 }
 ```
 
@@ -277,3 +310,4 @@ Output:
 | 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.3 | 2026-04-23 | Tightened enum discipline: added explicit CRITICAL block before RESPONSE FORMAT listing invented values observed in validation runs and mapping each to the correct enum value. Strengthened RESPONSE FORMAT preamble with no-exceptions language. Addresses 30-47% failure rate from model inventing reason_codes like SHARE_BUYBACK, ACQUISITION_COMPLETION, etc. instead of using listed enum values. |
 | 0.4 | 2026-04-23 | Added suffix-pattern warning and two concrete examples. Addresses residual 13% failure rate from v0.3. |
+| 0.5 | 2026-07-28 | V2 alignment. Added VC/funding events to IN SCOPE: VC funding rounds, growth equity investments, venture debt, recapitalizations. Added `VC_ROUND_OR_FUNDING` and `RECAPITALIZATION` to reason_code enum (23 total, up from 21). Updated OUT OF SCOPE debt note to distinguish venture debt (in scope) from corporate bond issuances (out of scope). Added Example 4 (VC round). Updated CRITICAL block with invented-value examples for funding types. |

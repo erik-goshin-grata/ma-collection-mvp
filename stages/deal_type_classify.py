@@ -8,20 +8,23 @@ Creates a staging_extraction row for each processed source:
   - status = CLASSIFIED on success
   - status = PROMPT_FAILED on prompt failure or schema violation
 
-On CLASSIFIED, populates: deal_type, spin_split_type, distribution_mechanism,
-target_type, event_type, target_status, model_confidence, dt_prompt_version.
+On CLASSIFIED, populates: deal_type, v2_event_type, spin_split_type,
+spin_split_type_v2, distribution_mechanism, recap_type, target_type,
+target_type_v2, event_type, event_history_type, target_status,
+model_confidence, dt_prompt_version.
 
 Notes field shape for newly created staging_extraction rows:
     {"dt": "<model notes string or null>"}
     If overrides_relevancy_hint is True, adds "dt_overrides_relevancy": true.
 
 Schema validation enforced:
-  - deal_type must be in: ACQUISITION, MERGER, SPIN_SPLIT, REVERSE_MERGER,
-    JOINT_VENTURE, MINORITY_INVESTMENT, UNKNOWN
-  - event_type must be in: ANNOUNCEMENT, CLOSE, AMENDMENT, TERMINATION
-  - target_status must be in: PUBLIC, PRIVATE, SUBSIDIARY_OF_PUBLIC,
-    SUBSIDIARY_OF_PRIVATE, UNKNOWN
-  - spin_split_type and distribution_mechanism must be null for non-SPIN_SPLIT
+  - v2_event_type must be in V2 EventType enum when present
+  - deal_type accepted as transitional alias (same valid set)
+  - event_history_type must be in: ANNOUNCED, CLOSED, AMENDED, TERMINATED
+  - event_type accepted as legacy alias during rollout
+  - target_status must be in valid set
+  - recap_type must be null for non-RECAPITALIZATION
+  - spin_split discriminators must be null for non-spin types
 
 PROMPT_FAILED rows are not retried automatically; use --mode=rerun-prompt.
 
@@ -40,32 +43,167 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_type_classifier"
-_VERSION = "0.5"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
-_VALID_DEAL_TYPES = frozenset({
-    "ACQUISITION", "MERGER", "SPIN_SPLIT", "REVERSE_MERGER",
-    "JOINT_VENTURE", "MINORITY_INVESTMENT", "UNKNOWN",
+# V2 EventType enum values
+_VALID_V2_EVENT_TYPES = frozenset({
+    "ACQUISITION", "MERGER", "SPIN_OFF", "SPLIT_OFF", "REVERSE_MERGER",
+    "JOINT_VENTURE", "MINORITY_INVESTMENT", "RECAPITALIZATION",
+    "VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT",
+    "UNKNOWN",
 })
-_VALID_EVENT_TYPES = frozenset({"ANNOUNCEMENT", "CLOSE", "AMENDMENT", "TERMINATION"})
+# Legacy deal_type values accepted during migration
+_VALID_DEAL_TYPES = _VALID_V2_EVENT_TYPES | frozenset({"SPIN_SPLIT"})
+
+# V2 event_history_type values
+_VALID_EVENT_HISTORY_TYPES = frozenset({"ANNOUNCED", "CLOSED", "AMENDED", "TERMINATED"})
+# Legacy event_type values accepted during rollout
+_VALID_LEGACY_EVENT_TYPES = frozenset({"ANNOUNCEMENT", "CLOSE", "AMENDMENT", "TERMINATION"})
+
 _VALID_TARGET_STATUSES = frozenset({
     "PUBLIC", "PRIVATE", "SUBSIDIARY_OF_PUBLIC", "SUBSIDIARY_OF_PRIVATE", "UNKNOWN",
 })
+_VALID_RECAP_TYPES = frozenset({"DIVIDEND", "EQUITY", "LEVERAGED", "SPONSOR_RECAP"})
+_VALID_SPIN_SPLIT_TYPES = frozenset({"SPIN_OFF", "SPLIT_OFF", "SPLIT"})  # SPLIT accepted during rollout
+
+# V2 lowercase target_type values
+_VALID_TARGET_TYPES_V2 = frozenset({
+    "standalone_company", "business_unit", "subsidiary", "assets", "spinco",
+})
+# Legacy uppercase accepted during rollout
+_VALID_LEGACY_TARGET_TYPES = frozenset({
+    "STANDALONE_COMPANY", "BUSINESS_UNIT", "SUBSIDIARY", "ASSETS",
+})
+
 _SLEEP = 1.0  # conservative Opus throttle
 
+# ---------------------------------------------------------------------------
+# Normalization helpers — handle legacy values from pre-v0.6 prompt output
+# ---------------------------------------------------------------------------
+
+_LEGACY_EVENT_TYPE_MAP = {
+    "ANNOUNCEMENT": "ANNOUNCED",
+    "CLOSE": "CLOSED",
+    "AMENDMENT": "AMENDED",
+    "TERMINATION": "TERMINATED",
+}
+
+_LEGACY_TARGET_TYPE_MAP = {
+    "STANDALONE_COMPANY": "standalone_company",
+    "BUSINESS_UNIT": "business_unit",
+    "SUBSIDIARY": "subsidiary",
+    "ASSETS": "assets",
+}
+
+_LEGACY_SPIN_SPLIT_TYPE_MAP = {
+    "SPLIT": "SPLIT_OFF",  # v0.5 used SPLIT; v0.6 uses SPLIT_OFF
+}
+
+
+def _normalize_event_history_type(result: dict) -> str | None:
+    """
+    Resolve event_history_type from a classifier result.
+    Prefers event_history_type (v0.6+); falls back to event_type (v0.5).
+    Normalizes legacy ANNOUNCEMENT/CLOSE/AMENDMENT/TERMINATION values.
+    """
+    eht = result.get("event_history_type")
+    if eht in _VALID_EVENT_HISTORY_TYPES:
+        return eht
+    # Normalize if it's a V2 value in the old field
+    legacy = result.get("event_type")
+    if legacy in _VALID_EVENT_HISTORY_TYPES:
+        return legacy
+    if legacy in _LEGACY_EVENT_TYPE_MAP:
+        return _LEGACY_EVENT_TYPE_MAP[legacy]
+    return eht  # return as-is; validation will catch invalid values
+
+
+def _normalize_target_type_v2(raw: str | None) -> str | None:
+    """Normalize target_type to V2 lowercase vocabulary."""
+    if raw is None:
+        return None
+    if raw in _VALID_TARGET_TYPES_V2:
+        return raw
+    return _LEGACY_TARGET_TYPE_MAP.get(raw, raw)
+
+
+def _normalize_spin_split_type_v2(raw: str | None) -> str | None:
+    """Normalize spin_split_type to V2 values."""
+    if raw is None:
+        return None
+    return _LEGACY_SPIN_SPLIT_TYPE_MAP.get(raw, raw)
+
+
+def _resolve_v2_event_type(result: dict) -> str | None:
+    """Get canonical v2_event_type — prefer v2_event_type field, fall back to deal_type."""
+    v2et = result.get("v2_event_type")
+    if v2et in _VALID_V2_EVENT_TYPES:
+        return v2et
+    # Fall back to deal_type, normalizing SPIN_SPLIT → SPIN_OFF
+    dt = result.get("deal_type")
+    if dt == "SPIN_SPLIT":
+        # Determine SPIN_OFF vs SPLIT_OFF from distribution_mechanism
+        mech = result.get("distribution_mechanism")
+        return "SPLIT_OFF" if mech == "EXCHANGE_OFFER" else "SPIN_OFF"
+    if dt in _VALID_V2_EVENT_TYPES:
+        return dt
+    return v2et
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
 
 def _validate(result: dict) -> str | None:
-    if result.get("deal_type") not in _VALID_DEAL_TYPES:
-        return f"invalid deal_type: {result.get('deal_type')!r}"
-    if result.get("event_type") not in _VALID_EVENT_TYPES:
-        return f"invalid event_type: {result.get('event_type')!r}"
+    # Must have at least one of v2_event_type or deal_type
+    v2et = _resolve_v2_event_type(result)
+    if v2et is not None and v2et not in _VALID_V2_EVENT_TYPES:
+        return f"invalid v2_event_type: {v2et!r}"
+
+    dt = result.get("deal_type")
+    if dt is not None and dt not in _VALID_DEAL_TYPES:
+        return f"invalid deal_type: {dt!r}"
+
+    if v2et is None and dt is None:
+        return "missing both v2_event_type and deal_type"
+
+    # event_history_type — accept new field or legacy event_type
+    eht = _normalize_event_history_type(result)
+    if eht not in _VALID_EVENT_HISTORY_TYPES:
+        return f"invalid event_history_type: {eht!r}"
+
+    # target_status
     if result.get("target_status") not in _VALID_TARGET_STATUSES:
         return f"invalid target_status: {result.get('target_status')!r}"
-    if result.get("deal_type") != "SPIN_SPLIT":
-        if result.get("spin_split_type") is not None or result.get("distribution_mechanism") is not None:
-            return "spin_split discriminators must be null for non-SPIN_SPLIT"
+
+    # recap_type — required null for non-RECAPITALIZATION
+    recap = result.get("recap_type")
+    if v2et == "RECAPITALIZATION":
+        if recap is not None and recap not in _VALID_RECAP_TYPES:
+            return f"invalid recap_type: {recap!r}"
+    elif recap is not None:
+        return f"recap_type must be null for v2_event_type={v2et!r}"
+
+    # spin_split discriminators — must be null for non-spin types
+    is_spin = v2et in ("SPIN_OFF", "SPLIT_OFF") or dt == "SPIN_SPLIT"
+    if not is_spin:
+        if result.get("spin_split_type") is not None:
+            return "spin_split_type must be null for non-spin types"
+        if result.get("distribution_mechanism") is not None:
+            return "distribution_mechanism must be null for non-spin types"
+
+    # target_type — accept both legacy uppercase and V2 lowercase
+    tt = result.get("target_type")
+    if tt is not None and tt not in (_VALID_TARGET_TYPES_V2 | _VALID_LEGACY_TARGET_TYPES):
+        return f"invalid target_type: {tt!r}"
+
     return None
 
+
+# ---------------------------------------------------------------------------
+# Stage entry point
+# ---------------------------------------------------------------------------
 
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     """Classify deal types for relevant rows and create staging_extraction records.
@@ -151,11 +289,16 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         if result.get("overrides_relevancy_hint"):
             notes_dict["dt_overrides_relevancy"] = True
 
-        _insert(conn, sid, "CLASSIFIED", result, _VERSION, json.dumps(notes_dict))
+        v2_event_type = _resolve_v2_event_type(result)
+        event_history_type = _normalize_event_history_type(result)
+
+        _insert(conn, sid, "CLASSIFIED", result, _VERSION, json.dumps(notes_dict),
+                v2_event_type=v2_event_type,
+                event_history_type=event_history_type)
         classified += 1
         log.info(
-            "source_raw_id=%d CLASSIFIED  deal_type=%s  event_type=%s  confidence=%s",
-            sid, result.get("deal_type"), result.get("event_type"), result.get("model_confidence"),
+            "source_raw_id=%d CLASSIFIED  v2_event_type=%s  event_history_type=%s  confidence=%s",
+            sid, v2_event_type, event_history_type, result.get("model_confidence"),
         )
         time.sleep(_SLEEP)
 
@@ -168,6 +311,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Insert helper
+# ---------------------------------------------------------------------------
+
 def _insert(
     conn: sqlite3.Connection,
     source_raw_id: int,
@@ -175,21 +322,48 @@ def _insert(
     result: dict | None,
     dt_version: str,
     notes: str | None,
+    v2_event_type: str | None = None,
+    event_history_type: str | None = None,
 ) -> None:
     r = result or {}
+
+    # Normalize V2 fields
+    target_type_v2 = _normalize_target_type_v2(r.get("target_type"))
+    spin_split_type_v2 = _normalize_spin_split_type_v2(r.get("spin_split_type"))
+
     conn.execute(
         """
         INSERT INTO staging_extraction
             (source_raw_id, status,
-             deal_type, spin_split_type, distribution_mechanism,
-             target_type, event_type, target_status,
+             deal_type, v2_event_type,
+             spin_split_type, spin_split_type_v2,
+             distribution_mechanism,
+             recap_type,
+             target_type, target_type_v2,
+             event_type, event_history_type,
+             target_status,
              model_confidence, dt_prompt_version, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             source_raw_id, status,
-            r.get("deal_type"), r.get("spin_split_type"), r.get("distribution_mechanism"),
-            r.get("target_type"), r.get("event_type"), r.get("target_status"),
+            # deal_type — legacy field; keep writing for backward compat
+            r.get("deal_type") or v2_event_type,
+            # v2_event_type — new canonical field
+            v2_event_type,
+            # spin_split_type legacy + V2
+            r.get("spin_split_type"), spin_split_type_v2,
+            # distribution_mechanism (unchanged)
+            r.get("distribution_mechanism"),
+            # recap_type — new field
+            r.get("recap_type"),
+            # target_type legacy + V2 lowercase
+            r.get("target_type"), target_type_v2,
+            # event_type legacy + event_history_type new
+            r.get("event_type") or event_history_type,
+            event_history_type,
+            # target_status (unchanged)
+            r.get("target_status"),
             r.get("model_confidence"), dt_version, notes,
         ),
     )

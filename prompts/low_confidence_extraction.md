@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.4
+**Version:** 0.5 (V2 alignment)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -35,13 +35,23 @@ Runs on every row where high-confidence extraction completed.
   "source_tier": "T2",
   "title": "Acme Corp Announces Acquisition of Beta Industries",
   "clean_text": "Acme Corp (NASDAQ: ACME)...",
+  "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
-  "event_type": "ANNOUNCEMENT",
-  "target_type": "STANDALONE_COMPANY",
+  "event_history_type": "ANNOUNCED",
+  "target_type": "standalone_company",
   "value_amount": 500000000,
   "value_currency": "USD",
   "value_type": "TRANSACTION_VALUE"
 }
+```
+
+**V2 note:** `v2_event_type` is the primary field (V2 EventType vocabulary). `deal_type`
+is retained as a transitional alias. `event_history_type` replaces `event_type`
+(`ANNOUNCED`, `CLOSED`, `AMENDED`, `TERMINATED`). `target_type` values are lowercase
+V2 vocabulary (`standalone_company`, `subsidiary`, `business_unit`, `assets`, `spinco`).
+Both legacy and V2 field names are accepted during the migration window.
+
+```json
 ```
 
 The `value_amount` and `value_type` from high-confidence extraction are passed so the model can sanity-check component sums and compute percentages against total deal value.
@@ -220,9 +230,9 @@ All fields are required. Use null for optional fields that have no value. "promp
 
 ```
 SOURCE TYPE: {source_type}
-DEAL TYPE: {deal_type}
+V2 EVENT TYPE: {v2_event_type}
 TARGET TYPE: {target_type}
-EVENT TYPE: {event_type}
+EVENT HISTORY TYPE: {event_history_type}
 DEAL VALUE: {value_amount} {value_currency} ({value_type})
 
 TITLE: {title}
@@ -288,9 +298,9 @@ Extract advisors, consideration components, and deal characteristic flags.
 
 Input:
 ```
-DEAL TYPE: ACQUISITION
-TARGET TYPE: STANDALONE_COMPANY
-EVENT TYPE: ANNOUNCEMENT
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
 DEAL VALUE: 500000000 USD (TRANSACTION_VALUE)
 
 TITLE: Acme Corp to Acquire Beta Industries for $500 Million
@@ -332,9 +342,9 @@ Output:
 
 Input:
 ```
-DEAL TYPE: ACQUISITION
-TARGET TYPE: STANDALONE_COMPANY
-EVENT TYPE: ANNOUNCEMENT
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
 DEAL VALUE: 800000000 USD (TRANSACTION_VALUE)
 
 TITLE: Acme Corp Acquires Beta Industries for Up to $800 Million
@@ -373,9 +383,9 @@ Output:
 
 Input:
 ```
-DEAL TYPE: ACQUISITION
-TARGET TYPE: STANDALONE_COMPANY
-EVENT TYPE: ANNOUNCEMENT
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
 DEAL VALUE: 4500000000 USD (ENTERPRISE_VALUE)
 
 TITLE: Acme Corp to Be Acquired by Zenith Capital in $4.5 Billion Transaction
@@ -412,9 +422,9 @@ Output:
 
 Input:
 ```
-DEAL TYPE: ACQUISITION
-TARGET TYPE: STANDALONE_COMPANY
-EVENT TYPE: ANNOUNCEMENT
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
 DEAL VALUE: 54000000 USD (TRANSACTION_VALUE)
 
 TITLE: SkyCore Technologies Acquired for $54 Million
@@ -452,9 +462,9 @@ Output:
 
 Input:
 ```
-DEAL TYPE: ACQUISITION
-TARGET TYPE: STANDALONE_COMPANY
-EVENT TYPE: ANNOUNCEMENT
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
 DEAL VALUE: null null (UNDISCLOSED)
 
 TITLE: PharmaCo to Acquire BioTarget for $25.00 Per Share Plus CVR
@@ -495,9 +505,9 @@ Output:
 
 Input:
 ```
-DEAL TYPE: ACQUISITION
-TARGET TYPE: STANDALONE_COMPANY
-EVENT TYPE: CLOSE
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: CLOSED
 DEAL VALUE: null null (UNDISCLOSED)
 
 TITLE: Acme Corp Completes Acquisition of Beta Industries
@@ -553,3 +563,4 @@ Output:
 | 0.2 | 2026-04-22 | Revised. Removed `all_cash` and `includes_stock` flags (derived by orchestrator from consideration array). Split `break_fee_*` fields into `termination_fees` object with target/acquirer × amount/percentage per schema. Formalized `go_shop` as object with `has_go_shop` + `go_shop_period_days`. Renamed `consideration` → `consideration_components` for clarity. |
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.4 | 2026-05-02 | Added EARNOUT and CVR component-type guidance to consideration_components extraction. Components are additive to primary consideration; do not change consideration_type. Added few-shot examples for both (Examples 4, 5). Updated RESPONSE FORMAT to show earnout component. |
+| 0.5 | 2026-07-28 | V2 alignment. Input schema updated: `deal_type` → `v2_event_type` (deal_type retained as alias); `event_type` → `event_history_type` (ANNOUNCED/CLOSED/AMENDED/TERMINATED); `target_type` values lowercased (V2 vocabulary). User template updated. All examples updated to V2 field names. Note: LC extraction logic is deal-type-agnostic — advisors, consideration components, and flags are extracted regardless of whether the event is M&A or funding. No taxonomy changes required. |
