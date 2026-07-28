@@ -43,12 +43,17 @@ _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
+_FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
+
 # Fields aggregated into transaction_record.
 # Each entry: (field_name, field_type)
 _FIELDS = [
     ("deal_type", "string"),
+    ("v2_event_type", "string"),
+    ("event_history_type", "string"),
     ("spin_split_type", "string"),
     ("distribution_mechanism", "string"),
+    ("recap_type", "string"),
     ("target_type", "string"),
     ("event_type", "string"),
     ("target_status", "string"),
@@ -59,6 +64,7 @@ _FIELDS = [
     ("acquirer_domain", "string"),
     ("acquirer_ticker", "string"),
     ("acquirer_type", "string"),
+    ("acquirer_type_v2", "string"),
     ("parent_seller_name", "string"),
     ("parent_seller_ticker", "string"),
     ("target_description", "string"),
@@ -66,8 +72,11 @@ _FIELDS = [
     ("acquirer_sponsor_name", "string"),
     ("parent_seller_description", "string"),
     ("announced_date", "date"),
+    ("announced_date_precision", "string"),
     ("closed_date", "date"),
+    ("closed_date_precision", "string"),
     ("signing_date", "date"),
+    ("rumor_date", "date"),
     ("value_amount", "number"),
     ("value_currency", "string"),
     ("value_type", "string"),
@@ -75,11 +84,14 @@ _FIELDS = [
     ("pct_acquired", "number"),
     ("target_revenue", "number"),
     ("target_revenue_period_type", "string"),
+    ("target_revenue_period_type_v2", "string"),
     ("target_revenue_period_end", "date"),
     ("target_ebitda", "number"),
     ("target_ebitda_period_type", "string"),
+    ("target_ebitda_period_type_v2", "string"),
     ("target_ebitda_period_end", "date"),
     ("financials_currency", "string"),
+    ("financials_disclosure_status", "string"),
     ("consideration_components", "json"),
     ("includes_earnout", "boolean"),
     ("hostile", "boolean"),
@@ -91,6 +103,20 @@ _FIELDS = [
     ("target_fee_percentage", "number"),
     ("acquirer_fee_amount", "number"),
     ("acquirer_fee_percentage", "number"),
+    # Funding fields
+    ("round_label", "string"),
+    ("round_size", "number"),
+    ("pre_money_valuation", "number"),
+    ("post_money_valuation", "number"),
+    ("valuation_currency", "string"),
+    ("facility_size", "number"),
+    ("total_raised_to_date", "number"),
+    ("is_extension_round", "boolean"),
+    ("is_down_round", "boolean"),
+    ("is_bridge_round", "boolean"),
+    ("use_of_proceeds", "string"),
+    ("has_board_seat", "boolean"),
+    ("board_seat_notes", "string"),
 ]
 
 _FIELD_NAMES = {f for f, _ in _FIELDS}
@@ -203,6 +229,27 @@ def _derive_transaction_status(event_type: str | None, closed_date: str | None) 
     return "UNKNOWN"
 
 
+def _derive_round_stage_category(round_label: str | None) -> str | None:
+    """Derive round_stage_category from round_label."""
+    if not round_label:
+        return None
+    label = round_label.lower().strip()
+    if any(x in label for x in ("pre-seed", "pre_seed", "preseed")):
+        return "PRE_SEED"
+    if any(x in label for x in ("seed", "angel")):
+        return "SEED"
+    if "series a" in label or "series-a" in label:
+        return "EARLY_STAGE"
+    if any(x in label for x in ("series b", "series-b", "series c", "series-c")):
+        return "GROWTH"
+    if any(x in label for x in (
+        "series d", "series e", "series f", "series g",
+        "growth equity", "growth", "late stage", "late-stage",
+    )):
+        return "LATE_STAGE"
+    return None
+
+
 def _compute_multiples(
     value_amount: float | None,
     value_type: str | None,
@@ -214,6 +261,7 @@ def _compute_multiples(
     financials_currency: str | None,
     log: Any,
     cluster_id: str,
+    v2_event_type: str | None = None,
 ) -> dict:
     """Compute EV/Revenue and EV/EBITDA multiples.
 
@@ -228,6 +276,10 @@ def _compute_multiples(
         "ev_to_ebitda_ntm": None,
         "multiple_quality": "NOT_CALCULABLE",
     }
+
+    # Multiples not applicable for funding events
+    if v2_event_type in _FUNDING_EVENT_TYPES:
+        return result
 
     if value_type != "ENTERPRISE_VALUE" or not value_amount or value_amount <= 0:
         return result
@@ -724,12 +776,24 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 value_type=field_values.get("value_type"),
                 value_currency=field_values.get("value_currency"),
                 target_revenue=field_values.get("target_revenue"),
-                target_revenue_period_type=field_values.get("target_revenue_period_type"),
+                target_revenue_period_type=(
+                    field_values.get("target_revenue_period_type_v2")
+                    or field_values.get("target_revenue_period_type")
+                ),
                 target_ebitda=field_values.get("target_ebitda"),
-                target_ebitda_period_type=field_values.get("target_ebitda_period_type"),
+                target_ebitda_period_type=(
+                    field_values.get("target_ebitda_period_type_v2")
+                    or field_values.get("target_ebitda_period_type")
+                ),
                 financials_currency=field_values.get("financials_currency"),
                 log=log,
                 cluster_id=cluster_id,
+                v2_event_type=field_values.get("v2_event_type") or field_values.get("deal_type"),
+            )
+
+            # Derive round_stage_category from round_label
+            round_stage_category = _derive_round_stage_category(
+                field_values.get("round_label")
             )
 
             # Check for existing transaction_record to determine version
@@ -743,17 +807,19 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO transaction_record (
-                    transaction_id, deal_type, spin_split_type, distribution_mechanism,
-                    target_type, event_type, transaction_status, target_status,
+                    transaction_id, deal_type, v2_event_type, event_history_type,
+                    spin_split_type, spin_split_type_v2, distribution_mechanism, recap_type,
+                    target_type, target_type_v2, event_type, transaction_status, target_status,
                     target_name, target_domain, target_ticker,
-                    acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type,
+                    acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type, acquirer_type_v2,
                     parent_seller_name, parent_seller_ticker,
                     target_description, acquirer_description, acquirer_sponsor_name, parent_seller_description,
-                    announced_date, closed_date, signing_date,
+                    announced_date, announced_date_precision, closed_date, closed_date_precision,
+                    signing_date, rumor_date,
                     value_amount, value_currency, value_type, per_share_price, pct_acquired,
-                    target_revenue, target_revenue_period_type, target_revenue_period_end,
-                    target_ebitda, target_ebitda_period_type, target_ebitda_period_end,
-                    financials_currency,
+                    target_revenue, target_revenue_period_type, target_revenue_period_type_v2, target_revenue_period_end,
+                    target_ebitda, target_ebitda_period_type, target_ebitda_period_type_v2, target_ebitda_period_end,
+                    financials_currency, financials_disclosure_status,
                     ev_to_revenue_ltm, ev_to_revenue_ntm, ev_to_ebitda_ltm, ev_to_ebitda_ntm, multiple_quality,
                     consideration_type, consideration_components,
                     includes_earnout, hostile, competing_bid, regulatory_approvals_required,
@@ -762,17 +828,27 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     acquirer_fee_amount, acquirer_fee_percentage,
                     is_take_private, is_add_on, is_divestiture, is_de_spac,
                     has_earnout, has_cvr,
+                    round_label, round_stage_category, round_size,
+                    pre_money_valuation, post_money_valuation, valuation_currency,
+                    facility_size, total_raised_to_date,
+                    is_extension_round, is_down_round, is_bridge_round,
+                    use_of_proceeds, has_board_seat, board_seat_notes,
                     is_current, aggregation_version, updated_at
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
                     cluster_id,
-                    field_values.get("deal_type"),
+                    field_values.get("deal_type") or field_values.get("v2_event_type"),
+                    field_values.get("v2_event_type"),
+                    field_values.get("event_history_type"),
                     field_values.get("spin_split_type"),
+                    field_values.get("spin_split_type_v2"),
                     field_values.get("distribution_mechanism"),
+                    field_values.get("recap_type"),
                     field_values.get("target_type"),
+                    field_values.get("target_type_v2"),
                     field_values.get("event_type"),
                     txn_status,
                     field_values.get("target_status"),
@@ -783,6 +859,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("acquirer_domain"),
                     field_values.get("acquirer_ticker"),
                     field_values.get("acquirer_type"),
+                    field_values.get("acquirer_type_v2"),
                     field_values.get("parent_seller_name"),
                     field_values.get("parent_seller_ticker"),
                     field_values.get("target_description"),
@@ -790,8 +867,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("acquirer_sponsor_name"),
                     field_values.get("parent_seller_description"),
                     field_values.get("announced_date"),
+                    field_values.get("announced_date_precision"),
                     field_values.get("closed_date"),
+                    field_values.get("closed_date_precision"),
                     field_values.get("signing_date"),
+                    field_values.get("rumor_date"),
                     field_values.get("value_amount"),
                     field_values.get("value_currency"),
                     field_values.get("value_type"),
@@ -799,11 +879,14 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("pct_acquired"),
                     field_values.get("target_revenue"),
                     field_values.get("target_revenue_period_type"),
+                    field_values.get("target_revenue_period_type_v2"),
                     field_values.get("target_revenue_period_end"),
                     field_values.get("target_ebitda"),
                     field_values.get("target_ebitda_period_type"),
+                    field_values.get("target_ebitda_period_type_v2"),
                     field_values.get("target_ebitda_period_end"),
                     field_values.get("financials_currency"),
+                    field_values.get("financials_disclosure_status"),
                     multiples["ev_to_revenue_ltm"],
                     multiples["ev_to_revenue_ntm"],
                     multiples["ev_to_ebitda_ltm"],
@@ -827,6 +910,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     derived["is_de_spac"],
                     _derive_has_earnout(field_values.get("consideration_components")),
                     _derive_has_cvr(field_values.get("consideration_components")),
+                    # Funding fields
+                    field_values.get("round_label"),
+                    round_stage_category,
+                    field_values.get("round_size"),
+                    field_values.get("pre_money_valuation"),
+                    field_values.get("post_money_valuation"),
+                    field_values.get("valuation_currency"),
+                    field_values.get("facility_size"),
+                    field_values.get("total_raised_to_date"),
+                    field_values.get("is_extension_round"),
+                    field_values.get("is_down_round"),
+                    field_values.get("is_bridge_round"),
+                    field_values.get("use_of_proceeds"),
+                    field_values.get("has_board_seat"),
+                    field_values.get("board_seat_notes"),
                     1,
                     agg_version,
                     now,
