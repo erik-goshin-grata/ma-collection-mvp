@@ -1,6 +1,6 @@
 # Prompt Conventions
 
-**Version:** 0.1 (draft)
+**Version:** 0.3 (V2 alignment)
 **Repo path:** `prompts/prompt_conventions.md`
 
 Conventions that apply to every prompt file in this directory. Each individual prompt file references this document by default and only specifies deviations.
@@ -28,14 +28,29 @@ Each prompt file has the following sections:
 | Stage | Model | Rationale |
 | :--- | :--- | :--- |
 | Relevancy filter | Haiku 4.5 | High volume, low stakes, cheap |
-| Deal type classification | Opus 4.5 | Single decision, downstream branches depend on it |
-| High-confidence extraction | Opus 4.5 | Core fields, must be accurate |
-| Low-confidence extraction | Opus 4.5 | Nuanced fields (advisors, consideration), signal quality matters |
-| Aggregation conflict resolution | Opus 4.5 | Judgment calls on source reconciliation |
-| Deal summary | Opus 4.5 | Readable prose output |
-| Strategic rationale | Opus 4.5 | Judgment against taxonomy |
+| Deal type classification | Opus 4.7 | Single decision, downstream branches depend on it |
+| High-confidence extraction | Opus 4.7 | Core fields, must be accurate |
+| Low-confidence extraction | Opus 4.7 | Nuanced fields (advisors, consideration), signal quality matters |
+| Aggregation conflict resolution | Opus 4.7 | Judgment calls on source reconciliation |
+| Deal summary | Opus 4.7 | Readable prose output |
+| Strategic rationale | Opus 4.7 | Judgment against taxonomy |
 
-Exact model strings (for API calls): `claude-opus-4-5` and `claude-haiku-4-5`. Implementation should read these from configuration, not hardcode them in prompt code — model strings change.
+Exact model strings (for API calls): `claude-opus-4-7` and `claude-haiku-4-5-20251001`.
+Implementation reads these from `Config.opus_model` and `Config.haiku_model` — never
+hardcoded in prompt code. Model strings change; config values do not require code changes.
+
+**OpenAI provider:** When `LLM_PROVIDER=openai`, the pipeline uses a separate model
+hierarchy defined in config:
+- `openai_relevancy_model` — high-volume classification (e.g., `gpt-5-nano`)
+- `openai_classification_model` — deal type, event category routing (e.g., `gpt-5-mini`)
+- `openai_extract_model` — HC/LC extraction (e.g., `gpt-5-mini`)
+- `openai_legal_extract_model` — agreement extraction prompts (e.g., `gpt-5.2`)
+- `openai_reasoning_model` — conflict resolution, rationale (e.g., `gpt-5.2`)
+
+**Model upgrade policy:** Each model version bump requires validation against the existing
+prompt suite before changing the default. Breaking changes observed in Opus 4.7+: tokenizer
+produces 1.0–1.35x more tokens for the same text; model follows instructions more literally
+— existing prompts may behave differently. Test on a known validation DB before promoting.
 
 ---
 
@@ -143,6 +158,7 @@ All examples are synthetic. No real press release text, no real company data, no
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-23 | Added §11 Prompt File Structure Rule (RESPONSE FORMAT requirement). |
+| 0.3 | 2026-07-28 | V2 alignment. Model strings updated: claude-opus-4-5 → claude-opus-4-7, claude-haiku-4-5 → claude-haiku-4-5-20251001. Model upgrade policy added. OpenAI provider model hierarchy documented. Stage table updated to reflect current defaults. |
 
 ---
 
