@@ -1,316 +1,111 @@
-# M&A Collection MVP - Project State
+# Project State
+**Updated:** 2026-07-28
+**Last commit:** `2f05aa6`
+**Branch:** `main`
 
-**As of:** 2026-06-04
-**Repo:** `elgoshin11215/ma-collection-mvp`  
-**Current commit:** documentation closeout commit; run `git log --oneline -1`
-for the exact hash.
-**Current default aggregation read path:** `AGGREGATION_READ_SOURCE=staging`
+---
 
-## Purpose
+## Current Drop: V2 Alignment + Funding Path
 
-This document preserves the working state of the project across sessions. Read
-it first when resuming the repo, then consult `README.md`, the drop design docs,
-and the validation scripts for implementation details.
+Pipeline is fully operational with V2 prompt vocabulary and a new funding
+event extraction path. All 14 stages are wired and running.
 
-## Current System Shape
+---
 
-The MVP is a single-operator M&A collection pipeline built around SQLite,
-source-tiered extraction, deterministic clustering, LLM-assisted aggregation,
-SEC document enrichment, agreement extraction, summarization, rationale tagging,
-and export.
+## Schema
 
-The pipeline still preserves the original Anthropic flow, but now has a provider
-abstraction that can instantiate either Anthropic or OpenAI clients from
-configuration. OpenAI live validation is deferred until an enterprise API key is
-available to the local Python runtime.
+Three migrations applied to `data/ma_mvp.db`:
 
-Stage 9 aggregation now has two read paths:
-
-- `staging`: legacy read from `staging_extraction JOIN source_raw`; still the
-  default and rollback path.
-- `observation`: new read from `transaction_field_observation`; parity validated
-  against the staging path on copied real DBs.
-
-The observation path is limited to source-row observations from
-`DT_CLASSIFY`, `HC_EXTRACT`, `LC_EXTRACT`, and `BACKFILL`. Agreement extraction
-observations are intentionally excluded from Stage 9 routing until a separate
-agreement-supersession design is approved.
-
-Drop 3.32a is committed as participant-centric multi-party organization
-support. It adds normalized organization participant tables and an idempotent
-backfill/validation path without changing Stage 9, prompts, exports, advisors,
-or `transaction_record`.
-
-## Recent Completed Work
-
-| Commit | Drop / scope | Status |
+| Migration | Applied | Contents |
 |---|---|---|
-| latest | Documentation closeout for 3.32a completion and validation | Committed |
-| `577364d` | Drop 3.32a: multi-party organization participant model | Implemented and copied-real-DB validated |
-| `bfdfba5` | Documentation state and handoff updates | Committed |
-| `674ab04` | Drop 3.31c: observation-backed Stage 9 read path | Implemented and parity validated |
-| `34c3dff` | Drop 3.31c design | Accepted |
-| `e63b692` | OpenAI provider support while preserving Anthropic | Implemented; live OpenAI validation deferred |
-| `dfa0be7` | Drop 3.31b: observation provenance and source-row dual writes | Implemented and accepted |
-| `0bd7062` | Drop 3.31a: shared field priority and confidence tiebreak | Implemented and accepted |
-| `de4c223` | Drop 3.26: `transaction_security` soft-delete + unique index | Implemented |
-| `b8fcb05` | Drop 3.25: observation idempotency/savepoint correctness | Implemented |
-| `6d020d2` | Drop 3.24a: capitalization sub-section descent | Implemented |
+| `001_initial.sql` | Yes | Base schema — 16 tables including `staging_extraction`, `transaction_record`, `transaction_field_observation`, `staging_investor` (3.32a participant tables), etc. |
+| `002_v2_prompt_alignment.sql` | Yes | 12 new nullable V2 columns on `staging_extraction` and `transaction_record` |
+| `003_funding_path.sql` | Yes | `staging_investor` table + funding scalar columns on `staging_extraction` and `transaction_record` |
 
-## Drop 3.31 Status
+---
 
-### Drop 3.31a
+## Prompt Versions
 
-Closed.
+See `docs/prompt_versions.md` for full cross-prompt version table.
 
-- Shared field-priority logic lives in `lib/field_priority.py`.
-- Stage 9 applies deterministic same-tier confidence priority before LLM
-  conflict resolution.
-- Corpus validation on copied real DB reduced conflict logs and LLM conflict
-  calls from `116` to `113`.
-- One canonical transaction changed, affecting three fields; all changes were
-  explained by strict `HIGH` over `MEDIUM` confidence priority.
-- No prompt, schema, or observation-architecture changes were made.
+Current versions:
+- `relevancy_filter` 0.5
+- `deal_type_classifier` 0.6
+- `high_confidence_extraction` 0.12
+- `funding_hc_extraction` 0.1 (NEW)
+- `funding_lc_extraction` 0.1 (NEW — stage code not yet written)
+- `low_confidence_extraction` 0.5
+- `aggregation` 0.4
+- `deal_summary` 0.9
+- `strategic_rationale` 0.5
+- `prompt_conventions` 0.3
+- Agreement prompts (5): unchanged at current versions
 
-### Drop 3.31b
+---
 
-Closed and accepted.
+## Stage Status
 
-- `transaction_field_observation` now supports source-row provenance needed for
-  Stage 9 aggregation:
-  - `staging_extraction_id`
-  - `source_raw_id`
-  - `source_type`
-  - `source_tier`
-  - `model_confidence`
-  - `source_published_date`
-  - `filing_type`
-  - `agreement_dated_as_of`
-  - `observation_source_stage`
-- Stage 4 and Stage 7 dual-write source-row observations.
-- Backfill is idempotent.
-- Stage 9 behavior remained unchanged in 3.31b.
+| Stage | Module | Notes |
+|---|---|---|
+| 1 | `scrape_pr_newswire` | Running |
+| 2 | `relevancy_filter` | v0.5 — funding events in scope |
+| 3 | `deal_type_classify` | v0.6 — V2 event types, funding types classifiable |
+| 4a | `high_confidence_extract` | v0.12 — V2 vocabulary, new fields |
+| 4b | `funding_hc_extract` | v0.1 — NEW; routes VC_ROUND/GROWTH_EQUITY/VENTURE_DEBT |
+| 5 | `sec_trigger_detect` | Running |
+| 6 | `sec_enrich` | Extended lookback/lookahead window |
+| 7 | `low_confidence_extract` | v0.5 |
+| 8 | `entity_cluster` | Running |
+| 9 | `aggregate` | Extended for V2 + funding fields; multiples skip for funding |
+| 10 | `sec_documents` | Running |
+| 11 | `agreement_extract` | Running |
+| 12 | `summarize` | v0.9 — V2 input fields; M&A framing only (funding framing v0.10 pending) |
+| 13 | `rationale_tag` | v0.5 |
+| 14 | `export` | Running |
 
-Copied-real-DB validation:
+---
 
-- Source-row observations after 3.31b: `7423`
-- Missing source IDs: `0`
-- Missing transaction IDs after clustering/backfill: `0`
-- Stage 9 staging-read output unchanged:
-  - `335` transactions
-  - `414` transaction-source rows
-  - `113` conflict logs/calls
-  - `0` transaction diffs
+## Configuration
 
-### Drop 3.31c
+Key config flags:
+- `AGGREGATION_READ_SOURCE=staging` — default. Switch to `observation` after next validation run.
+- `LLM_PROVIDER=anthropic` — default. OpenAI provider available via `LLM_PROVIDER=openai`.
+- `opus_model=claude-opus-4-7`
+- `haiku_model=claude-haiku-4-5-20251001`
+- `SEC_LOOKBACK_DAYS=30` / `SEC_LOOKAHEAD_DAYS=7`
 
-Closed by parity validation; administrative merge/acceptance can proceed.
+---
 
-Implemented:
+## Known Gaps / Deferred Work
 
-- `AGGREGATION_READ_SOURCE=staging|observation`
-- Observation-backed Stage 9 loader.
-- JSON-level `consideration_components` observations.
-- Source marker observations using `__source_row_present`.
-- Copied-DB parity validation harness.
+**Funding path (partial):**
+- `stages/funding_lc_extract.py` — not written; prompt exists
+- `adapters/sec_api.py` Form D extension — deferred
+- `deal_summary` funding framing — deferred to v0.10
 
-Preserved:
+**V2 schema alignment (deferred):**
+- `transaction_participant` → `transaction_party` rename (3.32a tables)
+- `financial_metric` as deal value write target
+- `transaction_event_history` as date write target
+- Agreement observation supersession
 
-- Existing prompts.
-- Existing schemas for 3.31c itself.
-- Existing aggregation rules and 3.31a priority behavior.
-- Existing staging read path.
-- Existing Stage 11 agreement extraction behavior.
+**Awaiting eng:**
+- 13 open questions in `docs/enum_schema_gaps.md`
+- Key: `POST_MONEY_VALUATION` in MetricType, `round_stage_category` enum,
+  `PartyRole` additions, multiple display precedence rule
 
-Excluded by design:
+**Validation:**
+- V2 prompt changes not yet validated on known sources
+- Funding path test corpus not yet built
+- `SILVER_TRANSACTION_HEADER_SCHEMA` conformance not yet tested
 
-- Agreement observation routing through Stage 9.
-- Agreement supersession logic.
-- OpenAI live API validation.
+---
 
-## Latest 3.31c Parity Validation
+## Next Steps
 
-Validation target:
-
-- Commit: `674ab04`
-- Source DB: `/private/tmp/ma_mvp_331a_corpus_post.db`
-- Staging copy: `/private/tmp/ma_331c_parity_staging_674ab04.db`
-- Observation copy: `/private/tmp/ma_331c_parity_observation_674ab04.db`
-- Production touched: no
-- Live API calls: no
-
-Results:
-
-| Check | Staging | Observation |
-|---|---:|---:|
-| Clusters total | 335 | 335 |
-| Transactions created | 335 | 335 |
-| Transactions upserted | 335 | 335 |
-| Failed clusters | 0 | 0 |
-| `transaction_record` rows | 335 | 335 |
-| `transaction_source` rows | 414 | 414 |
-| `aggregation_conflict_log` rows | 113 | 113 |
-| Stubbed LLM conflict calls | 113 | 113 |
-| Flagged for review | 0 | 0 |
-
-Diff and coverage checks:
-
-- `transaction_record` diffs excluding audit timestamps: `0`
-- `transaction_source` diffs: `0`
-- Canonical `consideration_components` diffs: `0`
-- JSON-level `consideration_components` observations: `392`
-- Source marker observations: `402`
-- Clustered/aggregated rows without observations: `0`
-- Observation rows missing required provenance: `0`
-- Missing JSON-level `consideration_components` observations: `0`
-- Agreement observations routed through Stage 9: `0`
-
-Recommendation: close 3.31c.
-
-## Drop 3.32a Status
-
-Implemented and committed in `577364d`.
-
-Design decision:
-
-- 3.32a is participant-centric, not relationship-centric.
-- `entity_relationship` was removed from the active 3.32a scope.
-- Relationship-style concepts such as `PORTFOLIO_COMPANY_OF`,
-  `SPONSORED_BY`, `CORPORATE_VC_ARM_OF`, `MANAGED_BY`, and `SUBSIDIARY_OF`
-  are not written in 3.32a.
-- Sponsors, platforms, parents, merger subs, investors, and issuers are
-  represented through transaction-context participant roles.
-
-Approved active tables:
-
-- `entity`
-- `entity_alias`
-- `transaction_participant`
-- `transaction_participant_group`
-
-Explicit non-goals preserved:
-
-- No people extraction.
-- No advisor redesign.
-- No generic participant attribute table.
-- No Stage 9 changes.
-- No prompt changes.
-- No export changes.
-- No live API calls.
-
-Copied-real-DB validation:
-
-- Source DB: `/private/tmp/ma_331c_parity_staging_674ab04.db`
-- Validation DB: `/private/tmp/ma_332a_patch3_validation.db`
-- Full JSON report: `/private/tmp/ma_332a_patch3_validation.json`
-- Result: `PASS`
-- Production touched: no
-- Live API calls: no
-
-Validation results:
-
-- `entity` rows inserted: `802`
-- `entity_alias` rows inserted: `802`
-- `transaction_participant` rows inserted: `803`
-- `transaction_participant_group` rows inserted: `20`
-- Duplicate current participants: `0`
-- Duplicate groups: `0`
-- Synthetic group entities: `0`
-- Foreign key issues: `0`
-- `transaction_record` unchanged: `335` rows, digest matched source
-- `advisor` unchanged: `340` rows, digest matched source
-- Idempotency second run inserted: `0`
-
-Role counts:
-
-- `TARGET`: `335`
-- `ACQUIRER`: `278`
-- `BUYER_PLATFORM`: `54`
-- `BUYER_SPONSOR`: `66`
-- `PARENT_SELLER`: `70`
-
-Group counts:
-
-- `CONSORTIUM`: `12`
-- `INVESTOR_GROUP`: `5`
-- `SELLER_GROUP`: `3`
-
-Coverage note:
-
-- Strict acquirer misses: `3`
-- All three are generic consortium-label exceptions stored as group labels, not
-  synthetic entities.
-
-## OpenAI Provider State
-
-Provider abstraction is implemented and Anthropic support remains available.
-
-Configuration surface includes:
-
-- `LLM_PROVIDER=openai|anthropic`
-- `OPENAI_API_KEY`
-- `OPENAI_RELEVANCY_MODEL`
-- `OPENAI_CLASSIFICATION_MODEL`
-- `OPENAI_EXTRACT_MODEL`
-- `OPENAI_LEGAL_EXTRACT_MODEL`
-- `OPENAI_REASONING_MODEL`
-
-Pending:
-
-- Obtain a usable OpenAI API key for the local pipeline.
-- Run provider smoke validation with OpenAI selected.
-- Run a small copied-DB or limited-slice live validation only after explicit
-  API configuration.
-
-## Current Operational Defaults
-
-Use staging read path unless explicitly testing the new path:
-
-```text
-AGGREGATION_READ_SOURCE=staging
-```
-
-Use observation read path only on copied DBs or controlled validation runs until
-one accepted operational run confirms the new path outside the parity harness:
-
-```text
-AGGREGATION_READ_SOURCE=observation
-```
-
-## Recommended Next Work
-
-The repository is at a clean handoff point after the 3.32a documentation
-closeout.
-
-1. Keep staging as default until an accepted observation-backed operational run
-   is completed on a copied real DB.
-2. Validate OpenAI live provider behavior when an enterprise API key becomes
-   available to the local runtime.
-3. Design SEC polling, accession inventory, and transaction-source attachment
-   before relying on broad SEC lookup windows.
-4. Design the agreement observation supersession drop separately; do not fold it
-   back into 3.31c.
-5. Decide later whether to switch the default Stage 9 read path to
-   `observation`.
-
-## Deferred / Known Follow-Ups
-
-- Agreement observations are written but not yet part of Stage 9 canonical
-  routing.
-- The observation path is ready for source-row aggregation parity, not full
-  agreement supersession.
-- Gold-set labeling remains the path for acceptance scoring beyond parity.
-- OpenAI live validation remains blocked on local API key access.
-- Staging read path should remain available as a rollback path for now.
-- 3.32a does not yet extract investors/issuers from new prompts; those roles
-  are reserved for future Growth Equity / Venture Capital support.
-- SEC document handling should move toward proactive polling and accession-level
-  source inventory. PR/news-triggered SEC lookup should first check known
-  filings and attach matched sources to existing transaction clusters; date
-  windows should be a constrained fallback for missed polling days, historical
-  backfills, and manual recovery.
-- Transaction matching must prevent duplicate transaction records when multiple
-  sources describe the same deal. SEC filings should attach to an existing
-  transaction when CIK/ticker, party names, target/business description, dates,
-  value, and deal wording strongly match; ambiguous matches should route to
-  review rather than auto-merge.
+1. Validate V2 prompt changes — run July 22 validation DB through v0.6/v0.12
+2. Build funding test corpus — 10-15 announcements across event types
+3. Check eng responses on `docs/enum_schema_gaps.md`
+4. Write `stages/funding_lc_extract.py`
+5. Write `deal_summary` v0.10 funding framing block
+6. Apply `AGGREGATION_READ_SOURCE=observation` after successful validation run
