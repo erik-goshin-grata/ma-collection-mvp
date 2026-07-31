@@ -60,6 +60,47 @@ _VALID_REASON_CODES = frozenset({
 })
 _SLEEP = 0.3  # conservative Haiku throttle
 
+# Known short/aliased reason codes Haiku emits despite the prompt's enum
+# discipline (e.g. it drops the "_ANNOUNCEMENT" suffix the value carries).
+# Normalizing these keeps a correctly-classified deal instead of hard-failing
+# the row on a secondary metadata label.
+_REASON_CODE_ALIASES = {
+    "ACQUISITION": "ACQUISITION_ANNOUNCEMENT",
+    "ACQUISITION_ANNOUNCED": "ACQUISITION_ANNOUNCEMENT",
+    "MERGER": "MERGER_ANNOUNCEMENT",
+    "MERGER_ANNOUNCED": "MERGER_ANNOUNCEMENT",
+    "DIVESTITURE": "CARVE_OUT_OR_DIVESTITURE",
+    "CARVE_OUT": "CARVE_OUT_OR_DIVESTITURE",
+    "SPIN_OFF": "SPIN_OFF_OR_SPLIT",
+    "SPINOFF": "SPIN_OFF_OR_SPLIT",
+    "SPLIT": "SPIN_OFF_OR_SPLIT",
+    "DEAL_CLOSE": "DEAL_CLOSE_OR_COMPLETION",
+    "DEAL_COMPLETION": "DEAL_CLOSE_OR_COMPLETION",
+    "COMPLETION": "DEAL_CLOSE_OR_COMPLETION",
+    "CLOSED": "DEAL_CLOSE_OR_COMPLETION",
+    "TERMINATION": "DEAL_AMENDMENT_OR_TERMINATION",
+    "TERMINATED": "DEAL_AMENDMENT_OR_TERMINATION",
+    "AMENDMENT": "DEAL_AMENDMENT_OR_TERMINATION",
+    "ASSET_PURCHASE": "ACQUISITION_ANNOUNCEMENT",
+}
+
+
+def _normalize_reason_code(reason_code, classification: str) -> str:
+    """Map a non-canonical reason_code to a valid enum value.
+
+    Never returns an invalid value: tries the alias table, then an
+    "_ANNOUNCEMENT" suffix, and finally falls back to the catch-all valid code
+    for the given side so a correctly-classified row is never dropped.
+    """
+    rc = (reason_code or "").strip().upper()
+    if rc in _VALID_REASON_CODES:
+        return rc
+    if rc in _REASON_CODE_ALIASES:
+        return _REASON_CODE_ALIASES[rc]
+    if f"{rc}_ANNOUNCEMENT" in _VALID_REASON_CODES:
+        return f"{rc}_ANNOUNCEMENT"
+    return "AMBIGUOUS_BUT_LIKELY_DEAL" if classification == "RELEVANT" else "OTHER_NOT_RELEVANT"
+
 
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     """Apply the Haiku relevancy gate to fetched PR Newswire rows.
@@ -137,22 +178,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             time.sleep(_SLEEP)
             continue
 
+        # The binary classification (validated above) is the actual gate;
+        # reason_code is secondary metadata. Normalize an off-enum reason_code
+        # rather than failing a correctly-classified row on the label alone.
         reason_code = result.get("reason_code")
         if reason_code not in _VALID_REASON_CODES:
-            log.warning(
-                "source_raw_id=%d invalid reason_code %r — RELEVANCY_FAILED",
-                sid, reason_code,
+            normalized = _normalize_reason_code(reason_code, classification)
+            log.info(
+                "source_raw_id=%d normalized off-enum reason_code %r → %r",
+                sid, reason_code, normalized,
             )
-            log_prompt_failure(
-                conn, source_raw_id=sid, extraction_id=None, stage=_PROMPT_NAME,
-                failure_type="SCHEMA_VIOLATION", raw_response=json.dumps(result),
-                error_message=f"invalid reason_code: {reason_code!r}",
-                prompt_version=_FULL_VERSION, run_id=run_id,
-            )
-            _write(conn, sid, "RELEVANCY_FAILED", row["notes"], result)
-            failed += 1
-            time.sleep(_SLEEP)
-            continue
+            result["reason_code"] = normalized
+            reason_code = normalized
 
         new_status = "RELEVANT" if classification == "RELEVANT" else "NOT_RELEVANT"
         _write(conn, sid, new_status, row["notes"], result)

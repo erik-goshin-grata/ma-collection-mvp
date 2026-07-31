@@ -115,7 +115,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     rows = conn.execute(
         """
         SELECT se.extraction_id, se.source_raw_id,
-               se.deal_type, se.target_type, se.event_type,
+               se.deal_type, se.target_type, se.event_type, se.v2_event_type,
+               se.event_history_type,
                se.value_amount, se.value_currency, se.value_type,
                se.notes,
                sr.source_type, sr.title, sr.clean_text
@@ -139,6 +140,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             deal_type=_fmt(row["deal_type"]),
             target_type=_fmt(row["target_type"]),
             event_type=_fmt(row["event_type"]),
+            v2_event_type=_fmt(row["v2_event_type"]),
+            event_history_type=_fmt(row["event_history_type"]),
             value_amount=_fmt(row["value_amount"]),
             value_currency=_fmt(row["value_currency"]),
             value_type=_fmt(row["value_type"]),

@@ -14,6 +14,9 @@ from typing import Any
 
 STAGE3_FIELDS = (
     "deal_type",
+    "v2_event_type",
+    "event_history_type",
+    "recap_type",
     "spin_split_type",
     "distribution_mechanism",
     "target_type",
