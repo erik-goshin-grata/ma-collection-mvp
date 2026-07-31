@@ -58,7 +58,7 @@ _ALL_STAGES: list[types.ModuleType] = [
 ]
 
 _EXTRACTION_STAGES = [
-    _stage_2, _stage_3, _stage_4, stage_4b,
+    _stage_2, _stage_3, _stage_4, _stage_4b,
     _stage_5, _stage_6,
     # Stage 6 can queue SEC attached sources with inherited transaction context.
     # Run HC extraction again so those sources reach Stage 7 in the same run.

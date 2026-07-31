@@ -18,7 +18,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-_SCHEMA_PATH = Path(__file__).parent / "schema" / "001_initial.sql"
+_SCHEMA_DIR = Path(__file__).parent / "schema"
+_SCHEMA_PATH = _SCHEMA_DIR / "001_initial.sql"
 
 _OBSERVATION_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS transaction_field_observation (
@@ -391,8 +392,47 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _apply_sql_migrations(conn: sqlite3.Connection) -> None:
+    """Apply numbered schema/NNN_*.sql files (after 001) exactly once each.
+
+    Complements _apply_migrations(), which handles programmatic column adds.
+    Versioned .sql migrations such as 002_v2_prompt_alignment.sql and
+    003_funding_path.sql are recorded in a schema_migrations ledger so each
+    runs once, and fresh clones pick them up automatically instead of failing
+    later at runtime with "no such column".
+
+    A migration whose objects already exist (e.g. applied by hand on an existing
+    database before this ledger existed) is recorded without re-running, so
+    init_db stays safe to call on existing databases.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            filename    TEXT PRIMARY KEY,
+            applied_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    already = {row[0] for row in conn.execute("SELECT filename FROM schema_migrations")}
+    for path in sorted(_SCHEMA_DIR.glob("[0-9][0-9][0-9]_*.sql")):
+        if path.name == _SCHEMA_PATH.name or path.name in already:
+            continue
+        try:
+            conn.executescript(path.read_text(encoding="utf-8"))
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "duplicate column" not in msg and "already exists" not in msg:
+                raise
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations (filename) VALUES (?)",
+            (path.name,),
+        )
+    conn.commit()
+
+
 def init_db(db_path: str) -> None:
-    """Create all tables and indexes defined in schema/001_initial.sql.
+    """Create all tables and indexes defined in schema/001_initial.sql, then
+    apply the programmatic and numbered .sql migrations.
 
     Safe to call on an existing database; existing tables are left untouched.
     Creates the parent directory of db_path if it does not exist.
@@ -409,6 +449,7 @@ def init_db(db_path: str) -> None:
     try:
         conn.executescript(ddl)
         _apply_migrations(conn)
+        _apply_sql_migrations(conn)
         conn.commit()
     finally:
         conn.close()
