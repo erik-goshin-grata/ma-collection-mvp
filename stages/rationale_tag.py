@@ -90,7 +90,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     rows = conn.execute(
         """
-        SELECT tr.transaction_id, tr.deal_type, tr.target_name, tr.acquirer_name,
+        SELECT tr.transaction_id, tr.deal_type, tr.v2_event_type, tr.target_name, tr.acquirer_name,
                s.summary_text
         FROM transaction_record tr
         JOIN summary s ON s.transaction_id = tr.transaction_id AND s.is_current = 1
@@ -142,6 +142,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
         user_prompt = prompt["user_template"].format(
             deal_type=tr["deal_type"] or "null",
+            v2_event_type=tr["v2_event_type"] or "null",
             target_name=tr["target_name"] or "null",
             acquirer_name=tr["acquirer_name"] or "null",
             summary_text=tr["summary_text"],

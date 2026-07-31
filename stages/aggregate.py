@@ -217,16 +217,20 @@ def _derive_has_cvr(consideration_components_json: str | None) -> int:
         return 0
 
 
-def _derive_transaction_status(event_type: str | None, closed_date: str | None) -> str:
-    if event_type == "TERMINATION":
+def _derive_transaction_status(event_history_type: str | None, closed_date: str | None) -> str:
+    """Derive deal status from the V2 event_history_type lifecycle + closed_date.
+
+    event_history_type describes the release type (ANNOUNCED / CLOSED / AMENDED /
+    TERMINATED). A deal is CLOSED when a close date is known or the release is a
+    completion notice; TERMINATED when it was called off; otherwise it is PENDING.
+    A deal that is not closed or terminated is, by definition, pending — so
+    PENDING is the default rather than UNKNOWN.
+    """
+    if event_history_type == "TERMINATED":
         return "TERMINATED"
-    if event_type == "RUMOR":
-        return "RUMORED"
-    if closed_date is not None:
+    if closed_date is not None or event_history_type == "CLOSED":
         return "CLOSED"
-    if event_type in ("ANNOUNCEMENT", "AMENDMENT"):
-        return "PENDING"
-    return "UNKNOWN"
+    return "PENDING"
 
 
 def _derive_round_stage_category(round_label: str | None) -> str | None:
@@ -769,7 +773,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
             derived = _derive_flags(field_values)
             txn_status = _derive_transaction_status(
-                field_values.get("event_type"), field_values.get("closed_date")
+                field_values.get("event_history_type"), field_values.get("closed_date")
             )
             multiples = _compute_multiples(
                 value_amount=field_values.get("value_amount"),

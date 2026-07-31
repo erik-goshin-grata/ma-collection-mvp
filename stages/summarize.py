@@ -158,6 +158,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
         user_prompt = prompt["user_template"].format(
             deal_type=_f(tr["deal_type"]),
+            v2_event_type=_f(tr["v2_event_type"]),
+            event_history_type=_f(tr["event_history_type"]),
+            recap_type=_f(tr["recap_type"]),
             spin_split_type=_f(tr["spin_split_type"]),
             distribution_mechanism=_f(tr["distribution_mechanism"]),
             event_type=_f(tr["event_type"]),
