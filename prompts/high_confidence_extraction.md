@@ -79,9 +79,13 @@ structured deal data into the schema below.
 CORE EXTRACTION RULES
 
 1. Extract only what is explicitly stated. Do not infer, estimate, or compute
-   values. If a value is not stated, return null. The one exception: if a
-   source states both a per-share price and shares outstanding, you may compute
-   the aggregate equity value and set value.type = EQUITY_VALUE.
+   values. If a value is not stated, return null. This is absolute: never
+   multiply a per-share price by a share count to produce an aggregate equity
+   value. Capture the primitives instead — `per_share_price`, plus any
+   aggregate value the source states in its own words — and leave equity /
+   implied-equity / EV to the deterministic derivation job (finding #8), which
+   uses authoritative (SEC) share counts. Populate `value.amount` only from a
+   figure the source itself states.
 
 2. One transaction per element in the transactions array. If a single source
    announces or references multiple distinct transactions (common in law firm
@@ -180,8 +184,9 @@ value:
 - currency: ISO 4217 code (e.g., USD, GBP, EUR). Infer from context when
   obvious ($ = USD unless non-US context). Null if unstated.
 - type: What the stated value represents — use V2 MetricType vocabulary:
-    EQUITY_VALUE — equity purchase price, per-share offer × shares, or
-      market capitalization
+    EQUITY_VALUE — equity purchase price, a per-share × shares aggregate the
+      source itself states, or market capitalization (do not compute the
+      product yourself — see rule 1)
     TRANSACTION_VALUE — total consideration including assumed debt; often
       labelled "transaction value" or "total consideration"
     ENTERPRISE_VALUE — EV (equity + debt - cash); often labelled
