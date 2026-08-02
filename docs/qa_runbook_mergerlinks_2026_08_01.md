@@ -63,7 +63,7 @@ locked, what remains to be built, and what must be confirmed by manual validatio
 | 8 | Derived valuations not computed (equity, implied equity, EV, multiples all ~0) | No derivation step; share counts (SEC) not fetched; minority stakes not grossed up | **LLM captures primitives; a deterministic job computes derived values** — never the LLM. See §5. | Code + schema + integration |
 | 9 | Presentation shows "Unknown" | Data-layer nuance leaks to the surface | Platform rollup per axis: **Disclosed / Not Disclosed** only; keep UNKNOWN/UNDISCLOSED nuance internal | Presentation |
 | 10 | **Aggregation nulls clobber real values** — Olin/Huntsman: PR extraction captured `consideration_type=stock`, but the higher-tier SEC exhibit's NULL overrode it, so the final record shows `None` | Best-of aggregation prioritizes by source tier and lets a higher-tier **null** win over a lower-tier **value** | A null must never beat a populated value — aggregation should coalesce to the highest-tier *non-null*. **Fix before scaling multi-source**, or more sources degrade fields. | Code (aggregate) |
-| 11 | Exchange ratio / ownership split **captured but only in free text** — Olin/Huntsman: the model stored `0.5476` and `54.5%/45.5%` in the `consideration_components.description` prose, machine-unusable | **Schema gap:** `consideration_components` is only `{form, amount, percentage, description}` — no structured `exchange_ratio` or ownership-split field, so the model had nowhere to put the numbers it read | Add structured fields — `exchange_ratio`, `acquirer_ownership_pct` / `target_ownership_pct` (per-share / CVR / earnout as needed). The model already extracts these; give them a home so the derivation job (#8) can use them. Not a capture or SEC gap — a schema gap. (Also see #10: even the description was clobbered in aggregation.) | Schema (+ prompt to fill new fields) |
+| 11 | Exchange ratio / ownership split **captured but only in free text** — Olin/Huntsman: the model stored `0.5476` and `54.5%/45.5%` in the `consideration_components.description` prose, machine-unusable | **Schema gap:** `consideration_components` is only `{form, amount, percentage, description}` — no structured `exchange_ratio` or ownership-split field, so the model had nowhere to put the numbers it read | Add a structured **`exchange_ratio`** field (per-share / CVR / earnout as needed). The model already extracts it; give it a home so the derivation job (#8) can use it. Ownership split is **low priority** (not a needed metric). Note: stock-deal equity also needs `acquirer_share_price` (market-data source — see §5). Not a capture or SEC gap — a schema gap. (Also see #10: even the description was clobbered in aggregation.) | Schema (+ prompt to fill new fields) |
 
 ## 5. Decision locked — value model architecture
 
@@ -72,10 +72,15 @@ locked, what remains to be built, and what must be confirmed by manual validatio
 | Capture (LLM — from the release) | Compute (job — deterministic, free) |
 |---|---|
 | per-share price | `equity = per_share × shares` (shares from sec-api) |
+| **exchange ratio** (stock deal) | `equity = exchange_ratio × acquirer_share_price × target_shares` |
 | stated aggregate value | (used directly) |
 | stake value + `pct_acquired` | `implied_equity = stake ÷ pct` (minority gross-up) |
 | net debt | `EV = equity + net_debt` |
 | revenue, EBITDA, ARR | `EV/revenue`, `EV/EBITDA` on derived/implied EV |
+
+**Input-source gaps for the job (neither is the LLM's job):**
+- **`target_shares`** — sec-api structured company-facts. *Not wired.*
+- **`acquirer_share_price`** — **we have neither.** Needed for stock-for-stock equity. We *do* have the acquirer ticker (from `sec_trigger`) + announcement date, so it's a **market-data lookup** (ticker + date → close) — a source not yet integrated. Occasionally the filing states an implied price.
 
 Rationale: accuracy (the prompt already forbids the model reverse-calculating),
 zero token cost, and consistency. Structured inputs (share counts, and net debt
