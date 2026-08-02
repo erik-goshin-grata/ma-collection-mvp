@@ -86,6 +86,13 @@ where in filings) come from the **sec-api** — not by LLM-ing documents.
 - `target_financials_disclosure` — same, over revenue/EBITDA/ARR.
 - Each axis driven by metric presence + explicit statement only.
 
+### Worked examples (why the derivation job matters)
+
+- **Tracsis / Mistral Data** — captured EV £48M + revenue £13M (LTM 2026-03-31); `EV/revenue = 3.7×` is computable but never computed. The £4M EBITDA was in the **official LSE RNS** (a source URL we skipped) → would give `EV/EBITDA = 12×`. Also carried an orphan EBITDA period (LTM/2026-03-31) with no value.
+- **Altaris / Simulations Plus** — captured `per_share = $18.50`; the **$375M aggregate was in the headline** and missed; `$18.50 × shares ≈ $375M` never computed. Equity value should be both captured and derivable.
+- **Sixth Street / Pinnacle Gas** — 27% stake for $600M; `implied equity = $600M ÷ 0.27 ≈ $2.22B` never computed (we store only the stake).
+- **Olin / Huntsman (stock-for-stock)** — captured `consideration = stock` and nothing quantitative. Valuation needs: exchange ratio (extract as a primitive from the 8-K / merger-agreement section — not LLM the whole doc), target shares (sec-api **structured** company-facts), acquirer price → `implied equity = exchange_ratio × acquirer_price × target_shares`. A SEC Exhibit 99 (press-release version) *was* pulled but lacks the ratio/share counts; the structured pull was never wired.
+
 ## 6. To be addressed (prioritized)
 
 **A. Prompt (capture) — `high_confidence_extraction.md`**
