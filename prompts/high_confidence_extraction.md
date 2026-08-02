@@ -5,6 +5,20 @@
 
 ---
 
+> ## ⚠️ QA NOTES — pending revisions (NOT yet applied)
+> From the 2026-08-01 MergerLinks QA review — see `docs/qa_runbook_mergerlinks_2026_08_01.md` for detail + manual-validation steps. These are **notes to guide the next prompt revision**, not implemented changes.
+>
+> - **#1 Close date (rule b):** strengthen — an announcement with **no forward/pending-close language** ⇒ closed on announcement (`closed_date = announced_date`). Add a paired example (closed-on-announcement vs. still-pending). Funding rounds / minority investments close on announcement. *Guard against over-flipping deals that say "subject to regulatory approval."*
+> - **#3 SPLIT:** do **not** split when multiple targets share one consideration / combine into a single platform (e.g. Apax/Centor+PPP). Only split when each target would stand alone.
+> - **#4 Currency:** set `value.currency = null` when `value.amount` is null (no orphan currency).
+> - **#5 Financials:** tighten `target_financials` capture — stated revenue/EBITDA are being missed even when in-text (Norwegian, Fox/Roku, Gilat, Kesko). Also capture a **stated aggregate value even when a per-share is present** (Simulations Plus: got $18.50/sh, missed the $375M).
+> - **#6 Periods:** if an annual figure has **no year**, anchor `period_end` to the most-recent completed FY vs. the announcement date (or LTM-at-announcement); do not leave an orphan period with no value. Tag **ARR / run-rate distinctly** (not fiscal ANNUAL).
+> - **#7 Value type / disclosure:** drop `UNDISCLOSED` from `value.type` (basis-or-null only). Disclosure moves to **two axes** — `deal_value_disclosure` (TV/EV/EQV) and `target_financials_disclosure` (rev/EBITDA/ARR), each DISCLOSED/UNDISCLOSED/UNKNOWN from metric presence + explicit language only.
+> - **#11 Exchange ratio:** capture the stock-deal `exchange_ratio` into a **structured field** (schema pending) — today it lands in `consideration_components.description` free-text (Olin/Huntsman `0.5476`). Ownership split is low priority.
+> - **Not this prompt's job (derivation JOB, see #8):** equity / implied-equity / EV / multiples and `is_take_private`/`is_divestiture`/`is_add_on`. The model **captures primitives only** — it must not compute or infer these.
+
+---
+
 ## 1. Purpose
 
 Extract structured deal data from a classified press release or SEC filing with

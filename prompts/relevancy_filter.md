@@ -5,6 +5,11 @@
 
 ---
 
+> ## ✅ QA NOTE — fix already applied (code)
+> The stage now **normalizes off-enum `reason_code`** rather than dropping a correctly-classified row (Haiku sometimes returns `ACQUISITION` instead of `ACQUISITION_ANNOUNCEMENT`, or `ASSET_PURCHASE`). See `stages/relevancy_filter.py::_normalize_reason_code` and the 2026-08-01 QA runbook. Prompt enum discipline is unchanged; the safety net is in code so a valid deal is never lost on a metadata label.
+
+---
+
 ## 1. Purpose
 
 Binary gate at the top of the extraction pipeline. Given a press release title and body, decide whether the release is about an M&A transaction or capital event in the MVP scope. Drops noise cheaply before expensive downstream extraction runs.

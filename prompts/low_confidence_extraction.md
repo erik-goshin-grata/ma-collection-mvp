@@ -5,6 +5,12 @@
 
 ---
 
+> ## ⚠️ QA NOTE — pending revision (NOT yet applied)
+> From the 2026-08-01 MergerLinks QA — see `docs/qa_runbook_mergerlinks_2026_08_01.md`.
+> - **#2 Advisors — capture *people* + *side*, not just firm.** Releases name the individual bankers and buy/sell side, e.g. *"Canaccord Genuity (sell-side), led by Sanjay Chadda and Lexia Schwartz… Juan Mejia at BrightTower, buy-side."* Advisor records should hold **firm + person(s) + side** (via the participant model). *Recall is also gated by one-URL ingest — multi-source ingest recovers most missed advisors; the prompt change is the people/side capture.*
+
+---
+
 ## 1. Purpose
 
 Extract fields that are frequently absent, inconsistently stated, or require nuanced judgment. These fields are lower-priority than the high-confidence set, but their signal matters for deal analytics when present.
