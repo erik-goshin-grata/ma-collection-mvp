@@ -10,8 +10,7 @@
 
 | Field | Match | We missed | We got more | Differ | Nature of the gap |
 |---|---|---|---|---|---|
-| Deal value (vs DEAL_VALUE) | 28 | 5 | 3 | 2 | Currency-adjusted; matches strong |
-| Enterprise value (vs ENTERPRISE_VALUE) | 14 | 5 | 15 | 4 | We often captured EV ML left blank |
+| Deal value (our one value vs ML's **any** value column) | 29 | 6 | 2 | 2 | **At parity, not ahead.** Currency-adjusted. An earlier draft compared our single value against ML's `ENTERPRISE_VALUE` column alone and over-counted "we got more" as ~15 — corrected: 13 of those were ML `DEAL_VALUE` (mostly VC round sizes ML *did* capture). |
 | Announced date | 85 | 0 | 0 | 7 | Small residual diffs |
 | Closed date | 32 | 22 | 2 | 1 | Mostly a same-day-completion **convention** gap |
 | Target fin. advisors | 16 | 8 | 2 | 0 | Multi-source + ML non-URL feeds |
@@ -60,9 +59,17 @@ Where **we captured a value MergerLinks left blank** (we-got-more):
 - **Kesko / Dahl** — ours `1518000000.0` (ENTERPRISE_VALUE)
 - **Galantas Gold Corporation / Sol de Oro Mining Ltd.** — ours `32500000.0` (TRANSACTION_VALUE)
 
-## 3. Enterprise value — we frequently captured more
+## 3. Deal value — at parity (correcting an earlier over-count)
 
-On **15** deals we extracted an enterprise value that MergerLinks left blank:
+> **Correction:** an earlier draft of this section claimed we "captured more" on ~15 deals. That was wrong — it compared our single value against ML's `ENTERPRISE_VALUE` column alone. Recomputed against ML's **any** value column: **29 match, 6 we missed, only 2 genuine we-got-more, 2 differ** — i.e. **value is at parity, not ahead.**
+
+**Shape — today vs. target:** today this V2 table stores **one** value: a single `value_amount` + a `value_type` flag (EQUITY / ENTERPRISE / TRANSACTION). There are **no separate equity/enterprise/transaction columns yet**, and the multiples assume `value_amount` = enterprise value. MergerLinks, by contrast, stores several (`DEAL_VALUE`, `ENTERPRISE_VALUE`, `equity_value`).
+
+**Target model:** three distinct value fields — **equity, enterprise, transaction — each populatable, and a deal should carry all three where derivable.** Extraction captures the *stated* value into its correct field; the derivation job (finding #8) fills the rest — net debt bridges EV↔equity, per-share × shares yields equity, minority stakes gross up to implied equity.
+
+Because we store only one value today, that single figure maps to whichever ML column matches — which is why the `ENTERPRISE_VALUE`-column comparison below looks lopsided ("we captured more" = our one value present where ML's EV column is blank, not a separately-derived EV).
+
+The 15 rows below are where our value sits and ML's `ENTERPRISE_VALUE` column is blank — but **13 of them ML captured in `DEAL_VALUE`** (mostly VC round sizes; they *match*). Only **2** are genuine "we got more." Listed for transparency, not as an advantage:
 - **Sixth Street Growth / Chronograph** — ours `140000000.0` (EQUITY_VALUE)
 - **Camber Partners / Respond.io** — ours `62500000.0` (TRANSACTION_VALUE)
 - **Selva Ventures / Kimba** — ours `6500000.0` (TRANSACTION_VALUE)
@@ -88,6 +95,10 @@ EV DIFFs (both present, differ):
 ## 4. Advisors — recall gap, partly structural
 
 We captured ~2/3 of advisors where MergerLinks has them. The gap is confounded by (a) our **one-URL-per-deal** ingest (multi-source deals had ~2× the miss rate), and (b) MergerLinks sourcing some advisor data from **direct feeds not present in any press release**. Not purely an extraction failure.
+
+**Confirmed multi-source recovery:** several of the "missed" advisors below are present in the *other* source URLs we didn't read — e.g. **Montagu/BMC Helix** (Jefferies) and **Bertram/Bluebird** (Canaccord Genuity) both name their advisors in the **prnewswire** releases. Reading all URLs per deal + clustering recovers them.
+
+**Capture advisor *people*, not just firms:** these releases name the individual bankers and their side. From Bertram/Bluebird's second prnewswire: *"Canaccord Genuity (Bluebird's **sell-side** advisor), led by **Sanjay Chadda** and **Lexia Schwartz**… **Juan Mejia** at **BrightTower**… **buy-side** advisor."* → advisor records should hold **firm + person(s) + side (buy/sell)**, which the existing participant model can carry.
 
 Target financial advisors we missed:
 - **Montagu Private Equity LLP / BMC Helix** — ML: `Jefferies & Company`
