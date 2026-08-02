@@ -80,7 +80,7 @@ locked, what remains to be built, and what must be confirmed by manual validatio
 
 **Input-source gaps for the job (neither is the LLM's job):**
 - **`target_shares`** — sec-api structured company-facts. *Not wired.*
-- **`acquirer_share_price`** — **we have neither.** Needed for stock-for-stock equity. We *do* have the acquirer ticker (from `sec_trigger`) + announcement date, so it's a **market-data lookup** (ticker + date → close) — a source not yet integrated. Occasionally the filing states an implied price.
+- **`acquirer_share_price`** — **we have neither.** Needed for stock-for-stock equity. We *do* have the acquirer ticker (from `sec_trigger`) + announcement date, so it's a **market-data lookup** (ticker + date → close) — a source not yet integrated. Note the price is a **convention, not a single number** (1-day / 30-day / unaffected / VWAP). Handle it as: a **codified default rule** (pick one convention the job applies automatically) **plus a collection-input override field** (price + reference window) for deals that quote a specific basis. Rule for coverage; human field for accuracy.
 
 Rationale: accuracy (the prompt already forbids the model reverse-calculating),
 zero token cost, and consistency. Structured inputs (share counts, and net debt
