@@ -217,6 +217,14 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     ev_to_ebitda_ntm            REAL,        -- enterprise_value / target_ebitda (when period_type = NTM)
     multiple_quality            TEXT,        -- CALCULATED | NM | NOT_CALCULABLE
 
+    -- Derived valuations (finding #8; computed in aggregate from captured primitives)
+    net_debt                    REAL,        -- manual collection input in the interim (NOT extracted); preserved across re-aggregation
+    equity_value                REAL,        -- canonical equity value
+    equity_value_basis          TEXT,        -- STATED | PER_SHARE_X_SHARES
+    implied_equity_value        REAL,        -- equity grossed up to 100% (equity / (pct_acquired/100))
+    enterprise_value            REAL,        -- canonical enterprise value
+    enterprise_value_basis      TEXT,        -- STATED | EQUITY_PLUS_NET_DEBT
+
     -- Consideration
     consideration_type          TEXT,        -- derived from components
     consideration_components    TEXT,        -- JSON

@@ -334,6 +334,63 @@ def _compute_multiples(
     return result
 
 
+def _derive_equity_value(
+    value_amount: float | None,
+    value_type: str | None,
+    per_share_price: float | None,
+    sec_shares: float | None,
+) -> tuple[float | None, str | None]:
+    """Canonical equity value + basis. The model captures primitives; this derives.
+
+    STATED             — source stated an equity / market-cap figure (value_type=EQUITY_VALUE).
+    PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count.
+    Returns (None, None) when neither input is available (e.g. PR-only data with no
+    SEC enrichment). Never computed by the LLM — see high_confidence_extraction rule 1.
+    """
+    if value_type == "EQUITY_VALUE" and value_amount and value_amount > 0:
+        return float(value_amount), "STATED"
+    if per_share_price and per_share_price > 0 and sec_shares and sec_shares > 0:
+        return round(per_share_price * sec_shares, 2), "PER_SHARE_X_SHARES"
+    return None, None
+
+
+def _derive_implied_equity(
+    equity_value: float | None,
+    pct_acquired: float | None,
+) -> float | None:
+    """Gross a minority equity value up to 100%: equity / (pct_acquired / 100).
+
+    Returns the equity value unchanged when the stake is an implicit/explicit 100%
+    (pct_acquired null or >= 100), and None when there is no equity value to gross up.
+    """
+    if equity_value is None or equity_value <= 0:
+        return None
+    if pct_acquired and 0 < pct_acquired < 100:
+        return round(equity_value / (pct_acquired / 100.0), 2)
+    return equity_value
+
+
+def _derive_enterprise_value(
+    value_amount: float | None,
+    value_type: str | None,
+    equity_value: float | None,
+    net_debt: float | None,
+) -> tuple[float | None, str | None]:
+    """Canonical enterprise value + basis.
+
+    STATED               — source stated an EV figure (value_type=ENTERPRISE_VALUE).
+    EQUITY_PLUS_NET_DEBT — equity + net_debt. net_debt is a manual collection input
+                           in the interim (not extracted), so this basis is null until
+                           a researcher supplies net_debt.
+    Returns (None, None) when neither path is satisfiable.
+    """
+    if value_type == "ENTERPRISE_VALUE" and value_amount and value_amount > 0:
+        return float(value_amount), "STATED"
+    if equity_value is not None and net_debt is not None:
+        return round(equity_value + net_debt, 2), "EQUITY_PLUS_NET_DEBT"
+    return None, None
+
+
 # ---------------------------------------------------------------------------
 # Tier-based field aggregation
 # ---------------------------------------------------------------------------
@@ -800,12 +857,34 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 field_values.get("round_label")
             )
 
-            # Check for existing transaction_record to determine version
+            # Check for existing transaction_record to determine version and to
+            # preserve the manual net_debt input across re-aggregation.
             existing = conn.execute(
-                "SELECT aggregation_version FROM transaction_record WHERE transaction_id=?",
+                "SELECT aggregation_version, net_debt FROM transaction_record WHERE transaction_id=?",
                 (cluster_id,),
             ).fetchone()
             agg_version = (existing["aggregation_version"] + 1) if existing else 1
+
+            # Derive valuations (the deterministic job — LLM captured primitives only).
+            # sec_shares comes from SEC enrichment once it runs; None on PR-only data.
+            # net_debt is a manual collection input in the interim; keep any stored value.
+            sec_shares = None
+            net_debt = existing["net_debt"] if existing else None
+            equity_value, equity_value_basis = _derive_equity_value(
+                field_values.get("value_amount"),
+                field_values.get("value_type"),
+                field_values.get("per_share_price"),
+                sec_shares,
+            )
+            implied_equity_value = _derive_implied_equity(
+                equity_value, field_values.get("pct_acquired")
+            )
+            enterprise_value, enterprise_value_basis = _derive_enterprise_value(
+                field_values.get("value_amount"),
+                field_values.get("value_type"),
+                equity_value,
+                net_debt,
+            )
 
             # Upsert transaction_record
             conn.execute(
@@ -837,9 +916,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     facility_size, total_raised_to_date,
                     is_extension_round, is_down_round, is_bridge_round,
                     use_of_proceeds, has_board_seat, board_seat_notes,
-                    is_current, aggregation_version, updated_at
+                    is_current, aggregation_version, updated_at,
+                    net_debt, equity_value, equity_value_basis,
+                    implied_equity_value, enterprise_value, enterprise_value_basis
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -932,6 +1013,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     1,
                     agg_version,
                     now,
+                    net_debt,
+                    equity_value,
+                    equity_value_basis,
+                    implied_equity_value,
+                    enterprise_value,
+                    enterprise_value_basis,
                 ),
             )
 

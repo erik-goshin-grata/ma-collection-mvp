@@ -334,6 +334,15 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("has_observation_changes",          "INTEGER DEFAULT 0"),
         ("observation_changes_field_count",  "INTEGER DEFAULT 0"),
         ("observation_changes_summary",      "TEXT"),
+        # Drop 3.32 — derived valuations (finding #8). The LLM captures primitives;
+        # aggregate derives these. net_debt is a manual collection input in the
+        # interim (not extracted) and is preserved across re-aggregation.
+        ("net_debt",                         "REAL"),
+        ("equity_value",                     "REAL"),
+        ("equity_value_basis",               "TEXT"),
+        ("implied_equity_value",             "REAL"),
+        ("enterprise_value",                 "REAL"),
+        ("enterprise_value_basis",           "TEXT"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
