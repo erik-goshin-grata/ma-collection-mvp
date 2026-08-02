@@ -62,6 +62,8 @@ locked, what remains to be built, and what must be confirmed by manual validatio
 | 7 | `value_type = UNDISCLOSED`; disclosure flag overblown | `value_type` doubles as a disclosure state; single `financials_disclosure_status` conflates independent axes | Drop UNDISCLOSED from `value_type` (basis or null only). Replace `financials_disclosure_status` with **two axes**: `deal_value_disclosure` (TV/EV/EQV) + `target_financials_disclosure` (rev/EBITDA/ARR), each DISCLOSED / UNDISCLOSED / UNKNOWN, derived from **metric presence + explicit language only** — never inferred across axes. | Prompt + schema |
 | 8 | Derived valuations not computed (equity, implied equity, EV, multiples all ~0) | No derivation step; share counts (SEC) not fetched; minority stakes not grossed up | **LLM captures primitives; a deterministic job computes derived values** — never the LLM. See §5. | Code + schema + integration |
 | 9 | Presentation shows "Unknown" | Data-layer nuance leaks to the surface | Platform rollup per axis: **Disclosed / Not Disclosed** only; keep UNKNOWN/UNDISCLOSED nuance internal | Presentation |
+| 10 | **Aggregation nulls clobber real values** — Olin/Huntsman: PR extraction captured `consideration_type=stock`, but the higher-tier SEC exhibit's NULL overrode it, so the final record shows `None` | Best-of aggregation prioritizes by source tier and lets a higher-tier **null** win over a lower-tier **value** | A null must never beat a populated value — aggregation should coalesce to the highest-tier *non-null*. **Fix before scaling multi-source**, or more sources degrade fields. | Code (aggregate) |
+| 11 | Exchange ratio / ownership split not captured (Olin/Huntsman: `0.5476`, `54.5%/45.5%` were **in the PR**) | No `exchange_ratio` field; consideration capture incomplete for stock deals | Add `exchange_ratio` (+ ownership split) as captured primitives; feeds the stock-deal equity derivation (finding #8). Was in the press release — not a SEC gap. | Prompt + schema |
 
 ## 5. Decision locked — value model architecture
 
@@ -120,6 +122,7 @@ where in filings) come from the **sec-api** — not by LLM-ing documents.
 - [ ] **Close-date rule (#1):** undated same-day completions flip to CLOSED
       **without** over-flipping genuinely-pending deals — verify Mutares/Free2move
       and Yum/Pizza Hut ("subject to regulatory approvals") stay PENDING.
+- [ ] **Aggregation null-clobber (#10):** on a multi-source deal, confirm a populated field from one source is NOT overwritten by a null from a higher-tier source (re-check Olin/Huntsman `consideration_type=stock` survives).
 - [ ] **SPLIT tightening (#3):** Apax/Centor+PPP collapses to ONE transaction,
       while a genuine multi-deal (Colt → NorthC + DWS) still correctly splits.
 - [ ] **Two-axis disclosure (#7):** Clear Water reads deal-value=Not Disclosed,
