@@ -153,3 +153,38 @@ where in filings) come from the **sec-api** — not by LLM-ing documents.
 - Scorecard/worksheet for this run: `exports/ML_worksheet.csv`,
   `exports/ML_scorecard.csv`, `exports/transactions_run_20260801_110339.csv`
   (git-ignored; regenerate from the run DB).
+
+## 9. Researcher review workbook — spec
+
+A focused, source-linked xlsx (≈55–58 fields), **not** the 105-col worksheet. Two field classes, kept visually separate:
+
+- **Extraction fields** — grade against the source.
+- **Derived fields** — flags (`is_take_private`/`is_divestiture`/`is_add_on`) *and* valuations (equity/implied/EV/multiples). Marked **"computed by the job — pending"** so blanks aren't mis-graded (see #8).
+
+**Column groups (in order):**
+1. **Identity / sources** — acquirer, target, **source(s) we used** (clickable), announced_date
+2. **Classification** — deal_type, event_history_type, transaction_status, consideration_type
+3. **Value** — value_amount, currency, value_type, per_share_price, pct_acquired, *exchange_ratio (new)*
+4. **Dates** — announced, signing, closed
+5. **Parties** — acquirer_type, acquirer_sponsor, target_type, target_status, parent_seller (+ticker), *seller_sponsor (new)*
+6. **Advisors** — target fin/legal, acquirer fin/legal (+both/other); *people + side (new)*
+7. **Financials** — revenue (+period type/end), EBITDA (+period type/end)
+8. **Disclosure (new)** — deal_value_disclosure, target_financials_disclosure
+9. **Narrative** — summary_text, primary_rationale, secondary_rationales
+10. **Agreement flags** (own tab) — PR-populated (consideration_components, regulatory_approvals, MAC/fees/vote where stated) + agreement-extraction-populated (go-shop, break fees, structure) — the latter **populate in the real run** (agreement extraction targeted at the agreement sections; not run in this QA pass)
+11. **Derived** (own tab, marked pending job) — flags + equity/implied/EV/multiples
+
+**Reviewer verdicts (per group):** `value_ok`, `dates_ok`, `parties_ok`, `advisors_ok`, `financials_ok`, `summary_ok`, `rationale_ok`, `overall`, `notes` (dropdowns ✓ / ✗ / partial).
+
+**Layout:** freeze identity+source columns; group header bands; filters; **Instructions tab** with the review method (grade vs. *source*), the verdict legend, and the **known-issues list** (the findings below — so researchers surface *new* problems, not re-flag known ones).
+
+## 10. Run plan (when funded)
+
+**Sequence — don't re-run per fix (cost lesson from this session):**
+1. **Free deterministic layer first (no LLM, no re-run):** aggregation null-fix (#10, *gate for multi-source*), the **derivation job** (#8 — flags + implied-equity + multiples-where-both-present, runnable on the *current* extractions), schema fields (#7 disclosure axes, #11 exchange_ratio, #12 seller_sponsor), currency/period cleanup (#4/#6).
+2. **Batch all prompt changes** (#1 close-date, #3 SPLIT, #5 financials, #6 periods, #7 undisclosed, #11 exchange-ratio capture, #2 advisor people) into one revision — eyeball before running.
+3. **Multi-source ingest** (all URLs; **exclude `sec.gov` links** — LLM-the-filing is the wrong path; SpaceX/Anysphere is the lone sec-only-ish exception). Agreement extraction runs **targeted** on the agreement sections; sec-api **structured** supplies shares/net-debt to the derivation job.
+4. **One clean re-run each** — ML (91 deals / ~141 sources, `llm-only` for the press path) ≈ **$18–20**; Valu8 (77 deals) ≈ **$11**. ~**$30 total, once.**
+5. Regenerate scorecard + differences + the review workbook from the new run.
+
+**Cost basis:** Opus 4.7 ≈ $5/$25 per M, Haiku 4.5 ≈ $1/$5 → ~$0.14/txn; extraction cost scales with **source count**, not deal count.
