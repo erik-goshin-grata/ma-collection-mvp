@@ -55,6 +55,7 @@ class Config:
 
     # --- Model strings ---
     opus_model: str
+    sonnet_model: str
     haiku_model: str
     openai_relevancy_model: str
     openai_classification_model: str
@@ -156,6 +157,7 @@ def load_config() -> Config:
     aggregation_read_source = _opt_str("AGGREGATION_READ_SOURCE", "staging").lower()
 
     opus_model = _opt_str("OPUS_MODEL", "claude-opus-4-7")
+    sonnet_model = _opt_str("SONNET_MODEL", "claude-sonnet-4-6")
     haiku_model = _opt_str("HAIKU_MODEL", "claude-haiku-4-5-20251001")
     openai_relevancy_model = _opt_str("OPENAI_RELEVANCY_MODEL", "gpt-5-nano")
     openai_classification_model = _opt_str("OPENAI_CLASSIFICATION_MODEL", "gpt-5-mini")
@@ -194,6 +196,7 @@ def load_config() -> Config:
         run_id_prefix=run_id_prefix,
         aggregation_read_source=aggregation_read_source,
         opus_model=opus_model,
+        sonnet_model=sonnet_model,
         haiku_model=haiku_model,
         openai_relevancy_model=openai_relevancy_model,
         openai_classification_model=openai_classification_model,

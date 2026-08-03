@@ -206,7 +206,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 prompt_version=_FULL_VERSION,
                 user_prompt=user_prompt,
                 system_prompt=prompt["system"],
-                model="opus",
+                model="sonnet",
                 temperature=0.3,
                 max_tokens=768,
                 cfg=cfg,

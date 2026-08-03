@@ -28,14 +28,15 @@ Each prompt file has the following sections:
 | Stage | Model | Rationale |
 | :--- | :--- | :--- |
 | Relevancy filter | Haiku 4.5 | High volume, low stakes, cheap |
-| Deal type classification | Opus 4.7 | Single decision, downstream branches depend on it |
-| High-confidence extraction | Opus 4.7 | Core fields, must be accurate |
+| Deal type classification | Sonnet 4.6 | Fixed-enum single pick, temp 0.0 — mid-tier handles it; downgraded from Opus 2026-08-02 |
+| High-confidence extraction | Sonnet 4.6 | Explicit-fact extraction (pattern-matching, not judgment); downgraded from Opus 2026-08-02 |
 | Low-confidence extraction | Opus 4.7 | Nuanced fields (advisors, consideration), signal quality matters |
 | Aggregation conflict resolution | Opus 4.7 | Judgment calls on source reconciliation |
-| Deal summary | Opus 4.7 | Readable prose output |
+| Deal summary | Sonnet 4.6 | Prose over already-extracted facts, temp 0.3 — mid-tier task; downgraded from Opus 2026-08-02 |
 | Strategic rationale | Opus 4.7 | Judgment against taxonomy |
 
-Exact model strings (for API calls): `claude-opus-4-7` and `claude-haiku-4-5-20251001`.
+Exact model strings (for API calls): `claude-opus-4-7`, `claude-sonnet-4-6`, and `claude-haiku-4-5-20251001`.
+(Funding HC extraction, stage 4b, follows high-confidence extraction → Sonnet 4.6.)
 Implementation reads these from `Config.opus_model` and `Config.haiku_model` — never
 hardcoded in prompt code. Model strings change; config values do not require code changes.
 

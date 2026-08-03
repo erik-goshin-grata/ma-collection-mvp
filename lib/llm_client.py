@@ -100,13 +100,15 @@ def call_llm(request: LLMRequest, *, cfg: Config, log: Any) -> LLMResponse:
 def _resolve_anthropic_model(cfg: Config, requested_model: str) -> str:
     if requested_model == "opus":
         return cfg.opus_model
+    if requested_model == "sonnet":
+        return cfg.sonnet_model
     if requested_model == "haiku":
         return cfg.haiku_model
     return requested_model
 
 
 def _resolve_openai_model(cfg: Config, prompt_name: str, requested_model: str) -> str:
-    if requested_model not in {"opus", "haiku"}:
+    if requested_model not in {"opus", "sonnet", "haiku"}:
         return requested_model
     attr_name = _OPENAI_MODEL_BY_PROMPT.get(prompt_name)
     if attr_name:
