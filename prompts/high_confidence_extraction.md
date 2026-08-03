@@ -5,17 +5,22 @@
 
 ---
 
-> ## ⚠️ QA NOTES — pending revisions (NOT yet applied)
-> From the 2026-08-01 MergerLinks QA review — see `docs/qa_runbook_mergerlinks_2026_08_01.md` for detail + manual-validation steps. These are **notes to guide the next prompt revision**, not implemented changes.
+> ## QA NOTES — from the 2026-08-01 MergerLinks review
+> See `docs/qa_runbook_mergerlinks_2026_08_01.md` for detail + manual-validation steps.
 >
-> - **#1 Close date (rule b):** strengthen — an announcement with **no forward/pending-close language** ⇒ closed on announcement (`closed_date = announced_date`). Add a paired example (closed-on-announcement vs. still-pending). Funding rounds / minority investments close on announcement. *Guard against over-flipping deals that say "subject to regulatory approval."*
+> **✅ APPLIED in this revision** (active in the rules below):
+> - **#1 Close date (rule b):** an announcement with **no forward/pending-close language** ⇒ closed on announcement (`closed_date = announced_date`); funding / minority close on announcement; **guard** against flipping deals with "subject to..." language. See `closed_date`.
+> - **#4 Currency:** `value.currency = null` when `value.amount` is null (no orphan currency). See `value.currency`.
+> - **#5 Financials:** capture stated revenue/EBITDA even when in running prose; capture a **stated aggregate value even when a per-share is present**. See `value.amount` and TARGET FINANCIALS *capture discipline*.
+> - **#6 Periods:** anchor `period_end` to a stated year (else null, keep period_type); **ARR is not revenue** — don't record ARR in `revenue_amount`. See TARGET FINANCIALS.
+>
+> **⏳ STILL PENDING** (notes only — not yet implemented):
 > - **#3 SPLIT:** do **not** split when multiple targets share one consideration / combine into a single platform (e.g. Apax/Centor+PPP). Only split when each target would stand alone.
-> - **#4 Currency:** set `value.currency = null` when `value.amount` is null (no orphan currency).
-> - **#5 Financials:** tighten `target_financials` capture — stated revenue/EBITDA are being missed even when in-text (Norwegian, Fox/Roku, Gilat, Kesko). Also capture a **stated aggregate value even when a per-share is present** (Simulations Plus: got $18.50/sh, missed the $375M).
-> - **#6 Periods:** if an annual figure has **no year**, anchor `period_end` to the most-recent completed FY vs. the announcement date (or LTM-at-announcement); do not leave an orphan period with no value. Tag **ARR / run-rate distinctly** (not fiscal ANNUAL).
-> - **#7 Value type / disclosure:** drop `UNDISCLOSED` from `value.type` (basis-or-null only). Disclosure moves to **two axes** — `deal_value_disclosure` (TV/EV/EQV) and `target_financials_disclosure` (rev/EBITDA/ARR), each DISCLOSED/UNDISCLOSED/UNKNOWN from metric presence + explicit language only.
-> - **#11 Exchange ratio:** capture the stock-deal `exchange_ratio` into a **structured field** (schema pending) — today it lands in `consideration_components.description` free-text (Olin/Huntsman `0.5476`). Ownership split is low priority.
-> - **Not this prompt's job (derivation JOB, see #8):** equity / implied-equity / EV / multiples and `is_take_private`/`is_divestiture`/`is_add_on`. The model **captures primitives only** — it must not compute or infer these.
+> - **#7 Value type / disclosure** *(needs schema — eng note):* drop `UNDISCLOSED` from `value.type`; move disclosure to **two axes** — `deal_value_disclosure` + `target_financials_disclosure`.
+> - **#11 Exchange ratio** *(needs schema — eng note):* capture the stock-deal `exchange_ratio` into a **structured field** (today it lands in `consideration_components.description` free-text; Olin/Huntsman `0.5476`).
+> - **ARR field** *(needs schema — eng note):* dedicated ARR capture, distinct from GAAP revenue.
+>
+> **Derivation JOB (#8) — now BUILT** in `stages/aggregate.py`: equity / implied-equity / EV / multiples and `is_take_private`/`is_divestiture`/`is_add_on`. The model **captures primitives only** — it must not compute or infer these (see rule 1).
 
 ---
 
@@ -163,9 +168,23 @@ dates:
     quarter — only quarter and year known
     year — only year known
 - closed_date: Date the transaction closed or completed. Populate when:
-    (a) the source explicitly states the deal has closed, OR
-    (b) the source is a same-day completed announcement with no pending-close
-        language. In case (b), set closed_date = announced_date.
+    (a) the source explicitly states the deal has closed/completed, OR
+    (b) the source announces the deal with NO forward/pending-close language —
+        no "expected to close," "will acquire," "subject to," "pending,"
+        "upon completion," or other future-tense closing. Then the deal is
+        closed on announcement: set closed_date = announced_date.
+  Funding rounds and minority investments are closed on announcement unless the
+  source says otherwise.
+  GUARD — do NOT flip a deal to closed when it carries ANY forward/conditional
+  closing language ("subject to regulatory approval," "expected to close in
+  Q_ 20__," "pending shareholder vote," "customary closing conditions"), even
+  when most of the release reads past-tense. When in doubt, leave closed_date
+  null.
+  Examples:
+    "X today completed its acquisition of Y" / "X has acquired Y" (no future
+      terms) → closed_date = announced_date.
+    "X today announced it will acquire Y; the transaction is expected to close
+      in Q4 2026, subject to regulatory approval" → closed_date = null.
   Null if the deal is announced but not yet closed.
 - closed_date_precision: same precision values as announced_date_precision.
 - signing_date: Date a definitive agreement was signed, if stated and distinct
@@ -180,9 +199,14 @@ VALUE
 
 value:
 - amount: Dollar (or local currency) value as stated. Return as a number
-  (e.g., 500000000 for $500 million). Do not include currency symbol.
+  (e.g., 500000000 for $500 million). Do not include currency symbol. If the
+  source states BOTH a per-share price and an aggregate/total deal value,
+  capture the aggregate here (and the per-share in per_share_price below) — do
+  not drop the total just because a per-share figure is present.
 - currency: ISO 4217 code (e.g., USD, GBP, EUR). Infer from context when
-  obvious ($ = USD unless non-US context). Null if unstated.
+  obvious ($ = USD unless non-US context). Null if unstated. Also null whenever
+  amount is null — never return a currency for a value that was not stated (an
+  undisclosed deal has null amount AND null currency).
 - type: What the stated value represents — use V2 MetricType vocabulary:
     EQUITY_VALUE — equity purchase price, a per-share × shares aggregate the
       source itself states, or market capitalization (do not compute the
@@ -241,6 +265,23 @@ CRITICAL: Do NOT assume LTM when period is not stated. A source saying
 "revenue of $50M" with no period qualifier should have revenue_period_type =
 null. Period tagging is required for NTM multiples to compute correctly
 downstream.
+
+CAPTURE DISCIPLINE: Extract a stated revenue/EBITDA figure for the TARGET even
+when it appears in running prose, a quote, or otherwise non-financial framing
+(e.g. "the Norwegian unit, which generated NOK 2.1bn in revenue," "Roku's
+platform revenue of $..."). A figure attached to the target counts even when
+the release is not primarily about financials. Only leave null when no figure
+is stated.
+
+PERIOD ANCHOR: When the source gives an end date or fiscal year for a figure,
+populate revenue_period_end / ebitda_period_end with it (YYYY or YYYY-MM-DD).
+If a figure has a period basis but no stated year, keep the period_type and
+leave period_end null — do not invent a year.
+
+ARR IS NOT REVENUE: Do not record ARR (annual recurring revenue) in
+revenue_amount. If the source states only ARR, leave revenue_amount null so ARR
+is not mistagged as GAAP revenue (which would produce a bogus EV/revenue
+multiple). A dedicated ARR field is pending schema — see the QA notes header.
 
 MULTI-TRANSACTION SOURCES
 
