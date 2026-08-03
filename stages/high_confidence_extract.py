@@ -170,6 +170,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         FROM staging_extraction se
         JOIN source_raw sr ON sr.source_raw_id = se.source_raw_id
         WHERE se.status = 'CLASSIFIED'
+          AND COALESCE(se.v2_event_type, se.deal_type) NOT IN ('VC_ROUND', 'GROWTH_EQUITY', 'VENTURE_DEBT')
         """
     ).fetchall()
 
