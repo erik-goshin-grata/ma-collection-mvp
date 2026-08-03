@@ -606,6 +606,16 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.target_fee_amount, se.target_fee_percentage,
                se.acquirer_fee_amount, se.acquirer_fee_percentage,
                se.model_confidence,
+               -- V2 event/date/financials fields (were dropped: loader was stale vs _FIELDS)
+               se.v2_event_type, se.event_history_type, se.recap_type, se.acquirer_type_v2,
+               se.announced_date_precision, se.closed_date_precision, se.rumor_date,
+               se.target_revenue_period_type_v2, se.target_ebitda_period_type_v2,
+               se.financials_disclosure_status,
+               -- Funding fields (Stage 4b) — required so funding deal value/round data propagates
+               se.round_label, se.round_size, se.pre_money_valuation, se.post_money_valuation,
+               se.valuation_currency, se.facility_size, se.total_raised_to_date,
+               se.is_extension_round, se.is_down_round, se.is_bridge_round,
+               se.use_of_proceeds, se.has_board_seat, se.board_seat_notes,
                sr.source_type, sr.source_tier, sr.published_date, sr.clean_text
         FROM staging_extraction se
         JOIN source_raw sr ON sr.source_raw_id = se.source_raw_id
