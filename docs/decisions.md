@@ -228,3 +228,43 @@ Consequences:
 - Prompt notes now refer to the derived flag rather than a PE-only shorthand.
 - Public-public merger false positives remain guarded by deal type, target
   type, target status, and public acquirer ticker checks.
+
+## 2026-08-02 - Per-Stage Model Tiering (Sonnet tier added)
+
+Status: accepted, implemented in `f5f4e88`.
+
+Decision:
+
+- Add a `sonnet` model alias resolving to `Config.sonnet_model`
+  (`SONNET_MODEL`, default `claude-sonnet-4-6`) in `lib/llm_client.py`, for both
+  the Anthropic and OpenAI resolvers.
+- Move four stages from Opus to Sonnet:
+  - `deal_type_classify` — fixed-enum single pick, temp 0.0.
+  - `high_confidence_extract` — explicit-fact extraction (pattern-match, not judgment).
+  - `funding_hc_extract` (Stage 4b) — funding variant of HC.
+  - `summarize` / deal summary — prose over already-extracted facts.
+- Keep on Opus: `low_confidence_extract` (nuanced fields), `agreement_extract`
+  (legal precision), aggregation conflict resolution (rare, low volume),
+  `strategic_rationale`.
+- Keep relevancy on Haiku.
+
+Context:
+
+- Every LLM stage except relevancy had been on Opus since the stages' initial
+  implementation (2026-04-23). The 2026-07-28 change was only a version bump
+  (`claude-opus-4-5` to `claude-opus-4-7`); Opus 4.7 emits 1.0-1.35x more tokens
+  for the same text, a real cost increase. Opus was paying for judgment that
+  enum / explicit-extraction / prose stages do not require.
+- No Sonnet tier existed; the resolver only knew `opus` and `haiku`.
+
+Consequences:
+
+- The highest-volume Opus stages move to Sonnet 4.6; precision-sensitive stages
+  (legal extraction, low-confidence nuance) stay on Opus.
+- `prompts/prompt_conventions.md` §2 updated to match.
+- `strategic_rationale` stays Opus pending a gold-set test — the cited "cheaper
+  tier matched/beat Opus at 11x lower cost" result is not recorded in this repo.
+- `funding_hc_extract -> Sonnet` was an inferred extension of the HC decision;
+  revisit if funding extraction quality regresses.
+- Any tier change should be validated via the evaluation harness
+  (`gold_set` + `specs/evaluation.md`) before being treated as proven.

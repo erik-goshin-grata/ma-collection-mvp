@@ -160,6 +160,7 @@ All examples are synthetic. No real press release text, no real company data, no
 | 0.1 | 2026-04-22 | Initial draft |
 | 0.2 | 2026-04-23 | Added §11 Prompt File Structure Rule (RESPONSE FORMAT requirement). |
 | 0.3 | 2026-07-28 | V2 alignment. Model strings updated: claude-opus-4-5 → claude-opus-4-7, claude-haiku-4-5 → claude-haiku-4-5-20251001. Model upgrade policy added. OpenAI provider model hierarchy documented. Stage table updated to reflect current defaults. |
+| 0.4 | 2026-08-02 | Sonnet tier added (`claude-sonnet-4-6`). §2 stage table updated: deal type classification, high-confidence extraction, funding HC (Stage 4b), and deal summary moved Opus → Sonnet. Rationale/decision recorded in `docs/decisions.md` (2026-08-02). |
 
 ---
 
