@@ -299,6 +299,18 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     def _existing(table: str) -> set:
         return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
+    # Base migrations 002 (V2 alignment) and 003 (funding path) add columns to
+    # staging_extraction / transaction_record and the staging_investor table.
+    # They were never applied to freshly-created DBs (only 001 + the drop-ALTERs
+    # below ran), so a new DB was missing v2_event_type / round_size / etc. and
+    # the pipeline crashed at classify. Apply each once, guarded by a sentinel
+    # column so this is idempotent on already-migrated DBs.
+    _mig_dir = Path(__file__).parent / "schema"
+    if "v2_event_type" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "002_v2_prompt_alignment.sql").read_text(encoding="utf-8"))
+    if "round_size" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "003_funding_path.sql").read_text(encoding="utf-8"))
+
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
     # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document
