@@ -355,6 +355,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("implied_equity_value",             "REAL"),
         ("enterprise_value",                 "REAL"),
         ("enterprise_value_basis",           "TEXT"),
+        # bug #8 — funding/minority "amount invested" (round size / check), kept
+        # distinct from equity_value so a check is never recorded as a valuation.
+        ("investment_amount",                "REAL"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")

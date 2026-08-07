@@ -44,6 +44,10 @@ _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
 
 _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
+# Non-control investments: an investor takes a (usually minority) stake / injects
+# primary capital — there is no whole-company purchase price. The amount is a
+# check/round size, NOT the company's equity value. (bug #8)
+_NON_CONTROL_TYPES = _FUNDING_EVENT_TYPES | frozenset({"MINORITY_INVESTMENT"})
 
 # Fields aggregated into transaction_record.
 # Each entry: (field_name, field_type)
@@ -334,20 +338,45 @@ def _compute_multiples(
     return result
 
 
+def _event_type(fv: dict) -> str | None:
+    return fv.get("v2_event_type") or fv.get("deal_type")
+
+
+def _derive_investment_amount(fv: dict) -> float | None:
+    """Amount invested (round size / check) for a non-control investment.
+
+    Funding rows carry it in round_size; MINORITY_INVESTMENT (M&A path) in value_amount.
+    Returns None for control deals — they have a purchase price, not an investment.
+    """
+    if _event_type(fv) not in _NON_CONTROL_TYPES:
+        return None
+    amt = fv.get("round_size") or fv.get("value_amount")
+    return float(amt) if amt and amt > 0 else None
+
+
 def _derive_equity_value(
-    value_amount: float | None,
-    value_type: str | None,
+    fv: dict,
     per_share_price: float | None,
     sec_shares: float | None,
 ) -> tuple[float | None, str | None]:
-    """Canonical equity value + basis. The model captures primitives; this derives.
+    """Canonical company equity value + basis. The model captures primitives; this derives.
 
-    STATED             — source stated an equity / market-cap figure (value_type=EQUITY_VALUE).
-    PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count.
-    Returns (None, None) when neither input is available (e.g. PR-only data with no
-    SEC enrichment). Never computed by the LLM — see high_confidence_extraction rule 1.
+    Non-control investments (VC/growth/venture-debt/minority): equity value is the
+    company's, NOT the check. Only a directly stated post-money valuation counts;
+    otherwise None. The invested amount lives in investment_amount, never here (bug #8).
+
+    Control deals (acquisition/merger/take-private/etc.) — unchanged:
+      STATED             — source stated an equity figure (value_type=EQUITY_VALUE).
+      PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count.
     """
-    if value_type == "EQUITY_VALUE" and value_amount and value_amount > 0:
+    if _event_type(fv) in _NON_CONTROL_TYPES:
+        pm = fv.get("post_money_valuation")
+        if pm and pm > 0:
+            return float(pm), "STATED_POST_MONEY"
+        return None, None
+
+    value_amount = fv.get("value_amount")
+    if fv.get("value_type") == "EQUITY_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
     if per_share_price and per_share_price > 0 and sec_shares and sec_shares > 0:
         return round(per_share_price * sec_shares, 2), "PER_SHARE_X_SHARES"
@@ -355,18 +384,31 @@ def _derive_equity_value(
 
 
 def _derive_implied_equity(
+    fv: dict,
     equity_value: float | None,
-    pct_acquired: float | None,
 ) -> float | None:
-    """Gross a minority equity value up to 100%: equity / (pct_acquired / 100).
+    """Whole-company (100%) equity value.
 
-    Returns the equity value unchanged when the stake is an implicit/explicit 100%
-    (pct_acquired null or >= 100), and None when there is no equity value to gross up.
+    Non-control: a stated post-money is the whole-company value; else gross the check
+    up by the stake (investment / pct_acquired); else None. The pct gross-up happens
+    exactly once — the check is NOT also written to equity_value (avoids double-count).
+
+    Control: gross the stated equity_value up by pct_acquired (unchanged behaviour).
     """
+    pct = fv.get("pct_acquired")
+    if _event_type(fv) in _NON_CONTROL_TYPES:
+        pm = fv.get("post_money_valuation")
+        if pm and pm > 0:
+            return float(pm)
+        inv = _derive_investment_amount(fv)
+        if inv and pct and 0 < pct < 100:
+            return round(inv / (pct / 100.0), 2)
+        return None
+
     if equity_value is None or equity_value <= 0:
         return None
-    if pct_acquired and 0 < pct_acquired < 100:
-        return round(equity_value / (pct_acquired / 100.0), 2)
+    if pct and 0 < pct < 100:
+        return round(equity_value / (pct / 100.0), 2)
     return equity_value
 
 
@@ -881,14 +923,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             sec_shares = None
             net_debt = existing["net_debt"] if existing else None
             equity_value, equity_value_basis = _derive_equity_value(
-                field_values.get("value_amount"),
-                field_values.get("value_type"),
+                field_values,
                 field_values.get("per_share_price"),
                 sec_shares,
             )
-            implied_equity_value = _derive_implied_equity(
-                equity_value, field_values.get("pct_acquired")
-            )
+            implied_equity_value = _derive_implied_equity(field_values, equity_value)
+            investment_amount = _derive_investment_amount(field_values)
             enterprise_value, enterprise_value_basis = _derive_enterprise_value(
                 field_values.get("value_amount"),
                 field_values.get("value_type"),
@@ -928,9 +968,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     use_of_proceeds, has_board_seat, board_seat_notes,
                     is_current, aggregation_version, updated_at,
                     net_debt, equity_value, equity_value_basis,
-                    implied_equity_value, enterprise_value, enterprise_value_basis
+                    implied_equity_value, enterprise_value, enterprise_value_basis,
+                    investment_amount
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1029,6 +1070,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     implied_equity_value,
                     enterprise_value,
                     enterprise_value_basis,
+                    investment_amount,
                 ),
             )
 
