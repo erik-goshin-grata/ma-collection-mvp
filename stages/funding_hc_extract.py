@@ -282,11 +282,29 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
+                    # Explicit param tuple matching the 34-column list above.
+                    # (Do NOT reuse round_params here — that tuple is shaped for the
+                    # i==0 UPDATE SET clause and carries 2 extra fields, causing a
+                    # 36-vs-34 binding crash on multi-transaction funding sources. bug #6)
                     (
                         row["source_raw_id"], "HC_EXTRACTED",
                         v2_event_type, v2_event_type,
                         event_history_type, event_history_type,
-                    ) + round_params + (row["dt_prompt_version"], now, now),
+                        co.get("name"), co.get("domain"), co.get("ticker"), co.get("description"),
+                        rd.get("label"), rd.get("size"), rd.get("valuation_currency"),
+                        rd.get("pre_money_valuation"), rd.get("post_money_valuation"),
+                        rd.get("facility_size"), rd.get("total_raised_to_date"),
+                        1 if rd.get("is_extension_round") else 0,
+                        1 if rd.get("is_down_round") else 0,
+                        1 if rd.get("is_bridge_round") else 0,
+                        dt.get("announced_date"), dt.get("announced_date_precision"),
+                        dt.get("closed_date"), dt.get("closed_date_precision"),
+                        txn.get("financials_disclosure_status"), txn.get("consideration_type"),
+                        txn.get("model_confidence"), _VERSION,
+                        json.dumps(nd) if nd else None,
+                        row["dt_prompt_version"], i, multi_total,
+                        now, now,
+                    ),
                 )
                 new_eid = cur.lastrowid
 
