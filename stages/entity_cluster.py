@@ -13,8 +13,10 @@ Algorithm (per specs/entity_resolution.md):
      normalized names + earliest announced_date>.
   5. Update staging_extraction.transaction_cluster_id and status = CLUSTERED.
 
-Rows missing target_name or acquirer_name are left LC_EXTRACTED (unclustered).
-Rows with null announced_date become singletons (cannot match any other row).
+M&A rows missing target_name or acquirer_name are left LC_EXTRACTED (unclustered).
+Funding rows (VC_ROUND/VENTURE_DEBT/GROWTH_EQUITY) are recipient-centric: they match
+on target_name alone with soft conflict checks on round label/size/date (bug #5).
+Rows with null announced_date become singletons on the M&A path.
 
 Spec references: specs/entity_resolution.md, specs/pipeline.md §2 (Stage 8)
 """
@@ -113,6 +115,77 @@ def _make_cluster_id(all_norm_names: list[str], earliest_date: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Funding-path matching (bug #5)
+#
+# Funding rounds are recipient-centric: they have a target (the company raising)
+# but no acquirer — investors, not an acquirer. The M&A target+acquirer match
+# would strand them at LC_EXTRACTED forever. For funding rows we match on target
+# alone, then apply SOFT conflict checks (round label, round size, date): a check
+# only blocks a merge on a genuine *conflict*, never requires a field to be present.
+# Tunables are module-level — calibrated against data/pl_funding.db (see
+# docs/review_bug5_feedback.md), not picked blind.
+# ---------------------------------------------------------------------------
+
+FUNDING_TYPES = frozenset({"VC_ROUND", "VENTURE_DEBT", "GROWTH_EQUITY"})
+FUNDING_DATE_WINDOW_DAYS = 30          # same-round reports land within a few days; 0-day in fixture
+FUNDING_AMOUNT_TOLERANCE = 0.15        # $270.5M vs $312M (OLIX) = 13.3% is a legit same-round merge
+
+_SERIES_RE = re.compile(r"series\s*([a-k])", re.IGNORECASE)
+
+
+def _round_stage(label: str | None) -> str | None:
+    """Canonical base stage for a free-text round label, or None if undetermined.
+
+    'Series A' / 'Series A-1' / 'Series A Extension' all map to 'series_a'. Returns
+    None for unknown/empty labels so the caller treats them as compatible (soft).
+    """
+    if not label:
+        return None
+    l = label.lower()
+    m = _SERIES_RE.search(l)
+    if m:
+        return "series_" + m.group(1).lower()
+    if "pre-seed" in l or "pre seed" in l or "preseed" in l or "pre_seed" in l:
+        return "pre_seed"
+    if "seed" in l:
+        return "seed"
+    if "angel" in l:
+        return "angel"
+    return None
+
+
+def _label_compatible(a: str | None, b: str | None) -> bool:
+    """True unless two labels resolve to a genuinely different stage (soft check).
+
+    Null/unknown labels are compatible — Valar Atomics has a null-label row that must
+    still merge with its 'Series B' sibling.
+    """
+    sa, sb = _round_stage(a), _round_stage(b)
+    if sa is None or sb is None:
+        return True
+    return sa == sb
+
+
+def _funding_match(i: int, j: int, norm_t, labels, sizes, dates, precisions) -> bool:
+    """Recipient-centric match for two funding rows, with soft conflict checks."""
+    if fuzz.token_set_ratio(norm_t[i], norm_t[j]) < 90:
+        return False
+    # Date: only block on a real conflict, and only when BOTH dates are exact.
+    if precisions[i] == "exact" and precisions[j] == "exact" and dates[i] and dates[j]:
+        diff = _date_diff_days(dates[i], dates[j])
+        if diff is not None and diff > FUNDING_DATE_WINDOW_DAYS:
+            return False
+    # Round label: block only on an incompatible stage.
+    if not _label_compatible(labels[i], labels[j]):
+        return False
+    # Round size: block only when both present and beyond tolerance.
+    if sizes[i] and sizes[j]:
+        if abs(sizes[i] - sizes[j]) / max(sizes[i], sizes[j]) > FUNDING_AMOUNT_TOLERANCE:
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Stage entry point
 # ---------------------------------------------------------------------------
 
@@ -129,7 +202,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     rows = conn.execute(
         """
-        SELECT extraction_id, target_name, acquirer_name, announced_date
+        SELECT extraction_id, target_name, acquirer_name, announced_date,
+               v2_event_type, round_label, round_size, announced_date_precision
         FROM staging_extraction
         WHERE status = 'LC_EXTRACTED'
           AND transaction_cluster_id IS NULL
@@ -139,11 +213,19 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     total = len(rows)
     log.info("Stage 8: %d LC_EXTRACTED rows to cluster", total)
 
-    eligible = [r for r in rows if r["target_name"] and r["acquirer_name"]]
+    # Funding rows are eligible on target_name alone (no acquirer); M&A rows still
+    # need both target and acquirer. (bug #5)
+    def _eligible(r) -> bool:
+        if not r["target_name"]:
+            return False
+        return bool(r["acquirer_name"]) or (r["v2_event_type"] in FUNDING_TYPES)
+
+    eligible = [r for r in rows if _eligible(r)]
     skipped_count = total - len(eligible)
     if skipped_count:
         log.warning(
-            "%d rows skipped — null target_name or acquirer_name (left LC_EXTRACTED)",
+            "%d rows skipped — no target_name, or non-funding row missing acquirer_name "
+            "(left LC_EXTRACTED)",
             skipped_count,
         )
 
@@ -162,10 +244,30 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     norm_t = [_normalize(r["target_name"]) for r in eligible]
     norm_a = [_normalize(r["acquirer_name"]) for r in eligible]
     has_date = [bool(r["announced_date"]) for r in eligible]
+    is_funding = [r["v2_event_type"] in FUNDING_TYPES for r in eligible]
+    labels = [r["round_label"] for r in eligible]
+    sizes = [r["round_size"] for r in eligible]
+    dates = [r["announced_date"] for r in eligible]
+    precisions = [r["announced_date_precision"] for r in eligible]
 
     uf = _UF(n)
     for i in range(n):
         for j in range(i + 1, n):
+            # Funding path (bug #5): recipient-centric, soft conflict checks.
+            if is_funding[i] and is_funding[j]:
+                if _funding_match(i, j, norm_t, labels, sizes, dates, precisions):
+                    uf.union(i, j)
+                    log.info(
+                        "Matched funding eid=%d (%r, %s)  eid=%d (%r, %s)",
+                        eligible[i]["extraction_id"], norm_t[i], labels[i],
+                        eligible[j]["extraction_id"], norm_t[j], labels[j],
+                    )
+                continue
+            # Cross-path (one funding, one M&A): never merge.
+            if is_funding[i] or is_funding[j]:
+                continue
+
+            # M&A path (unchanged): require target AND acquirer.
             t_match = fuzz.token_set_ratio(norm_t[i], norm_t[j]) >= 90
             a_match = fuzz.token_set_ratio(norm_a[i], norm_a[j]) >= 90
             if not (t_match and a_match):
