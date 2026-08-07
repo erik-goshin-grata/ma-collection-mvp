@@ -114,7 +114,7 @@ Precision is not the goal — enum discipline is. The reason_code is for categor
 
 RESPONSE FORMAT
 
-Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 21 enum values listed above — no exceptions.
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 23 enum values listed above — no exceptions.
 
 {
   "classification": "RELEVANT",
@@ -164,6 +164,9 @@ Classify this release.
 | `notes` | string or null | Brief explanation if notable |
 | `prompt_version` | string | Set by caller, returned unchanged |
 
+<!-- REASON_CODES_START — authoritative reason_code enum. tests/test_reason_code_parity.py
+     parses this block; every code here must be covered by stages/relevancy_filter.py
+     _VALID_REASON_CODES (directly or as an alias target). Keep the two in sync. -->
 **`reason_code` values (RELEVANT side):**
 - `ACQUISITION_ANNOUNCEMENT`
 - `MERGER_ANNOUNCEMENT`
@@ -190,6 +193,7 @@ Classify this release.
 - `RUMOR_OR_SPECULATION`
 - `IPO_OR_DIRECT_LISTING`
 - `OTHER_NOT_RELEVANT`
+<!-- REASON_CODES_END -->
 
 ---
 

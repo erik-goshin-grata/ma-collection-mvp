@@ -52,6 +52,7 @@ _VALID_REASON_CODES = frozenset({
     "SPIN_OFF_OR_SPLIT", "TAKE_PRIVATE", "REVERSE_MERGER", "JOINT_VENTURE",
     "MINORITY_INVESTMENT", "DEAL_CLOSE_OR_COMPLETION", "DEAL_AMENDMENT_OR_TERMINATION",
     "AMBIGUOUS_BUT_LIKELY_DEAL",
+    "VC_ROUND_OR_FUNDING", "RECAPITALIZATION",  # bug #7 — prompt 0.5 emits these
     # NOT_RELEVANT side
     "PRODUCT_OR_COMMERCIAL", "PERSONNEL", "EARNINGS_OR_FINANCIAL_REPORTING",
     "BUYBACK_OR_DIVIDEND", "DEBT_OR_NON_DEAL_FINANCING", "REGULATORY_OR_COMPLIANCE",
@@ -82,6 +83,18 @@ _REASON_CODE_ALIASES = {
     "TERMINATED": "DEAL_AMENDMENT_OR_TERMINATION",
     "AMENDMENT": "DEAL_AMENDMENT_OR_TERMINATION",
     "ASSET_PURCHASE": "ACQUISITION_ANNOUNCEMENT",
+    # Funding synonyms (bug #7). Prompt 0.5 canon is VC_ROUND_OR_FUNDING; these are
+    # short/round-stage variants the model may emit. The SERIES_* prefix is handled
+    # in _normalize_reason_code (can't enumerate every letter here).
+    "FUNDING": "VC_ROUND_OR_FUNDING",
+    "VC_ROUND": "VC_ROUND_OR_FUNDING",
+    "SEED": "VC_ROUND_OR_FUNDING",
+    "PRE_SEED": "VC_ROUND_OR_FUNDING",
+    "ANGEL": "VC_ROUND_OR_FUNDING",
+    "GROWTH_EQUITY": "VC_ROUND_OR_FUNDING",
+    "RECAP": "RECAPITALIZATION",
+    "DIVIDEND_RECAP": "RECAPITALIZATION",
+    "DIVIDEND_RECAPITALIZATION": "RECAPITALIZATION",
 }
 
 
@@ -97,6 +110,9 @@ def _normalize_reason_code(reason_code, classification: str) -> str:
         return rc
     if rc in _REASON_CODE_ALIASES:
         return _REASON_CODE_ALIASES[rc]
+    # Round-stage labels (SERIES_A … SERIES_N, SERIES_A1, …) → funding (bug #7).
+    if classification == "RELEVANT" and rc.startswith("SERIES_"):
+        return "VC_ROUND_OR_FUNDING"
     if f"{rc}_ANNOUNCEMENT" in _VALID_REASON_CODES:
         return f"{rc}_ANNOUNCEMENT"
     return "AMBIGUOUS_BUT_LIKELY_DEAL" if classification == "RELEVANT" else "OTHER_NOT_RELEVANT"
