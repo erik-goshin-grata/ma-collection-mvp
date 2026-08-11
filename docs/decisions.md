@@ -314,20 +314,38 @@ Status: accepted.
 
 Decision:
 
-- `transaction_value` = `equity_value` + gross debt where the transaction conveys control.
-  Cash is not netted.
-- Below control, `transaction_value` = `equity_value`. No debt is added.
-- Exception: where the source states debt was assumed or refinanced as part of the
-  transaction, add the stated amount. This must come from deal terms, not from the balance
-  sheet.
+- `transaction_value` is populated as-reported wherever a source states one.
+- Where it is calculated:
+  - `pct_acquired` < 50 → `transaction_value` = `equity_value`. No debt is added.
+  - `pct_acquired` ≥ 50 → `transaction_value` = `equity_value` + gross debt.
+  - `pct_acquired` ≥ 50 with debt unknown and nothing stated → null. Do not assume
+    debt = 0.
+- Cash is never netted. `transaction_value` − cash = `implied_enterprise_value`.
+- **The test is `pct_acquired ≥ 50`.** A control-crossing test using pre- and
+  post-transaction ownership was considered and rejected — see below.
+- No `implied_transaction_value` field. A grossed-up, 100%-basis transaction value was
+  considered and rejected.
 
 Context:
 
-- This mirrors consolidation. A controlling acquirer consolidates the target's balance
-  sheet and effectively takes on its debt. A minority buyer takes on none of it;
-  equity-method treatment consolidates nothing.
-- The accounting standards already draw this line — a step-up to control is a business
-  combination, a buyout of remaining minority is an equity transaction.
+- Below control no debt transfers: a minority buyer takes on none of it, and equity-method
+  treatment consolidates nothing. `transaction_value` = `equity_value` there is a statement
+  about the transaction, not a claim that the company is debt-free.
+- At or above control the acquirer consolidates the target's balance sheet and effectively
+  takes on its debt, so adding gross debt records something that happened.
+- **The simple threshold is wrong in one case and right in four.** A step-up from a
+  minority position into control — 30% to 60%, `pct_acquired` = 30 — reads as below
+  control and adds no debt, when it should. Buying from an existing minority position
+  into control is uncommon, and the failure understates rather than inflates.
+- The alternative, a control-crossing test, requires extracting pre-transaction ownership,
+  which sources state far less often than they state the stake acquired. It also requires
+  a derived control-flag family. The accuracy gain did not justify a new extraction
+  primitive and a flag set with no other consumer.
+- **The 50–99% band mixes partial equity with full debt**, which is the market convention
+  (CIQ Total Transaction Value) rather than an oversight. Grossing up in that band would
+  produce a 100%-basis figure — effectively an implied transaction value — which was
+  rejected as a field nobody asked for and which duplicates implied enterprise value up to
+  cash.
 
 Consequences:
 
@@ -338,6 +356,12 @@ Consequences:
   it keeps `transaction_size` populated without a special case.
 - The reconciliation identity `transaction_value - cash = implied_enterprise_value` holds
   for control deals only.
+- Requires no extraction primitive beyond `pct_acquired`, which already exists. Neither
+  pre-transaction ownership nor a derived control-flag family is needed for the value
+  model. Those may still be built for comps segmentation and filtering, on their own
+  merits.
+- `pct_acquired` must be stamped alongside `transaction_value` wherever it is displayed,
+  so that partiality in the 50–99% band is legible rather than hidden.
 
 ## 2026-08-10 - Transaction Size as Universal Magnitude
 

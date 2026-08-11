@@ -51,39 +51,48 @@ What actually changed hands. Deal-specific. **Never a multiple numerator.**
 | Field | Definition | Scope |
 |---|---|---|
 | `equity_value` | Consideration for the stake acquired, at the stake level. Not grossed up. | M&A |
-| `transaction_value` | `equity_value` + gross debt **where the transaction conveys control**. Cash is not netted. Below control, = `equity_value`. See §2.1.1. | M&A |
+| `transaction_value` | As-reported where stated. Otherwise `equity_value` + gross debt at `pct_acquired` ≥ 50, `equity_value` below it. Cash never netted. See §2.1.1. | M&A |
 | `transaction_size` | Universal event magnitude across all deal types. See §2.4. | All deals |
 
 #### 2.1.1 Debt follows control
 
+`transaction_value` is recorded as-reported wherever a source states one. Where it is
+calculated:
+
 | Condition | `transaction_value` |
 |---|---|
-| Control obtained by this transaction | `equity_value` + gross debt |
-| Below control, or control already held | `equity_value` |
-| Below control, source states debt assumed or refinanced in the transaction | `equity_value` + stated assumed debt |
+| `pct_acquired` < 50 | `equity_value` — no debt added |
+| `pct_acquired` ≥ 50 | `equity_value` + gross debt |
+| `pct_acquired` ≥ 50, debt unknown, nothing stated | null |
+
+Cash is never netted.
 
 **Rationale — TV mirrors consolidation.** A controlling acquirer consolidates the target's
 balance sheet and effectively takes on its debt, so adding gross debt records something that
 happened. A minority buyer takes on none of it; equity-method treatment consolidates nothing.
-Adding full gross debt to a partial stake describes a transfer that did not occur.
 
-The accounting standards draw the same line: a step-up to control is a business combination;
-a buyout of remaining minority is an equity transaction.
+Below control, `transaction_value` = `equity_value` is a statement about the *transaction* —
+no debt transferred — not a claim that the company is debt-free. Above control with debt
+unknown, the field goes null rather than assuming debt = 0.
 
-**The control test is not `pct_acquired ≥ 50`.** A holder at 50.1% acquiring the remaining
-49.9% obtains no control and consolidates nothing new. The test is whether *this transaction*
-causes the acquirer to newly obtain control — see the M&A features in `decisions.md`
-(`is_minority`, `pre_existing_control`, `acquires_remaining`).
+**The threshold is deliberately simple, and wrong in one case.** A step-up from a minority
+position into control — 30% to 60%, so `pct_acquired` = 30 — reads as below control and adds
+no debt when it should. That case is uncommon and the failure understates rather than
+inflates. The alternative is a control-crossing test requiring pre-transaction ownership,
+which sources state far less often than the stake acquired, plus a derived flag family with
+no other consumer in this model.
 
-Debt in the third row must come from stated deal terms, not from pulling `TOTAL_DEBT` off the
-balance sheet because the company carries some.
+**The 50–99% band mixes partial equity with full debt.** At 60%, the calculation adds the
+whole company's debt to 60% of its equity. This is the market convention — CIQ's Total
+Transaction Value does the same — and is accepted here rather than corrected, because
+grossing up in that band would produce a 100%-basis figure duplicating
+`implied_enterprise_value` up to cash. `pct_acquired` must be stamped alongside
+`transaction_value` wherever it is displayed so the partiality is visible.
 
-**Consequence:** `transaction_value` = `equity_value` for minority deals. Redundant but
-honest, and it keeps `transaction_size` populated without a special case.
+`transaction_value` is never a multiple numerator, so the convention does not propagate.
 
-**Migration note:** this redefines an existing field. The prior rule added total debt
-unconditionally, so previously computed rows for partial stakes change value. See §4.2 and
-`decisions.md`.
+**Migration note:** this changes an existing field. The prior rule added total debt
+unconditionally, so previously computed rows below 50% change value. See §4.2.
 
 #### Tier 2 — 100% basis
 
@@ -345,7 +354,7 @@ is 250 — it adds gross debt and does not net cash. 240 is the enterprise value
 | Field | Value |
 |---|---|
 | `transaction_size` | 600 |
-| `transaction_value` | 600 (below control — no debt added) |
+| `transaction_value` | 600 (below the threshold — no debt added) |
 | `equity_value` | 600 |
 | `implied_equity_value` | ≈ 2,220, basis `GROSSED_UP` |
 
@@ -394,12 +403,16 @@ total debt.
 | `equity_value` | 164,597 — stake level, not grossed up |
 | `implied_equity_value` | 329,853 (164,597 ÷ 0.499), basis `GROSSED_UP` |
 | `implied_enterprise_value` | 322,377, `as_reported` |
-| `transaction_value` | 164,597 — CCU already held 50.1%, so no debt attaches |
+| `transaction_value` | 164,597 — `pct_acquired` 49.9 < 50, so no debt is added |
 | `transaction_size` | 164,597 |
 
 The two stated figures reconcile: 329,853 − 322,377 = **7,477 of net cash**, which follows
-from the cash-free/debt-free basis. This is also the case that shows `pct_acquired` alone is
-the wrong control test — 49.9% acquired, no control obtained, because it was already held.
+from the cash-free/debt-free basis.
+
+CCU also illustrates why the simple threshold is tolerable. A control-crossing test would say
+no debt attaches because CCU already held 50.1%; the threshold says no debt attaches because
+49.9 < 50. Same answer, different reason. The two diverge only on a step-up from a minority
+position into control — see §2.1.1.
 
 ---
 
@@ -585,7 +598,8 @@ derived valuation fields are latent, because nothing downstream consumes them ye
 |---|---|
 | `value_amount`, `value_currency`, `value_type`, `per_share_price`, `pct_acquired` | LLM-extracted (primitives) |
 | `round.size`, `round.pre_money_valuation`, `round.post_money_valuation`, `round.currency` | LLM-extracted (funding primitives) |
-| `equity_value` (stake-level), `implied_equity_value`, **`implied_enterprise_value`**, `transaction_value`, `transaction_size` | **Computed** in `aggregate.py`, each with a `_method` and `_basis` flag |
+| `equity_value` (stake-level), `implied_equity_value`, **`implied_enterprise_value`**, `transaction_size` | **Computed** in `aggregate.py`, each with a `_method` and `_basis` flag |
+| `transaction_value` | **Both** — as-reported when a source states one, otherwise computed per §2.1.1 |
 | `net_debt` (or `debt` + `cash`) | **Manual** researcher input, preserved across re-aggregation |
 
 The LLM never does arithmetic (locked decision, QA runbook). All aggregates are deterministic
