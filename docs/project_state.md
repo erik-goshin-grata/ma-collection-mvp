@@ -1,6 +1,6 @@
 # Project State
-**Updated:** 2026-07-28
-**Last commit:** `2f05aa6`
+**Updated:** 2026-08-10
+**Last commit:** `fab6643`
 **Branch:** `main`
 
 ---
@@ -122,9 +122,10 @@ permanently mixed column, which is exactly what "re-aggregate, don't stamp" avoi
 1. **After §4.2:** re-aggregate the affected clusters once (both changes together — never
    between them). Route through `run.py` (or call `init_db()` first) so `_apply_migrations`
    adds the new columns before writing; assert the columns are present before running.
-2. **After total_debt + cash extraction (the next piece):** re-aggregate again to populate
+2. **After total_debt + Cash_ST extraction (the next piece):** re-aggregate again to populate
    the transaction_value total-debt branch (dormant until then) and derive net_debt from
-   total debt − cash.
+   `total_debt − Cash_ST` (cash is defined as `Cash_ST` — see decisions.md "Debt and Cash
+   Inputs").
 
 Expect **unattributable diffs** from re-aggregation: the DB holds several historical
 derivation semantics (aggregation has always been incremental), not just the two §4.2
