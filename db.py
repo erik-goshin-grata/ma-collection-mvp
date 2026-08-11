@@ -362,6 +362,13 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # (equity_value/implied_equity_value/enterprise_value/investment_amount) are
         # expressed in. NOT converted to USD; downstream must not assume USD.
         ("deal_value_currency",              "TEXT"),
+        # §4.2 — Tier-1 transaction_value (control-conditional) + its basis; total_debt
+        # (gross debt; manual interim input like net_debt, an extracted metric later),
+        # preserved across re-aggregation; pct_acquired_source stamps the §2.6 default.
+        ("total_debt",                       "REAL"),
+        ("transaction_value",                "REAL"),
+        ("transaction_value_basis",          "TEXT"),
+        ("pct_acquired_source",              "TEXT"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")

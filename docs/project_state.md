@@ -109,3 +109,28 @@ Key config flags:
 4. Write `stages/funding_lc_extract.py`
 5. Write `deal_summary` v0.10 funding framing block
 6. Apply `AGGREGATION_READ_SOURCE=observation` after successful validation run
+
+## Pending re-aggregation — §4.2 (2026-08-10)
+
+§4.2 landed as CODE only (equity_value now stake-level; transaction_value threshold;
++ total_debt / transaction_value / transaction_value_basis / pct_acquired_source columns).
+Aggregation is **incremental** (only CLUSTERED rows are derived; existing AGGREGATED rows
+keep old semantics), so a normal run does NOT re-derive existing rows. **Two deliberate
+re-aggregations are owed — track here, not just in conversation; forgetting leaves a
+permanently mixed column, which is exactly what "re-aggregate, don't stamp" avoids:**
+
+1. **After §4.2:** re-aggregate the affected clusters once (both changes together — never
+   between them). Route through `run.py` (or call `init_db()` first) so `_apply_migrations`
+   adds the new columns before writing; assert the columns are present before running.
+2. **After total_debt + cash extraction (the next piece):** re-aggregate again to populate
+   the transaction_value gross-debt branch (dormant until then) and derive net_debt from
+   gross − cash.
+
+Expect **unattributable diffs** from re-aggregation: the DB holds several historical
+derivation semantics (aggregation has always been incremental), not just the two §4.2
+creates. Diffs that don't trace to §4.2 are expected, not regressions.
+
+Also open (surfaced during §4.2, NOT fixed here): `001_initial.sql` is missing columns the
+aggregate INSERT writes (e.g. `v2_event_type`) that are in neither the CREATE nor the db.py
+migration list — deeper pre-existing CREATE/reality drift than the derived-valuation columns
+§4.2 folded in. A stronger parity test (INSERT columns ⊆ CREATE) would catch it; deferred.

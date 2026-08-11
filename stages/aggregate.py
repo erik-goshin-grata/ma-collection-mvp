@@ -49,6 +49,12 @@ _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
 # check/round size, NOT the company's equity value. (bug #8)
 _NON_CONTROL_TYPES = _FUNDING_EVENT_TYPES | frozenset({"MINORITY_INVESTMENT"})
 
+# §2.6 — event types that convey whole-company control, so a silent pct_acquired
+# defaults to 100 (assumed). Inherently-partial types (minority / growth / VC /
+# venture-debt, recap, spin/split, JV) never inherit the default; there, silence
+# means unknown, and defaulting would convert a minority stake into a whole-company buy.
+_CONTROL_DEFAULT_TYPES = frozenset({"ACQUISITION", "MERGER"})
+
 # Fields aggregated into transaction_record.
 # Each entry: (field_name, field_type)
 _FIELDS = [
@@ -380,27 +386,67 @@ def _derive_deal_value_currency(
     return vc or cc
 
 
+def _resolve_pct_acquired(fv: dict) -> tuple[float | None, str | None]:
+    """§2.6 — resolve pct_acquired for threshold and gross-up use.
+
+    A stated value is used as-is (source 'stated'). A null on a control event type
+    defaults to 100 ('assumed'). A null on an inherently-partial type stays None
+    (unknown), so the default never converts a minority stake into a whole-company buy.
+    Returns (pct, source).
+    """
+    pct = fv.get("pct_acquired")
+    if pct is not None:
+        return float(pct), "stated"
+    if _event_type(fv) in _CONTROL_DEFAULT_TYPES:
+        return 100.0, "assumed"
+    return None, None
+
+
+def _derive_transaction_value(
+    fv: dict,
+    equity_value: float | None,
+    total_debt: float | None,
+    pct: float | None,
+) -> tuple[float | None, str | None]:
+    """Tier-1 transaction value + basis (§2.1.1). As-reported wins; otherwise
+    equity_value below control, equity_value + gross debt (total_debt) at pct>=50.
+    Cash is never netted. `pct` must already be §2.6-resolved by the caller.
+
+      STATED                 — source stated a TRANSACTION_VALUE.
+      EQUITY_BELOW_CONTROL   — pct < 50; equity_value, no debt.
+      EQUITY_PLUS_GROSS_DEBT — pct >= 50 and total_debt known.
+
+    Returns (None, None) at pct>=50 with total_debt unknown (do not assume debt=0),
+    when pct is unknown, or when there is no equity to base on. The gross-debt branch
+    is dormant until total_debt is populated (extraction is a later piece).
+    """
+    value_amount = fv.get("value_amount")
+    if fv.get("value_type") == "TRANSACTION_VALUE" and value_amount and value_amount > 0:
+        return float(value_amount), "STATED"
+    if equity_value is None or pct is None:
+        return None, None
+    if pct < 50:
+        return equity_value, "EQUITY_BELOW_CONTROL"
+    if total_debt is not None:
+        return round(equity_value + total_debt, 2), "EQUITY_PLUS_GROSS_DEBT"
+    return None, None
+
+
 def _derive_equity_value(
     fv: dict,
     per_share_price: float | None,
     sec_shares: float | None,
 ) -> tuple[float | None, str | None]:
-    """Canonical company equity value + basis. The model captures primitives; this derives.
+    """Stake-level equity value + basis — the consideration for the stake actually
+    acquired, never grossed up, uniform across control and non-control (§4.2).
 
-    Non-control investments (VC/growth/venture-debt/minority): equity value is the
-    company's, NOT the check. Only a directly stated post-money valuation counts;
-    otherwise None. The invested amount lives in investment_amount, never here (bug #8).
-
-    Control deals (acquisition/merger/take-private/etc.) — unchanged:
       STATED             — source stated an equity figure (value_type=EQUITY_VALUE).
       PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count.
-    """
-    if _event_type(fv) in _NON_CONTROL_TYPES:
-        pm = fv.get("post_money_valuation")
-        if pm and pm > 0:
-            return float(pm), "STATED_POST_MONEY"
-        return None, None
 
+    Post-money is NOT equity value: it belongs in post_money_valuation (and the
+    implied tier via _derive_implied_equity), never here. A primary-capital raise has
+    null value fields, so it yields None here and lives in investment_amount (bug #8).
+    """
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "EQUITY_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
@@ -938,16 +984,19 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Check for existing transaction_record to determine version and to
             # preserve the manual net_debt input across re-aggregation.
             existing = conn.execute(
-                "SELECT aggregation_version, net_debt FROM transaction_record WHERE transaction_id=?",
+                "SELECT aggregation_version, net_debt, total_debt FROM transaction_record WHERE transaction_id=?",
                 (cluster_id,),
             ).fetchone()
             agg_version = (existing["aggregation_version"] + 1) if existing else 1
 
             # Derive valuations (the deterministic job — LLM captured primitives only).
             # sec_shares comes from SEC enrichment once it runs; None on PR-only data.
-            # net_debt is a manual collection input in the interim; keep any stored value.
+            # net_debt and total_debt are manual collection inputs in the interim
+            # (total_debt extraction is a later piece); keep any stored value.
             sec_shares = None
             net_debt = existing["net_debt"] if existing else None
+            total_debt = existing["total_debt"] if existing else None
+            pct_resolved, pct_acquired_source = _resolve_pct_acquired(field_values)
             equity_value, equity_value_basis = _derive_equity_value(
                 field_values,
                 field_values.get("per_share_price"),
@@ -955,6 +1004,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             )
             implied_equity_value = _derive_implied_equity(field_values, equity_value)
             investment_amount = _derive_investment_amount(field_values)
+            transaction_value, transaction_value_basis = _derive_transaction_value(
+                field_values, equity_value, total_debt, pct_resolved
+            )
             # Currency companion for the derived value fields; null on a genuine
             # currency mismatch (§4.7 — the null is itself the queryable signal).
             deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
@@ -998,9 +1050,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     is_current, aggregation_version, updated_at,
                     net_debt, equity_value, equity_value_basis,
                     implied_equity_value, enterprise_value, enterprise_value_basis,
-                    investment_amount, deal_value_currency
+                    investment_amount, deal_value_currency,
+                    total_debt, transaction_value, transaction_value_basis, pct_acquired_source
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1041,7 +1094,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("value_currency"),
                     field_values.get("value_type"),
                     field_values.get("per_share_price"),
-                    field_values.get("pct_acquired"),
+                    pct_resolved,  # §2.6-resolved: 100 (assumed) for control types when silent
                     field_values.get("target_revenue"),
                     field_values.get("target_revenue_period_type"),
                     field_values.get("target_revenue_period_type_v2"),
@@ -1101,6 +1154,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     enterprise_value_basis,
                     investment_amount,
                     deal_value_currency,
+                    total_debt,
+                    transaction_value,
+                    transaction_value_basis,
+                    pct_acquired_source,
                 ),
             )
 

@@ -96,6 +96,19 @@ documented in §2.1.1.
 
 ---
 
+## Prerequisite — migrate before re-aggregating
+
+Route the re-aggregation through `run.py`, or call `init_db()` first. A bare
+`get_connection` skips `_apply_migrations`, and the derived valuation columns are drifted
+across DBs (most at 2–3 of 4). `run.py:236` runs `init_db()` → `_apply_migrations` before any
+stage, so the ALTER-ADD covers all derived columns before aggregation writes. **Assert the
+columns are present before running, not after.**
+
+Aggregation is **incremental** (`_load_staging_input` selects `WHERE status='CLUSTERED'`;
+members become `AGGREGATED`), so a normal run does **not** re-derive existing rows — the joint
+re-aggregation is a deliberate act (reset the affected clusters to `CLUSTERED`, or use a rerun
+mode), not something the next ordinary run performs.
+
 ## Change 3 — Joint re-aggregation
 
 **Decided: re-aggregate. Do not stamp.**
