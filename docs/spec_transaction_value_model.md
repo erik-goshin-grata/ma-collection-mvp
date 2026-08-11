@@ -24,8 +24,11 @@ review sheets:
 - **100%-basis values** — whole-company valuation, normalized for comparison.
 
 The immediate trigger: audit of `exports/ML_worksheet.csv` and the bug-8 handoff confirmed
-that funding and minority **check sizes are being recorded as the company's equity value**,
-and that stated valuations such as post-money risk being promoted into the deal-value field.
+that funding and minority **check sizes are being labelled as the company's equity value at
+extraction** — `value_type = EQUITY_VALUE` on the raise — and exported verbatim. The derived
+`equity_value` column is unaffected; the defect is in the extracted label and what reaches the
+review sheets. Stated valuations such as post-money also risk being promoted into the
+deal-value field.
 
 **Note on an earlier framing.** The prior version of this spec equated Transaction Value with
 deal size, and treated implied equity value as a universal cross-deal comparable. Both were
@@ -462,6 +465,12 @@ rounds, not a few.
 carries a stated post-money; M&A carries implied equity; the two are not placed in a common
 column.
 
+**Two mechanisms enforce this, both already true.** `_compute_multiples()` skips calculation
+outright when the event type is `VC_ROUND`, `GROWTH_EQUITY` or `VENTURE_DEBT`
+`[verified: stages/aggregate.py:288–290, 2026-08-10]`, independently of whether a numerator is
+populated. Documented here so the gate is not removed later on the reasoning that the model
+constraint covers it. Both should stand.
+
 ---
 
 ## 3. The bridge
@@ -552,6 +561,22 @@ derived valuation fields are latent, because nothing downstream consumes them ye
    `UNKNOWN`) already exists in `high_confidence_extraction.md`, so the separate disclosure
    axis proposed in QA runbook finding #7 is partly built.
 
+9. **The value object is a single slot. — LIVE.**
+   `prompts/high_confidence_extraction.md` carries one `value.amount` and one `value.type`
+   `[verified: 2026-08-10]`. Where a source states more than one figure — an equity value and
+   an enterprise value, say — the model picks one and the rest is dropped, with nothing
+   recording that a choice was made.
+
+   Live for the same reason as gap 1: `value_amount` and `value_type` export.
+
+   **Fix:** named as-reported fields per value type, matching the shape
+   `prompts/funding_hc_extraction.md` already uses for funding primitives. See
+   `docs/decisions.md`, "Named Value Fields Replace the Single Value Slot."
+
+   This is the mechanism behind gap 1 rather than a separate defect — a single slot forces
+   the model to classify rather than record. Gap 1 stops the worst mislabel; this removes the
+   thing that produces it.
+
 ---
 
 ## 5. Extracted vs computed vs manual (target state)
@@ -584,6 +609,11 @@ derivations.
   normalization is visible rather than implied.
 
 Type and basis stamps are retained throughout. No collapse to a single scalar.
+
+**Resolved at the aggregation layer only.** Extraction still carries a single `value` slot,
+so a source stating multiple figures still forces a choice at capture time. The tier split
+governs how captured values are derived and presented; it does not remove the single-slot
+constraint upstream of it. See §4 gap 9.
 
 ---
 

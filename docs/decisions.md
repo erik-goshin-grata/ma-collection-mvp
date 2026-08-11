@@ -523,3 +523,52 @@ Consequences:
 - Blocks the `equity_value` path-consistency fix from merging.
 - Whichever option is chosen should be applied consistently with the transaction-value
   redefinition, since both alter stored meaning for partial-stake deals.
+
+## 2026-08-10 - Named Value Fields Replace the Single Value Slot
+
+Status: accepted in principle; migration unscheduled.
+
+Decision:
+
+- Replace the single `value.amount` + `value.type` pair in
+  `prompts/high_confidence_extraction.md` with named as-reported fields, one per value
+  type: `equity_value_as_reported`, `transaction_value_as_reported`,
+  `enterprise_value_as_reported`. `per_share_price` is already separate and unchanged.
+- Populate every field the source states. No inference and no arithmetic.
+- An unqualified figure — "acquired for $500MM", no basis given — continues to route to
+  `transaction_value_as_reported` with low type confidence, preserving today's default.
+- `UNDISCLOSED` is not a value field. It routes to `financials_disclosure_status`, which
+  already exists in the same prompt.
+
+Context:
+
+- The `value` object is a single slot. Where a source states more than one figure — common
+  in larger announcements, e.g. "$45.00 per share, representing an equity value of
+  approximately $2.1 billion and an enterprise value of approximately $2.4 billion" — the
+  model must pick one and the rest is dropped, with nothing recording that a choice was
+  made.
+- The single slot also forces the model to *classify* rather than to *record*, which is the
+  mechanism behind the check-recorded-as-equity-value defect. That defect is a symptom of
+  this shape, not an independent bug.
+- `prompts/funding_hc_extraction.md` already does this correctly — `round.size`,
+  `round.pre_money_valuation`, `round.post_money_valuation` and `facility_size` are separate
+  named fields, so a source stating several loses none. The M&A path is the outlier.
+- The V2 model already specifies `*_as_reported` columns per value type, so this is a
+  planned migration pulled forward to the extraction layer rather than a new design.
+
+Consequences:
+
+- Blast radius beyond the prompt: the parser, the staging columns, the aggregation read, and
+  the low-confidence input template. Aggregation currently routes by `value_type`; with
+  named fields there is nothing to route, which simplifies that read.
+- `low_confidence_extraction` consumes HC's value and does not produce one, so no LC
+  extraction logic changes — only its input template. With named fields there is no single
+  "deal value" to pass, so what LC receives becomes an explicit decision rather than a
+  template default.
+- Existing rows migrate mechanically: each `value_amount` / `value_type` pair maps to the
+  matching named column.
+- **Figures already dropped by the single slot are unrecoverable** without re-extraction.
+  Not in scope; note it if a backfill is ever scoped.
+- Open sub-decision: whether `currency`, `qualifier` and `type_confidence` become per-field
+  or stay shared. Per-field is more correct where a source mixes currencies; shared is
+  simpler. Not decided.
