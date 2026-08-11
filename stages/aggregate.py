@@ -354,6 +354,32 @@ def _derive_investment_amount(fv: dict) -> float | None:
     return float(amt) if amt and amt > 0 else None
 
 
+def _derive_deal_value_currency(
+    fv: dict, log: Any = None, cluster_id: str | None = None
+) -> str | None:
+    """Currency companion for the derived value fields (tag-and-defer; no USD
+    conversion). Precedence: valuation_currency (post-money-based funding values),
+    then value_currency (control-deal values).
+
+    On a genuine mismatch — both present and differing, e.g. a cross-border round
+    with a USD check and a EUR post-money — return None rather than guess. The null
+    is itself the queryable mismatch signal: a row with derived values populated but
+    deal_value_currency null is detectable in SQL, so no flag column is needed. The
+    log warning is a run-time convenience only.
+    """
+    vc = fv.get("valuation_currency")
+    cc = fv.get("value_currency")
+    if vc and cc and vc != cc:
+        if log is not None:
+            log.warning(
+                "cluster_id=%s currency mismatch valuation_currency=%s value_currency=%s "
+                "— deal_value_currency set null",
+                cluster_id, vc, cc,
+            )
+        return None
+    return vc or cc
+
+
 def _derive_equity_value(
     fv: dict,
     per_share_price: float | None,
@@ -929,6 +955,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             )
             implied_equity_value = _derive_implied_equity(field_values, equity_value)
             investment_amount = _derive_investment_amount(field_values)
+            # Currency companion for the derived value fields; null on a genuine
+            # currency mismatch (§4.7 — the null is itself the queryable signal).
+            deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
             enterprise_value, enterprise_value_basis = _derive_enterprise_value(
                 field_values.get("value_amount"),
                 field_values.get("value_type"),
@@ -969,9 +998,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     is_current, aggregation_version, updated_at,
                     net_debt, equity_value, equity_value_basis,
                     implied_equity_value, enterprise_value, enterprise_value_basis,
-                    investment_amount
+                    investment_amount, deal_value_currency
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1071,6 +1100,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     enterprise_value,
                     enterprise_value_basis,
                     investment_amount,
+                    deal_value_currency,
                 ),
             )
 

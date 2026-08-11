@@ -596,3 +596,41 @@ Consequences:
 - Open sub-decision: whether `currency`, `qualifier` and `type_confidence` become per-field
   or stay shared. Per-field is more correct where a source mixes currencies; shared is
   simpler. Not decided.
+
+## 2026-08-10 - deal_value_currency: single currency tag on derived values
+
+Status: accepted.
+
+Decision:
+
+- Derived value fields (`equity_value`, `implied_equity_value`, `enterprise_value`,
+  `investment_amount`) carry a single `deal_value_currency` on `transaction_record`,
+  not per-field `*_currency` columns. Tag-and-defer: attach the currency, never
+  assume USD, do not convert.
+- Precedence: `valuation_currency` (post-money-based funding values) then
+  `value_currency` (control-deal values).
+- Mismatch guard: when both `valuation_currency` and `value_currency` are present
+  and differ, `deal_value_currency` is null. The precedence is a fixed rule, not a
+  provenance lookup, so on a cross-border record (USD check + EUR post-money) it
+  would otherwise mislabel; null refuses to guess.
+
+Context:
+
+- **The null is itself the queryable signal.** A row with a derived value populated
+  and `deal_value_currency` null (with a currency actually present) is the mismatch
+  set, detectable in SQL — no flag column, and no dependence on the run log, is
+  needed. The logged warning is a run-time convenience only. Do not add a
+  review/flag column to "fix" this; the data already carries the state.
+- Single tag over per-field: per-field currencies matter mainly for
+  `implied_enterprise_value`, which adds two potentially different currencies, and
+  that is parked on the §2.10 currency question. Building per-field before that
+  resolves means building it twice. The `_basis` flags keep provenance-following
+  available later without re-architecting.
+
+Consequences:
+
+- Closes spec gap 7 (computed-but-not-inserted); the value is now persisted.
+- Per-field `*_currency` columns deferred, revisited with the §2.10
+  currency-normalization / FX work.
+- Test: `scripts/test_deal_value_currency.py` — non-null where a currency is present
+  and does not conflict; null on conflict (the second assertion proves the guard).

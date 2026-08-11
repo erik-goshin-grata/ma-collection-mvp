@@ -565,8 +565,12 @@ derived valuation fields are latent, because nothing downstream consumes them ye
    surface them — but note this is the change that converts gaps 2 and 3 from latent to live,
    so it must follow them, not precede them.
 
-7. **`deal_value_currency` computed but never inserted.** Calculated in aggregation but
-   missing from the INSERT column list. **Fix:** add to INSERT, or remove.
+7. **`deal_value_currency` — RESOLVED (§4.7).** Now computed with a mismatch guard and
+   persisted in the INSERT. A single currency tag on the derived value fields (precedence
+   `valuation_currency` → `value_currency`); **null on a genuine valuation/value mismatch —
+   the null is itself the queryable signal, no flag column.** Per-field `*_currency` deferred
+   to the §2.10 currency work. See `docs/decisions.md`, "deal_value_currency: single currency
+   tag on derived values."
 
 8. **Enum name drift.** `mvp_goal_and_schema.md` says `TOTAL_TRANSACTION_VALUE`; prompt and
    CSVs use `TRANSACTION_VALUE`. **Fix:** pick one canonical enum and align spec, prompt,

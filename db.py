@@ -358,6 +358,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # bug #8 — funding/minority "amount invested" (round size / check), kept
         # distinct from equity_value so a check is never recorded as a valuation.
         ("investment_amount",                "REAL"),
+        # currency tag-and-defer — the currency the derived value fields
+        # (equity_value/implied_equity_value/enterprise_value/investment_amount) are
+        # expressed in. NOT converted to USD; downstream must not assume USD.
+        ("deal_value_currency",              "TEXT"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
