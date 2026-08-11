@@ -414,7 +414,7 @@ def _derive_transaction_value(
 
       STATED                 — source stated a TRANSACTION_VALUE.
       EQUITY_BELOW_CONTROL   — pct < 50; equity_value, no debt.
-      EQUITY_PLUS_GROSS_DEBT — pct >= 50 and total_debt known.
+      EQUITY_PLUS_TOTAL_DEBT — pct >= 50 and total_debt known.
 
     Returns (None, None) at pct>=50 with total_debt unknown (do not assume debt=0),
     when pct is unknown, or when there is no equity to base on. The gross-debt branch
@@ -428,7 +428,7 @@ def _derive_transaction_value(
     if pct < 50:
         return equity_value, "EQUITY_BELOW_CONTROL"
     if total_debt is not None:
-        return round(equity_value + total_debt, 2), "EQUITY_PLUS_GROSS_DEBT"
+        return round(equity_value + total_debt, 2), "EQUITY_PLUS_TOTAL_DEBT"
     return None, None
 
 

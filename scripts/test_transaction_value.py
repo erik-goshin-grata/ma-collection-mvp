@@ -29,7 +29,7 @@ PCT_CASES = [
 TV_CASES = [
     ("as_reported_wins", {"value_type": "TRANSACTION_VALUE", "value_amount": 80}, 6, None, 100.0, 80.0, "STATED"),
     ("minority_below_50_equity_no_debt", {}, 600, None, 27.0, 600, "EQUITY_BELOW_CONTROL"),
-    ("control_debt_known_adds_gross", {}, 200, 50, 100.0, 250, "EQUITY_PLUS_GROSS_DEBT"),
+    ("control_debt_known_adds_total_debt", {}, 200, 50, 100.0, 250, "EQUITY_PLUS_TOTAL_DEBT"),
     ("control_debt_unknown_is_null", {}, 200, None, 100.0, None, None),   # do NOT assume debt=0
     ("no_equity_is_null", {}, None, None, 100.0, None, None),
     ("pct_unknown_is_null", {}, 200, None, None, None, None),
