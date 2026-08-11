@@ -170,3 +170,34 @@ Note: this log had fallen behind between 2026-07-28 and 2026-08-11. The Aug 2–
 behavioral work (per-stage model tiering; funding fixes #5–#9; §4.1/4.2/4.7
 value-model code landings) is recorded in `docs/decisions.md` and the git log but
 was not entered here. Backfill of those entries is pending.
+
+## 2026-08-11 - project_state.md Reconciled to Repo
+
+Commit: *(this commit)*
+
+Changed files:
+
+- `docs/project_state.md`
+
+Change (documentation only — reconciled stale state doc against verified repo reality):
+
+- Header bumped to 2026-08-11 / `02db22e`.
+- Current Drop reframed from "V2 Alignment + Funding Path" to **Transaction Value
+  Model** (the actual active workstream).
+- Schema section: added the `db.py _apply_migrations` ALTER source — value-model
+  columns (`investment_amount`, `deal_value_currency`, `total_debt`,
+  `transaction_value`, `transaction_value_basis`, `pct_acquired_source`) live there,
+  not in any `.sql` file.
+- `high_confidence_extraction` corrected 0.12 → **0.13** (Prompt Versions list +
+  Stage Status table).
+- Config: added `sonnet_model=claude-sonnet-4-6` (Sonnet tier, live since 2026-08-03).
+- Validation section: corrected "funding corpus not yet built" → **built**
+  (`data/pl_funding.db`); replaced stale items with currency/period anchoring +
+  owed re-aggregations.
+- Next Steps: replaced the 2026-07-28 queue with the current value-model queue
+  (currency anchoring → total_debt+cash → transaction_size → EV rewire).
+- **Removed dangling reference** to `docs/enum_schema_gaps.md` (file does not exist
+  in the repo); repointed "awaiting eng" to `docs/spec_field_parity_test.md` (ON HOLD).
+
+Verified against: `git log`, `config.py`, `db.py`, `prompts/*.md`,
+`docs/prompt_versions.md`, filesystem.
