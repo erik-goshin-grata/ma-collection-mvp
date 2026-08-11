@@ -137,7 +137,7 @@ Never 1,000,000,000. A valuation does not enter an as-transacted field.
 
 ### Control acquisition, debt known
 
-> 100% acquisition. Equity 200, gross debt 50.
+> 100% acquisition. Equity 200, total debt 50.
 
 | Field | Expected |
 |---|---|

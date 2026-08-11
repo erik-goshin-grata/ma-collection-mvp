@@ -226,8 +226,8 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     enterprise_value_basis      TEXT,        -- STATED | EQUITY_PLUS_NET_DEBT
     investment_amount           REAL,        -- funding/minority check (round size); kept distinct from equity (bug #8)
     deal_value_currency         TEXT,        -- currency of the derived value fields (§4.7); null on a valuation/value mismatch
-    total_debt                  REAL,        -- gross debt; manual interim input (extracted metric later); preserved across re-aggregation
-    transaction_value           REAL,        -- Tier-1 as-transacted value (§2.1.1); as-reported, else equity (+ gross debt at pct>=50)
+    total_debt                  REAL,        -- total debt, NOT net of cash. Manual interim input (extracted metric later); preserved across re-aggregation; input to transaction_value at pct_acquired>=50; net_debt is a different field (feeds implied_enterprise_value)
+    transaction_value           REAL,        -- Tier-1 as-transacted value (§2.1.1); as-reported, else equity (+ total debt at pct>=50)
     transaction_value_basis     TEXT,        -- STATED | EQUITY_BELOW_CONTROL | EQUITY_PLUS_GROSS_DEBT
     pct_acquired_source         TEXT,        -- §2.6: stated | assumed (100% default for control types when silent)
 

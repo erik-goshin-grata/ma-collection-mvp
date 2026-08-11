@@ -123,8 +123,8 @@ permanently mixed column, which is exactly what "re-aggregate, don't stamp" avoi
    between them). Route through `run.py` (or call `init_db()` first) so `_apply_migrations`
    adds the new columns before writing; assert the columns are present before running.
 2. **After total_debt + cash extraction (the next piece):** re-aggregate again to populate
-   the transaction_value gross-debt branch (dormant until then) and derive net_debt from
-   gross − cash.
+   the transaction_value total-debt branch (dormant until then) and derive net_debt from
+   total debt − cash.
 
 Expect **unattributable diffs** from re-aggregation: the DB holds several historical
 derivation semantics (aggregation has always been incremental), not just the two §4.2

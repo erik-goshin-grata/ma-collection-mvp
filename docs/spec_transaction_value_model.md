@@ -51,7 +51,7 @@ What actually changed hands. Deal-specific. **Never a multiple numerator.**
 | Field | Definition | Scope |
 |---|---|---|
 | `equity_value` | Consideration for the stake acquired, at the stake level. Not grossed up. | M&A |
-| `transaction_value` | As-reported where stated. Otherwise `equity_value` + gross debt at `pct_acquired` ≥ 50, `equity_value` below it. Cash never netted. See §2.1.1. | M&A |
+| `transaction_value` | As-reported where stated. Otherwise `equity_value` + total debt at `pct_acquired` ≥ 50, `equity_value` below it. Cash never netted. See §2.1.1. | M&A |
 | `transaction_size` | Universal event magnitude across all deal types. See §2.4. | All deals |
 
 #### 2.1.1 Debt follows control
@@ -62,13 +62,13 @@ calculated:
 | Condition | `transaction_value` |
 |---|---|
 | `pct_acquired` < 50 | `equity_value` — no debt added |
-| `pct_acquired` ≥ 50 | `equity_value` + gross debt |
+| `pct_acquired` ≥ 50 | `equity_value` + total debt |
 | `pct_acquired` ≥ 50, debt unknown, nothing stated | null |
 
 Cash is never netted.
 
 **Rationale — TV mirrors consolidation.** A controlling acquirer consolidates the target's
-balance sheet and effectively takes on its debt, so adding gross debt records something that
+balance sheet and effectively takes on its debt, so adding total debt records something that
 happened. A minority buyer takes on none of it; equity-method treatment consolidates nothing.
 
 Below control, `transaction_value` = `equity_value` is a statement about the *transaction* —
@@ -179,7 +179,7 @@ The bridge computes upward from equity as the root primitive. A stated debt-incl
 inverts it:
 
 ```
-Given TV  →  equity_value = transaction_value − gross debt
+Given TV  →  equity_value = transaction_value − total debt
 Given EV  →  implied_equity_value = implied_enterprise_value + cash − debt
 ```
 
@@ -320,7 +320,7 @@ cash. Comparing across them throws a false positive on every CFDF transaction.
 
 ### 2.8 Worked examples
 
-Company: 100% equity 1,000 · gross debt 500 · cash 0 · EBITDA 150
+Company: 100% equity 1,000 · total debt 500 · cash 0 · EBITDA 150
 
 | Scenario | `equity_value` | `transaction_value` | `implied_equity_value` | `implied_enterprise_value` | EV/EBITDA |
 |---|---|---|---|---|---|
@@ -336,18 +336,18 @@ The 5.1x is **illustrative of the field's incoherence, not of current output** �
 not currently read that field (§2.2). It is what the number would mean if anything consumed
 it, which is the reason to remove it rather than wait for something to.
 
-**Public 100%: equity 200, gross debt 50, cash 10**
+**Public 100%: equity 200, total debt 50, cash 10**
 
 | Field | Value |
 |---|---|
 | `equity_value` | 200 |
-| `transaction_value` | 250 (200 + 50 gross debt; cash not netted) |
+| `transaction_value` | 250 (200 + 50 total debt; cash not netted) |
 | `implied_equity_value` | 200 |
 | `implied_enterprise_value` | 240 (200 + 50 − 10) |
 | `transaction_size` | 250 |
 
 *Revised from the prior version, which gave TV as 240 or 200 depending on source wording. TV
-is 250 — it adds gross debt and does not net cash. 240 is the enterprise value.*
+is 250 — it adds total debt and does not net cash. 240 is the enterprise value.*
 
 **Minority 27%, $600M check (Pinnacle Gas)**
 

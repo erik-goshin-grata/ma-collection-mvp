@@ -34,7 +34,7 @@ from a single unlabelled value column, and funding check sizes labelled as compa
   valuation. **The only legal multiple numerators.**
 
 **`transaction_value`** — as-reported where a source states one. Otherwise `equity_value` +
-`total_debt` (gross) at `pct_acquired ≥ 50`, `equity_value` below it, null where debt is unknown
+`total_debt` at `pct_acquired ≥ 50`, `equity_value` below it, null where debt is unknown
 above the threshold. Cash never netted.
 
 **`transaction_size`** — universal magnitude across all deal types, derived not extracted, with
@@ -98,7 +98,7 @@ regressions.
    they are one piece of work, not two.
 2. **`total_debt` + `cash` as `target_financials` metrics** — with period type and
    `period_end_date`, alongside `target_revenue` and `target_ebitda`. Activates the dormant
-   gross-debt branch and lets `net_debt` derive from gross − cash. Touches prompt, parser,
+   total-debt branch and lets `net_debt` derive from total debt − cash. Touches prompt, parser,
    staging, `_FIELDS`, `HC_FIELDS`, schema, migration list.
 3. **`transaction_size` + the export** — `handoff_transaction_size.md`. The only item in the
    batch a reviewer ever sees, and the original point of the exercise. Depends on §4.2's

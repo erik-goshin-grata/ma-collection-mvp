@@ -78,14 +78,14 @@ tier.
 |---|---|
 | Source states one | As-reported. Takes precedence. |
 | `pct_acquired` < 50 | `equity_value` — no debt added |
-| `pct_acquired` ≥ 50 | `equity_value` + gross debt |
+| `pct_acquired` ≥ 50 | `equity_value` + total debt |
 | `pct_acquired` ≥ 50, debt unknown, nothing stated | **null** — do not assume debt = 0 |
 
 Cash is never netted.
 
 Uses `pct_acquired` only. No pre-transaction ownership, no control flags.
 
-**Gross debt, not net.** `implied_enterprise_value` consumes net debt; this consumes gross. A
+**Total debt, not net.** `implied_enterprise_value` consumes net debt; this consumes total debt. A
 row carrying only `net_debt` yields an EV and no calculated TV. That is expected, not a bug.
 
 **Known limitation, do not "fix" it.** A step-up from a minority position into control — 30% to
@@ -157,7 +157,7 @@ control-crossing test would have — the stake is below 50, and control was also
 
 ### Control acquisition with debt known
 
-> 100% acquisition. Equity consideration 200, gross debt 50, cash 10.
+> 100% acquisition. Equity consideration 200, total debt 50, cash 10.
 
 | Field | Expected |
 |---|---|
@@ -196,6 +196,6 @@ should reconcile with the as-reported 80.
 
 - No `equity_value` on a funding-path row equals that row's `post_money_valuation`
 - `transaction_value` equals `equity_value` on every row where `pct_acquired` < 50
-- `transaction_value` is null on every row where `pct_acquired` ≥ 50, gross debt is absent,
+- `transaction_value` is null on every row where `pct_acquired` ≥ 50, total debt is absent,
   and no debt-inclusive figure was stated
 - Manual `net_debt` values are unchanged from before the run

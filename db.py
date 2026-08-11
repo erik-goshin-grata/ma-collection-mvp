@@ -363,8 +363,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # expressed in. NOT converted to USD; downstream must not assume USD.
         ("deal_value_currency",              "TEXT"),
         # §4.2 — Tier-1 transaction_value (control-conditional) + its basis; total_debt
-        # (gross debt; manual interim input like net_debt, an extracted metric later),
-        # preserved across re-aggregation; pct_acquired_source stamps the §2.6 default.
+        # (total debt, NOT net of cash; manual interim input like net_debt, an extracted
+        # metric later), preserved across re-aggregation. net_debt feeds
+        # implied_enterprise_value (a different field). pct_acquired_source stamps §2.6.
         ("total_debt",                       "REAL"),
         ("transaction_value",                "REAL"),
         ("transaction_value_basis",          "TEXT"),

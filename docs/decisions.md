@@ -317,7 +317,7 @@ Decision:
 - `transaction_value` is populated as-reported wherever a source states one.
 - Where it is calculated:
   - `pct_acquired` < 50 → `transaction_value` = `equity_value`. No debt is added.
-  - `pct_acquired` ≥ 50 → `transaction_value` = `equity_value` + gross debt.
+  - `pct_acquired` ≥ 50 → `transaction_value` = `equity_value` + total debt.
   - `pct_acquired` ≥ 50 with debt unknown and nothing stated → null. Do not assume
     debt = 0.
 - Cash is never netted. `transaction_value` − cash = `implied_enterprise_value`.
@@ -332,7 +332,7 @@ Context:
   treatment consolidates nothing. `transaction_value` = `equity_value` there is a statement
   about the transaction, not a claim that the company is debt-free.
 - At or above control the acquirer consolidates the target's balance sheet and effectively
-  takes on its debt, so adding gross debt records something that happened.
+  takes on its debt, so adding total debt records something that happened.
 - **The simple threshold is wrong in one case and right in four.** A step-up from a
   minority position into control — 30% to 60%, `pct_acquired` = 30 — reads as below
   control and adds no debt, when it should. Buying from an existing minority position
@@ -641,7 +641,7 @@ Status: accepted. `total_debt` landed as a manual column; extraction deferred.
 
 Decision:
 
-- `total_debt` is **gross debt** — no cash netting. It is the input to
+- `total_debt` is **total debt, not net of cash**. It is the input to
   `transaction_value` at `pct_acquired ≥ 50`.
 - `net_debt` remains the input to `implied_enterprise_value`.
 - Both are manual columns on `transaction_record` for now, preserved across
