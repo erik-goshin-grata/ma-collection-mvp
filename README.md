@@ -1,28 +1,43 @@
 # M&A Collection MVP
 
-An independent MVP pipeline for collecting and structuring M&A transactions from public sources.
+A scalable MVP pipeline for collecting and structuring M&A **and funding** transactions from public sources.
 
-Discovery from PR Newswire's M&A category; enrichment from SEC 8-K Item 1.01 filings and Exhibit 2.1 merger agreements via sec-api.io; extraction and classification via the configured LLM provider.
+Discovery from PR Newswire's M&A category (plus CSV-URL and PredictLeads ingest adapters); enrichment from SEC 8-K Item 1.01 filings and Exhibit 2.1 merger agreements via sec-api.io; extraction, classification, and summarization via the configured LLM provider (Anthropic or OpenAI), with per-stage model tiering.
 
-Target scope for first production run: **100 press releases**, end-to-end in under 2 hours, with operator-graded acceptance criteria.
+## Purpose & positioning
+
+This repo is a **validation harness and scalable MVP**, not the production system. Its job is to test LLMs, prompts, and data sources for extraction quality — proving out the taxonomy, the value model, and the source coverage on real deals before those decisions harden.
+
+It runs **in parallel to the engineering team's production build**. The two tracks share goals and inform each other, but this repo is not a build target for eng and eng is not required to match it. **Interim differences between this MVP and the production system are expected** — schema names, enum sets, and field semantics will diverge at any given moment. When they matter, differences are recorded in `docs/` (see `docs/ML_differences_2026_08_01.md` and the decision/handoff docs).
+
+Because the recurring failure mode here is *authored-but-never-run* drift, the code — `prompts/`, `stages/`, `schema/`, `run.py` — is authoritative for what actually runs. Design docs describe intent; the repo describes reality.
 
 ---
 
 ## Status
 
-MVP. Pre-implementation — specs and prompt files are committed; pipeline code is to be implemented by Claude Code against these specs.
+**Operational.** The full pipeline is implemented and has completed production and funding-path runs. Active workstream is the **transaction value model** (two-tier as-transacted vs 100%-basis valuation); see `docs/`.
+
+Authoritative current-state docs, in freshness order:
+
+| Doc | Role |
+| :--- | :--- |
+| `docs/session_handoff_2026_08_10_value_model.md` | Latest workstream (value model) |
+| `docs/CONTEXT.md` | Code-derived pipeline contract (all stages, enums, bugs) |
+| `docs/decisions.md` | Authoritative decision log — source of truth |
+| `docs/project_state.md` | Living state, incl. owed re-aggregations |
+
+`mvp_goal_and_schema.md` is the **original v0.1 scope doc and is superseded** — it describes a 100-deal proof loop and tables that were ultimately built as columns. Kept for history; do not treat as current.
 
 | Component | Status |
 | :--- | :--- |
-| Goal doc & schema | Committed |
-| Adapter specs (PR Newswire, sec-api.io) | Committed |
-| Prompt specs (8 files) | Committed |
-| Pipeline orchestration spec | Committed |
-| Entity resolution spec | Committed |
-| Evaluation spec + gold set template | Committed |
-| SQLite DDL (v0.2) | Committed |
-| Python implementation | Pending |
-| First production run | Pending |
+| Discovery adapters (PR Newswire, CSV-URL, PredictLeads) | Implemented |
+| SEC enrichment (8-K Item 1.01, Exhibit 2.1) | Implemented |
+| Extraction / classification / summarization stages (14 + funding branch) | Implemented |
+| Anthropic + OpenAI providers, per-stage model tiering | Implemented |
+| SQLite schema (migrations 001–003) | Implemented |
+| Funding path (VC / growth / venture debt) | Implemented; `funding_lc_extract` stage still pending |
+| Two-tier value model | Design landed; two re-aggregations owed (see `project_state.md`) |
 
 ---
 
@@ -31,34 +46,33 @@ MVP. Pre-implementation — specs and prompt files are committed; pipeline code 
 ```
 ma-collection-mvp/
 ├── README.md                          # This file
-├── mvp_goal_and_schema.md             # MVP scope, acceptance criteria, schema reference
-├── specs/
-│   ├── adapter_pr_newswire.md         # PR Newswire scraper spec
-│   ├── adapter_sec_api.md             # sec-api.io enrichment spec
-│   ├── pipeline.md                    # Orchestration state machine, run modes, error posture
-│   ├── entity_resolution.md           # Name normalization, clustering, dedup
-│   └── evaluation.md                  # Gold set methodology, scoring
-├── prompts/
-│   ├── prompt_conventions.md          # Shared conventions (JSON I/O, temperature, versioning)
-│   ├── relevancy_filter.md            # Binary relevancy gate
-│   ├── deal_type_classifier.md        # 7-type taxonomy classifier
-│   ├── high_confidence_extraction.md  # Parties, dates, value, target financials
-│   ├── low_confidence_extraction.md   # Advisors, consideration, flags, termination fees
-│   ├── aggregation.md                 # Conflict resolution (tier tie-breaking)
-│   ├── deal_summary.md                # 80-150 word natural-language summary
-│   └── strategic_rationale.md         # 8-category rationale classifier
-├── schema/
-│   └── 001_initial.sql                # SQLite DDL, 12 tables, v0.2 enums
-├── eval/
-│   └── gold_set_template.csv          # Empty CSV template for operator labeling
+├── run.py                             # Primary entry point (pipeline orchestrator)
+├── config.py                          # Config flags, model tiers, provider selection
+├── db.py                              # SQLite access + migration application
+├── adapters/                          # Source ingest
+│   ├── pr_newswire.py                 #   PR Newswire M&A category scraper
+│   ├── csv_url.py                     #   CSV-of-URLs test-ingest harness
+│   └── sec_api.py                     #   sec-api.io SEC enrichment
+├── stages/                            # 14 pipeline stages + funding branch (4b)
+│   ├── relevancy_filter.py            #   Stage 2 — in-scope gate
+│   ├── deal_type_classify.py          #   Stage 3 — v2_event_type classifier
+│   ├── high_confidence_extract.py     #   Stage 4 — M&A extraction (excludes funding)
+│   ├── funding_hc_extract.py          #   Stage 4b — funding extraction (VC/growth/venture debt)
+│   ├── ... (sec_*, low_confidence, entity_cluster, aggregate, agreement_extract, summarize, rationale_tag, export)
+├── prompts/                           # Versioned prompt files (.md) + loader (base.py)
+├── lib/                               # Shared helpers (llm_client, field_priority, exhibit navigator, observation writer, ...)
+├── schema/                            # SQLite DDL — 001_initial, 002_v2_prompt_alignment, 003_funding_path
+├── scripts/                           # Reprocessors, backfills, validators, tests
+├── specs/                             # Design specs (adapters, pipeline, entity resolution, evaluation)
+├── docs/                              # Decisions, handoffs, current-state (see Status above)
+├── eval/                             # Gold set methodology + scoring (score.py)
 ├── .env.example                       # Required environment variables
 └── .gitignore                         # Excludes .env, DB, logs, generated CSVs
 
 Generated at runtime (not committed):
-  data/ma_mvp.db                       # SQLite database
+  data/ma_mvp.db                       # SQLite database (DB_PATH env overrides)
   exports/transactions_<run_id>.csv    # CSV exports of canonical transactions
   logs/                                # Per-stage, per-run log files
-  notes/                               # Operator notes, post-run reviews
 ```
 
 ---
@@ -169,29 +183,30 @@ python -c "import sqlite3; conn=sqlite3.connect('data/ma_mvp.db'); conn.executes
 
 ## Running the Pipeline
 
-The primary entry point is `run.py` with a mode flag. See `specs/pipeline.md` for the full list.
+The primary entry point is `run.py --mode=<mode>` (default `resume`). Modes map to stage ranges in `run.py` (`_MODE_STAGES`); `specs/pipeline.md` has the design-level reference.
 
-### First production run (100 PRs, end-to-end)
+| Mode | Stages run |
+| :--- | :--- |
+| `full` | Full pipeline, all stages |
+| `resume` *(default)* | Extraction stages onward (2→14); SEC stages no-op on non-SEC rows |
+| `scrape` | Discovery only, no LLM calls |
+| `extract` | Extraction stages (relevancy → SEC enrich, incl. funding 4b) |
+| `aggregate` | Cluster + aggregate (8–9) |
+| `sec-documents` | Expanded SEC filing fetch (10) |
+| `agreement-extract` / `agreement-rerun` | Merger-agreement extraction (11); rerun picks up unextracted docs |
+| `generate` | Summaries + rationale (12–13) |
+| `export` | CSV export (14) |
+| `rerun-prompt --prompt <name> --version <v>` | Re-run one prompt at a new version |
+
 ```bash
+# Examples
 python run.py --mode=full
-```
-
-### Resume after a failure
-```bash
 python run.py --mode=resume
-```
-
-### Scrape only (no LLM calls)
-```bash
 python run.py --mode=scrape
-```
-
-### Re-run a specific prompt after revision
-```bash
 python run.py --mode=rerun-prompt --prompt=deal_type_classifier --version=0.3
 ```
 
-See `specs/pipeline.md` §4 for the full mode reference.
+The DB path defaults to `data/ma_mvp.db`; override with the `DB_PATH` env var to run against a test corpus (e.g. `data/pl_funding.db`).
 
 ---
 
@@ -234,12 +249,14 @@ No pipeline stage halts on an individual row failure. Failures are logged to `ex
 
 ## Next Steps
 
-1. Implementation — Claude Code builds the Python pipeline against these specs.
-2. Sandbox validation — first test run on 5–10 PRs to debug adapter and prompt integration.
-3. First production run — 100 PRs, end-to-end.
-4. Gold set labeling — operator grades the sample.
-5. Scorecard review — identify prompts needing revision.
-6. Post-first-run T1 source review — examine raw 8-K and Exhibit 2.1 texts to inform v2 securities extraction scoping (per goal doc §8).
+Current queue (from `docs/session_handoff_2026_08_10_value_model.md`):
+
+1. Currency + period anchoring — blocks the implied-valuation tier.
+2. `total_debt` + `cash` as `target_financials` metrics — activates the dormant total-debt branch; lets `net_debt` derive.
+3. `transaction_size` + its export column — the reviewer-facing deliverable; depends on the §4.2 re-aggregation.
+4. EV rewire — parked until currency/period anchoring clears.
+
+Owed operational work: **two re-aggregations** (after §4.2, and after `total_debt`+`cash` lands) — route through `run.py` so migrations apply first. See `docs/project_state.md`.
 
 ---
 
@@ -254,3 +271,4 @@ Private repository. Not licensed for redistribution.
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-04-22 | Initial draft |
+| 0.2 | 2026-08-11 | Sync to operational reality — purpose/positioning, status, directory structure, run modes, next steps |
