@@ -130,7 +130,11 @@ Expect **unattributable diffs** from re-aggregation: the DB holds several histor
 derivation semantics (aggregation has always been incremental), not just the two §4.2
 creates. Diffs that don't trace to §4.2 are expected, not regressions.
 
-Also open (surfaced during §4.2, NOT fixed here): `001_initial.sql` is missing columns the
-aggregate INSERT writes (e.g. `v2_event_type`) that are in neither the CREATE nor the db.py
-migration list — deeper pre-existing CREATE/reality drift than the derived-valuation columns
-§4.2 folded in. A stronger parity test (INSERT columns ⊆ CREATE) would catch it; deferred.
+Schema drift is now guarded by `scripts/test_schema_convergence.py`: `init_db` brings any DB
+(a fresh one, a 001-base one, or a historical `data/*.db`) to one canonical schema — verified
+across all 6 historical DBs.
+
+_Retracted:_ an earlier note here flagged `v2_event_type` as undocumented CREATE/reality drift.
+That was a false positive from reading `001_initial.sql` alone — it is defined in
+`schema/002_v2_prompt_alignment.sql:18,69`. The schema of record is `schema/*.sql` collectively
+(001 + 002 + 003) plus the db.py migration list; see decisions.md "Schema Sources of Record".

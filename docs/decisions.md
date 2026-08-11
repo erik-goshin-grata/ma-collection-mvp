@@ -634,3 +634,151 @@ Consequences:
   currency-normalization / FX work.
 - Test: `scripts/test_deal_value_currency.py` — non-null where a currency is present
   and does not conflict; null on conflict (the second assertion proves the guard).
+
+## 2026-08-10 - Debt and Cash Inputs
+
+Status: accepted. `total_debt` landed as a manual column; extraction deferred.
+
+Decision:
+
+- `total_debt` is **gross debt** — no cash netting. It is the input to
+  `transaction_value` at `pct_acquired ≥ 50`.
+- `net_debt` remains the input to `implied_enterprise_value`.
+- Both are manual columns on `transaction_record` for now, preserved across
+  re-aggregation.
+- **When extracted, `total_debt` and `cash` belong in `target_financials`** alongside
+  `target_revenue` and `target_ebitda` — with period type and `period_end_date` — not as
+  standalone columns. Balance-sheet figures without a period are not usable in a bridge.
+- Collection is flexible: researchers may supply components (`total_debt`, `cash`) or only
+  `net_debt`. A row with only `net_debt` yields an enterprise value and no calculated
+  transaction value. That is expected, not a defect.
+
+Context:
+
+- `transaction_value` needs gross and `implied_enterprise_value` needs net. Gross cannot be
+  recovered from net, so capturing only `net_debt` forecloses the transaction value
+  permanently.
+- Asking researchers for net debt asks them to compute. The raw balance-sheet lines — gross
+  debt and cash — give all three figures; a computed input gives one.
+- An earlier claim that `total_debt` − `net_debt` yields cash "for free" was withdrawn: it
+  holds only where both are populated, and if one is extracted while the other is manual they
+  land on largely different rows, so `transaction_value` and `implied_enterprise_value` would
+  populate on different deals.
+
+Consequences:
+
+- **`total_debt` and `net_debt` sit adjacent and are one word apart.** The column comment must
+  state that `total_debt` is gross, or a net figure will eventually be entered into it and
+  nothing downstream will catch it.
+- QA check available on manual inputs: `total_debt >= net_debt` wherever both are populated.
+  Cash is non-negative, so gross can never be below net.
+- Extracting `total_debt` and `cash` requires the period-anchoring question to be settled
+  first — which is the same open item that blocks the implied tier. The two are one piece of
+  work, not two.
+- A `cash` column would move `net_debt` from manual entry to derived. Not urgent; the manual
+  path continues to serve the rows that already have it.
+
+## 2026-08-10 - pct_acquired Must Be Resolved Before Threshold Evaluation
+
+Status: accepted, implemented in `18720b7`.
+
+Decision:
+
+- The `pct_acquired ≥ 50` test in `transaction_value` derivation must operate on a
+  **resolved** value, never on the raw column.
+- Resolution: NULL becomes 100 for control event types (ACQUISITION, MERGER), per the
+  existing default. Otherwise unknown.
+- `pct_acquired_source` records `stated` or `assumed`.
+
+Context:
+
+- `pct_acquired` is NULL when 100% is implicit, per its own column comment. `NULL >= 50` does
+  not evaluate true, so reading the column raw routes **every ordinary 100% acquisition with
+  an unstated percentage** into the below-control branch and adds no debt.
+- That is the most common deal in the set silently taking the minority path, producing a
+  plausible wrong number rather than an obvious failure.
+
+Consequences:
+
+- This is a general hazard, not specific to `transaction_value`. Any future rule keyed on
+  `pct_acquired` must resolve first. The field became a valuation input when the implied tier
+  was introduced; its NULL-means-100 convention predates that.
+- Test coverage asserts a null-percentage 100% acquisition takes the control branch.
+
+## 2026-08-10 - Schema Sources of Record
+
+Status: accepted.
+
+Decision:
+
+- The schema of record is **`schema/*.sql` collectively** — currently `001_initial.sql`,
+  `002_v2_prompt_alignment.sql`, `003_funding_path.sql` — plus the `db.py`
+  `_apply_migrations` list. No single file describes the schema.
+- **`mvp_goal_and_schema.md` is superseded.** It is Version 0.1, scoped to a 100-transaction
+  proof loop, self-described as "not production." Its §6 DDL specifies `transaction`,
+  `consideration`, `valuation`, `target_financials` and `deal_characteristic` *tables*; what
+  was built flattened all of them into columns.
+- The V2 documents — `Transactions Data Model.md` and the `*_transaction_schema.md` set — are
+  **design intent, not schema.** They specify `financial_metric`, `consideration_component`
+  and `transaction_multiple` tables that do not exist.
+- Each of the above needs a header line saying so. Not a rewrite.
+
+Context:
+
+- Three generations of schema thinking are in circulation and two describe tables that were
+  never built. During this session that produced repeated wrong claims — references to a
+  `consideration_component` table, to a `financial_metric` table, and to "financial metrics" as
+  a location rather than columns. Every one was a reasonable reading of the document consulted.
+- `001_initial.sql` was also treated as the whole schema by both parties, which is why
+  `v2_event_type` was briefly reported as undocumented when it is defined in
+  `002_v2_prompt_alignment.sql`.
+
+Consequences:
+
+- **Spec gap 8 mostly dissolves.** It describes enum drift between `mvp_goal_and_schema.md`
+  (`TOTAL_TRANSACTION_VALUE`) and the prompts (`TRANSACTION_VALUE`). With that document
+  superseded there is no live conflict; the prompt is authoritative and the gap reduces to
+  confirming nothing else references the old token.
+- Any parity check comparing CREATE statements against the migration list must read all
+  `schema/*.sql` files. Comparing against `001_initial.sql` alone produces a false positive
+  for every column added by 002 and 003.
+
+## 2026-08-10 - Field Inventory Method and Naming Conventions
+
+Status: accepted as method. Inventory not yet built.
+
+Decision:
+
+- Field definitions are **generated by origin, never transcribed**:
+  - **Extracted** — from the prompts, which are authoritative for what is extracted and for
+    the enum values.
+  - **Derived** — from the aggregation code, where the `_derive_*` functions already declare
+    inputs and outputs.
+  - **Manual** — a short explicit list. Currently `net_debt`, `total_debt`.
+- **Definition precedes parity.** Establish what the field set should be before testing that
+  each field reaches all its homes. A parity test over an undefined field set checks
+  consistency without checking correctness.
+- Naming: `_basis` records **which rung of a waterfall fired**, including `STATED` as a rung.
+  `equity_value_basis` (`STATED | PER_SHARE_X_SHARES`) established this, and
+  `transaction_value_basis` follows it. Do not import `_method` from the V2 model, where it
+  means something narrower.
+
+Context:
+
+- A field's definition is currently spread across up to seven places: the prompt, the parser,
+  the `staging_extraction` column, the aggregation read (`_FIELDS`), the observation read
+  (`HC_FIELDS`), a `schema/*.sql` file, and the `db.py` migration list. Nothing checks that
+  they agree.
+- Two divergences surfaced on 2026-08-10: `round_size` absent from `HC_FIELDS` while present
+  on the staging read path (would have nulled `investment_amount` for every minority raise on
+  the observation loader, fixed in `e66c88c`), and `investment_amount` / `deal_value_currency`
+  present only in the migration list.
+- The schema is downstream of extraction, so auditing it first examines the consequence
+  without knowing the intent.
+
+Consequences:
+
+- A parity test remains wanted, following the pattern of `test_reason_code_parity.py` — the
+  answer to drift is a test that fails, not a reference document that goes stale.
+- Any committed field inventory must be generated output, not hand-maintained, or it becomes
+  the same stale-document problem one layer down.
