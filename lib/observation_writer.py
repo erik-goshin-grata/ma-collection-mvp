@@ -45,6 +45,7 @@ HC_FIELDS = (
     "value_currency",
     "value_type",
     "per_share_price",
+    "round_size",
     "pct_acquired",
     "target_revenue",
     "target_revenue_period_type",
