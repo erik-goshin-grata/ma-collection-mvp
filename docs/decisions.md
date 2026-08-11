@@ -637,7 +637,8 @@ Consequences:
 
 ## 2026-08-10 - Debt and Cash Inputs
 
-Status: accepted. `total_debt` landed as a manual column; extraction deferred.
+Status: accepted; amended 2026-08-10 (cash defined as `Cash_ST`). `total_debt` landed as a
+manual column; extraction deferred.
 
 Decision:
 
@@ -649,7 +650,12 @@ Decision:
 - **When extracted, `total_debt` and `cash` belong in `target_financials`** alongside
   `target_revenue` and `target_ebitda` — with period type and `period_end_date` — not as
   standalone columns. Balance-sheet figures without a period are not usable in a bridge.
-- Collection is flexible: researchers may supply components (`total_debt`, `cash`) or only
+- **`cash` is captured as a single field, `Cash_ST`** — cash + cash equivalents +
+  short-term / marketable investments (the CapIQ "Cash & Short-Term Investments" convention,
+  explicitly broader than strict cash & equivalents). Its one consumer is
+  `net_debt = total_debt − Cash_ST`, which feeds `implied_enterprise_value`. `Cash_ST` must
+  carry the same `period_end_date` as `total_debt`, or the derivation is incoherent.
+- Collection is flexible: researchers may supply components (`total_debt`, `Cash_ST`) or only
   `net_debt`. A row with only `net_debt` yields an enterprise value and no calculated
   transaction value. That is expected, not a defect.
 
@@ -664,6 +670,9 @@ Context:
   holds only where both are populated, and if one is extracted while the other is manual they
   land on largely different rows, so `transaction_value` and `implied_enterprise_value` would
   populate on different deals.
+- `Cash_ST` uses the comp-source convention (CapIQ Cash & Short-Term Investments) so the
+  resulting EVs line up against the comps they will be measured against. A narrower cash
+  definition overstates `net_debt` and inflates every multiple relative to those comps.
 
 Consequences:
 
@@ -675,8 +684,12 @@ Consequences:
 - Extracting `total_debt` and `cash` requires the period-anchoring question to be settled
   first — which is the same open item that blocks the implied tier. The two are one piece of
   work, not two.
-- A `cash` column would move `net_debt` from manual entry to derived. Not urgent; the manual
+- A `Cash_ST` column would move `net_debt` from manual entry to derived. Not urgent; the manual
   path continues to serve the rows that already have it.
+- **Considered and rejected: capturing cash and short-term investments as separate
+  components.** Debt needs components because two derived fields consume different
+  combinations — `transaction_value` needs total, `implied_enterprise_value` needs net. Cash
+  has exactly one consumer (`net_debt`), so a split buys nothing present-tense. One field.
 
 ## 2026-08-10 - pct_acquired Must Be Resolved Before Threshold Evaluation
 
