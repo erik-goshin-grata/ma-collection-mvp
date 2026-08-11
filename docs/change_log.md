@@ -142,3 +142,31 @@ Validation:
 - New fields to spot-check: `financials_disclosure_status` populated on
   all rows; `period_type` null when period not stated in source;
   `acquirer_type_v2` lowercase on all rows.
+
+## 2026-08-11 - README Synced to Operational Reality
+
+Commit: `b83e560`
+
+Changed files:
+
+- `README.md` (0.1 → 0.2)
+
+Change (documentation only — no pipeline, prompt, or schema behavior change):
+
+- Replaced "pre-implementation, Python pending" framing with a **Purpose &
+  positioning** section: this repo is a validation harness + scalable MVP,
+  running parallel to and loosely coupled with the eng production build.
+  Interim divergence between the two tracks is expected and recorded in `docs/`.
+- Status flipped to Operational; component table now reflects what is built
+  (adapters, 14 stages + funding branch 4b, dual providers, migrations 001–003,
+  two-tier value model design landed). Added freshness-ordered pointer to the
+  authoritative current-state docs; noted `mvp_goal_and_schema.md` is superseded.
+- Directory structure rebuilt to match the repo (`stages/`, `lib/`, `adapters/`,
+  `docs/`, `scripts/`); run-mode table regenerated from `run.py` `_MODE_STAGES`.
+- Next Steps replaced with the live value-model queue + the two owed
+  re-aggregations.
+
+Note: this log had fallen behind between 2026-07-28 and 2026-08-11. The Aug 2–11
+behavioral work (per-stage model tiering; funding fixes #5–#9; §4.1/4.2/4.7
+value-model code landings) is recorded in `docs/decisions.md` and the git log but
+was not entered here. Backfill of those entries is pending.
