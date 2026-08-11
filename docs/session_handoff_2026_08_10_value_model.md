@@ -133,8 +133,9 @@ regressions.
 
 6. **Field inventory + parity test.** Method decided: generate by origin — prompts for
    extracted, aggregation code for derived, a short list for manual. Definition precedes
-   parity. Erik is supplying eng-team information on schema and enum locations first; a draft
-   spec exists but is on hold pending it.
+   parity. Erik is supplying eng-team information on schema and enum locations first; the draft
+   spec is landed as `docs/spec_field_parity_test.md`, marked ON HOLD pending it (check 1
+   is superseded by `test_schema_convergence.py`; checks 2–4 stand).
 
 **Deferred:**
 
