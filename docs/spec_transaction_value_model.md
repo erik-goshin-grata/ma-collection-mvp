@@ -101,7 +101,7 @@ Whole-company valuation, normalized for comparison. **The only legal multiple nu
 | Field | Definition | Scope |
 |---|---|---|
 | `implied_equity_value` | Equity value on a 100% basis. | M&A |
-| `implied_enterprise_value` | `implied_equity_value` + debt − cash. | M&A |
+| `implied_enterprise_value` | `implied_equity_value` + total_debt − cash. | M&A |
 
 > **"Implied" means 100%-basis, not "derived."**
 > A source-stated figure populates these fields exactly as a computed one does.
@@ -135,7 +135,7 @@ All three routes to an EV converge on `implied_enterprise_value`:
 |---|---|
 | Source states an EV at a partial stake | `as_reported` |
 | Source states an EV generally | `as_reported` |
-| Computed from `implied_equity_value` + debt − cash | `calculated` |
+| Computed from `implied_equity_value` + total_debt − cash | `calculated` |
 
 At 100% the gross-up is a no-op, so the control case needs no separate field.
 
@@ -180,7 +180,7 @@ inverts it:
 
 ```
 Given TV  →  equity_value = transaction_value − total debt
-Given EV  →  implied_equity_value = implied_enterprise_value + cash − debt
+Given EV  →  implied_equity_value = implied_enterprise_value + cash − total_debt
 ```
 
 **Consequence:** `equity_value` may legitimately be null while `transaction_value` or
@@ -451,7 +451,7 @@ position into control — see §2.1.1.
 Funding rounds populate `post_money_valuation` and **not** `implied_equity_value`.
 
 This is enforced structurally rather than by rule. `implied_enterprise_value` is defined as
-`implied_equity_value + debt − cash`; with no implied equity for funding rounds, no EV can
+`implied_equity_value + total_debt − cash`; with no implied equity for funding rounds, no EV can
 compute. "Funding never produces an EV" holds because the inputs do not exist, not because a
 rule is remembered.
 
