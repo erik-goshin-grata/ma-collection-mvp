@@ -661,10 +661,10 @@ Decision:
 
 Context:
 
-- `transaction_value` needs gross and `implied_enterprise_value` needs net. Gross cannot be
-  recovered from net, so capturing only `net_debt` forecloses the transaction value
+- `transaction_value` needs `total_debt` and `implied_enterprise_value` needs `net_debt`. `total_debt` cannot be
+  recovered from `net_debt`, so capturing only `net_debt` forecloses the transaction value
   permanently.
-- Asking researchers for net debt asks them to compute. The raw balance-sheet lines — gross
+- Asking researchers for net debt asks them to compute. The raw balance-sheet lines — total
   debt and cash — give all three figures; a computed input gives one.
 - An earlier claim that `total_debt` − `net_debt` yields cash "for free" was withdrawn: it
   holds only where both are populated, and if one is extracted while the other is manual they
@@ -677,10 +677,10 @@ Context:
 Consequences:
 
 - **`total_debt` and `net_debt` sit adjacent and are one word apart.** The column comment must
-  state that `total_debt` is gross, or a net figure will eventually be entered into it and
+  state that `total_debt` is total debt, not net, or a net figure will eventually be entered into it and
   nothing downstream will catch it.
 - QA check available on manual inputs: `total_debt >= net_debt` wherever both are populated.
-  Cash is non-negative, so gross can never be below net.
+  Cash is non-negative, so `total_debt` can never be below `net_debt`.
 - Extracting `total_debt` and `cash` requires the period-anchoring question to be settled
   first — which is the same open item that blocks the implied tier. The two are one piece of
   work, not two.
@@ -688,7 +688,7 @@ Consequences:
   path continues to serve the rows that already have it.
 - **Considered and rejected: capturing cash and short-term investments as separate
   components.** Debt needs components because two derived fields consume different
-  combinations — `transaction_value` needs total, `implied_enterprise_value` needs net. Cash
+  combinations — `transaction_value` needs total debt, `implied_enterprise_value` needs net debt. Cash
   has exactly one consumer (`net_debt`), so a split buys nothing present-tense. One field.
 
 ## 2026-08-10 - pct_acquired Must Be Resolved Before Threshold Evaluation
