@@ -268,3 +268,258 @@ Consequences:
   revisit if funding extraction quality regresses.
 - Any tier change should be validated via the evaluation harness
   (`gold_set` + `specs/evaluation.md`) before being treated as proven.
+
+## 2026-08-10 - Two-Tier Value Model
+
+Status: accepted in principle; enterprise-value implementation under review.
+
+Decision:
+
+- Split every value field into exactly one of two tiers.
+- As-transacted tier — `equity_value`, `transaction_value`, `transaction_size`. Records
+  what changed hands. Never a multiple numerator.
+- 100%-basis tier — `implied_equity_value`, `implied_enterprise_value`. Whole-company
+  valuation, normalized for comparison. The only legal multiple numerators.
+- Remove stake-level `enterprise_value`. All routes to an enterprise value — stated at a
+  partial stake, stated generally, or computed — converge on `implied_enterprise_value`,
+  distinguished by method flag.
+- "Implied" means 100%-basis, not "derived." A source-stated figure populates these fields
+  exactly as a computed one does.
+- Multiple numerators become `implied_enterprise_value | implied_equity_value`.
+
+Context:
+
+- Stake-level enterprise value adds full company debt to a partial equity stake, which
+  corresponds to no economic quantity. A 27% stake bought for 270 against company debt of
+  500 produced an enterprise value of 770 and a 5.1x multiple against a true 10.0x.
+- Equity keeps both tiers because a partial equity stake is a real quantity — it is what
+  the buyer paid for their shares. The asymmetry between equity and enterprise value is
+  deliberate.
+
+Consequences:
+
+- The `enterprise_value_*` field family is renamed to `implied_enterprise_value_*`.
+- Multiples cannot be struck off as-transacted values structurally, rather than by
+  convention.
+- Currency and period-coherence questions remain open and block implementation: implied
+  enterprise value adds consideration in deal currency to net debt in the target's
+  reporting currency, and net debt anchors to announced date while the multiple
+  denominator carries its own period basis.
+- One item is parked: feeding `implied_enterprise_value` into `transaction_size` when
+  neither transaction value nor equity value is available. Control deals only.
+
+## 2026-08-10 - Transaction Value Follows Control
+
+Status: accepted.
+
+Decision:
+
+- `transaction_value` = `equity_value` + gross debt where the transaction conveys control.
+  Cash is not netted.
+- Below control, `transaction_value` = `equity_value`. No debt is added.
+- Exception: where the source states debt was assumed or refinanced as part of the
+  transaction, add the stated amount. This must come from deal terms, not from the balance
+  sheet.
+
+Context:
+
+- This mirrors consolidation. A controlling acquirer consolidates the target's balance
+  sheet and effectively takes on its debt. A minority buyer takes on none of it;
+  equity-method treatment consolidates nothing.
+- The accounting standards already draw this line — a step-up to control is a business
+  combination, a buyout of remaining minority is an equity transaction.
+
+Consequences:
+
+- **This redefines an existing field.** The prior rule added total debt unconditionally, so
+  previously computed rows for partial stakes will change value. A backfill decision is
+  required.
+- `transaction_value` equals `equity_value` for minority deals. Redundant but honest, and
+  it keeps `transaction_size` populated without a special case.
+- The reconciliation identity `transaction_value - cash = implied_enterprise_value` holds
+  for control deals only.
+
+## 2026-08-10 - Transaction Size as Universal Magnitude
+
+Status: accepted.
+
+Decision:
+
+- Add `transaction_size` — a single magnitude populated across all deal types.
+- Derived in aggregation. Never extracted; no extractor decides what belongs in it.
+- Waterfall: M&A takes `transaction_value`, then equity consideration where equity is
+  stated and debt unknown. Funding takes round size, then a sole investor's check.
+- `transaction_size_basis` is NOT NULL wherever the field is populated, and travels with it
+  in every export, sheet and view.
+- Named `transaction_size`, not `deal_size`, for vocabulary consistency with the rest of
+  the `transaction_*` schema.
+
+Context:
+
+- Reviewers presented with a single unlabeled value column picked the largest figure
+  available. Splitting the roles and stamping the basis makes that structurally harder.
+- An unqualified source figure — "acquired for $500MM" — populates `transaction_value` and
+  `transaction_size` only. It must never populate equity value or either implied value,
+  because grossing up an unqualified number and striking a multiple off it manufactures a
+  figure no source ever qualified.
+
+Consequences:
+
+- `transaction_size` must not be summed across bases. A control acquisition and a minority
+  check are different events and their sum is not a deal-volume figure. Enforce in the
+  query layer.
+- Sole-investor rounds are the only safe check-based fallback. Per-investor disclosure runs
+  around 30% for leads and under 5% for other participants, so summing whatever amounts
+  exist understates the round while presenting as a round size.
+- A share of transaction-value-basis rows carry figures whose debt-inclusivity is assumed
+  rather than determined, biasing private deals low on disclosure rather than size.
+
+## 2026-08-10 - Value Path Keyed on Where the Money Goes
+
+Status: accepted. Does not alter the `deal_type` enum, and adds no schema dimension.
+
+Decision:
+
+- Which value path applies depends on where the money goes, not on control or stake size.
+  - Money to a selling shareholder — M&A value path: `equity_value`, `transaction_value`,
+    `transaction_size`.
+  - Money into the company — funding value path: `post_money_valuation` and round size only.
+- Stake size does not determine the path. A minority stake purchase takes the M&A path with a
+  minority feature; a minority primary investment takes the funding path.
+- Features carrying the M&A distinctions: `is_minority`, `pre_existing_control`,
+  `acquires_remaining`.
+- Debt attaches only where `pre_existing_control` is false.
+- **No `capital_flow` or `instrument_class` field is introduced.** Both were considered and
+  rejected as premature taxonomy. The value path continues to key on `deal_type`.
+- Extraction rules are written as a test the model applies — did this money go into the
+  company or to a selling shareholder — rather than as a rule keyed on deal type. This is a
+  prompt instruction, not a stored field, which is what lets it survive taxonomy changes.
+
+Context:
+
+- `MINORITY_INVESTMENT` as defined spans growth equity rounds, strategic minority stakes and
+  PIPEs — primary and secondary capital in one bucket, discriminated by control rather than
+  by where the money went. Keying the value path on capital flow removes the ambiguity
+  without requiring the deal type itself to change.
+- Growth equity routinely combines a primary and a secondary leg in one transaction, so
+  capital flow needs a `both` state and the legs need separate amounts.
+- A 49.9% purchase by a holder already at 50.1% obtains no control and transfers no debt,
+  so `pct_acquired` alone is the wrong control test.
+
+Consequences:
+
+- `transaction_size` is stable across a misclassification between the two paths: both give
+  the same magnitude. Misclassification costs valuation coverage, not a wrong deal size.
+- The extraction rule survives any subsequent change to the deal-type enum, including the
+  open Decision #9 boundary, without revision.
+- Growth and VC handling is unchanged by this decision. Venture debt is out of scope —
+  flag from stories and handle separately.
+- Public ownership positions from 13D/13G filings remain out of scope. Positions are state
+  with a time dimension; transactions are discrete events. The two link rather than merge,
+  so nothing in the transaction model needs to anticipate them. Those filings remain valid
+  as sources of negotiated block purchases.
+
+## 2026-08-10 - VC vs Growth Boundary: DEFERRED to Decision #9
+
+Status: **deferred — no decision taken today.**
+
+Position:
+
+- Today's session discussed a boundary rule keyed on round label — a Series label meaning
+  VC, an institutional minority investment without one meaning growth. **That was proposed
+  without knowledge of the existing rule and is not adopted.**
+- The live rule in `deal_type_classifier.md` (0.6) keys types #9/#10 on **investor archetype
+  plus company profitability**, explicitly ignores round size and stage, and tie-breaks to
+  `VC_ROUND`.
+- Decision #9 is open, with the recorded lean toward `Series D+` implying `GROWTH_EQUITY` —
+  roughly the inverse of what was proposed today. Nothing in this session's discussion
+  should be read as settling it.
+
+Consequences:
+
+- The value-path decision above is deliberately independent of this boundary. Both
+  `VC_ROUND` and `GROWTH_EQUITY` are primary capital and take the same value path, so the
+  boundary can move without affecting value semantics.
+- Growth equity's role as a platform anchor is a separate argument for keeping the two types
+  distinct, and is unaffected by where the boundary is drawn.
+
+## 2026-08-10 - Funding Valuation Scope
+
+Status: accepted.
+
+Decision:
+
+- Funding rounds populate `post_money_valuation` only.
+- No `implied_equity_value` for funding rounds, and therefore no implied enterprise value.
+- Funding rounds produce no multiples of any kind.
+
+Context:
+
+- Enforced structurally rather than by rule. With no implied equity for a funding round,
+  there is nothing for debt to attach to and no enterprise value can compute. The
+  constraint holds because the inputs do not exist, not because a rule is remembered.
+- Post-money is as-converted and preference-laden, so post-money-derived multiples run rich
+  against M&A and should not blend with them.
+
+Consequences:
+
+- Two leaks are closed that are otherwise unblocked: implied enterprise value carries no
+  event-type restriction, and the multiple numerator type carries none either.
+- There is no cross-deal-type equity valuation comparison. Funding carries a stated
+  post-money; M&A carries implied equity; the two are not placed in a common column.
+- If post-money-based multiples are wanted later, post-money must be added as a deliberate
+  third numerator type. It should not arrive by inheritance.
+
+## 2026-08-10 - pct_acquired Default Retained, Now a Valuation Input
+
+Status: accepted.
+
+Decision:
+
+- Retain the 100% default where the event type conveys control and the source is silent.
+- Record `pct_acquired_source` as `stated` or `assumed`. Diagnostic only; it suppresses
+  nothing.
+- Never apply the default to inherently partial types — minority investments, growth
+  equity, secondaries, recapitalizations. There, silence means unknown.
+- Partiality language in the source suppresses the default and routes to review.
+
+Context:
+
+- Silence on an acquisition means whole-company in the large majority of cases; sources
+  that mean partial nearly always say so. Withholding the default would forfeit implied
+  values across most of the M&A set to guard a small error rate.
+- The field now grosses up every 100%-basis value, so an error propagates into every
+  multiple struck off that deal.
+
+Consequences:
+
+- The default's accuracy is inherited entirely from the deal-type classifier's precision on
+  the control/minority boundary. QA effort belongs there, not on the default.
+- The stamp exists so the error rate can be measured rather than debated.
+
+## 2026-08-10 - PENDING: equity_value Stake-Level Migration
+
+Status: **pending — decision required before the change merges.**
+
+Decision required:
+
+- Making `equity_value` consistently stake-level changes what stored rows mean. The control
+  path already stores stake-level equity; the funding path stores the 100% figure
+  (post-money). After the change, existing rows are mixed-semantics with nothing
+  distinguishing them.
+- Options: re-aggregate affected rows, or stamp existing rows with the semantics they were
+  written under.
+
+Context:
+
+- This is the second field in this batch whose meaning changes rather than being added —
+  see also the transaction-value redefinition above, which has the same backfill question
+  for partial stakes.
+- Escalated deliberately rather than left to the implementer. Merging without a decision
+  leaves a column that cannot be interpreted.
+
+Consequences:
+
+- Blocks the `equity_value` path-consistency fix from merging.
+- Whichever option is chosen should be applied consistently with the transaction-value
+  redefinition, since both alter stored meaning for partial-stake deals.
