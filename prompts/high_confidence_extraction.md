@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.12 (V2 alignment)
+**Version:** 0.13 (V2 alignment)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -194,6 +194,30 @@ dates:
   official announcement. Signals: "previously reported," "as reported
   earlier," "according to sources." Extract the rumor date if stated. Null
   if not a rumored deal or date not stated.
+
+CAPITAL RAISED — precondition (apply before the VALUE fields below)
+
+First determine whether the stated amount is capital being raised by, or invested
+INTO, the company — a funding round, growth investment, PIPE, or subscription for
+newly issued shares. Signals: "raised," "$X funding round," "investment of $X in
+<company>," "led a round," "to fund expansion / growth / R&D."
+
+If PRIMARY CAPITAL: the amount is not a value of any kind. Record it in round_size
+(below), set value.amount = null and value.type = null, and note the reason in notes
+as PRIMARY_CAPITAL. An amount invested as new capital is never the company's equity
+value, enterprise value, or transaction value — never gross it up.
+
+Otherwise continue to the VALUE fields and record normally. Buying shares from an
+existing holder — including a minority stake ("acquired the X% held by," "purchased
+the stake held by") — is an ordinary acquisition; its consideration is a real
+EQUITY_VALUE and must be recorded as one, not diverted to round_size.
+
+If the source does not permit the distinction, set value.type_confidence = LOW and
+note the ambiguity.
+
+round_size: Amount of primary capital raised by / invested into the company, as a
+number (no currency symbol). Populate ONLY for the primary-capital case above; null
+for ordinary acquisitions and secondary purchases.
 
 VALUE
 
@@ -448,6 +472,7 @@ Extract all transactions from this source.
         "qualifier": "string | null",
         "per_share_price": "number | null"
       },
+      "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "cash | stock | cash_and_stock | election | other | null",
       "target_financials": {

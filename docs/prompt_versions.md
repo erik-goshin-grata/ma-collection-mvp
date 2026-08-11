@@ -16,7 +16,7 @@ July 28, 2026.
 | Prompt | File | Current Version | Last Changed | V2 Enum Target | Notes |
 |---|---|---|---|---|---|
 | Deal Type Classifier | `prompts/deal_type_classifier.md` | 0.6 | 2026-07-28 | V2-2026-07-28 | v2_event_type + event_history_type rename; SPIN_OFF/SPLIT_OFF top-level; RECAPITALIZATION added; target_type lowercase |
-| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.12 | 2026-07-28 | V2-2026-07-28 | acquirer_type lowercase; period_type enum enforced; date_precision; rumor_date; financials_disclosure_status; consideration_type |
+| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.13 | 2026-08-10 | V2-2026-07-28 | 0.13: capital-raised precondition + `round_size` capture (primary capital → round_size, value fields null; spec §4.1 / gap 1). Prior: acquirer_type lowercase; period_type enum enforced; date_precision; rumor_date; financials_disclosure_status; consideration_type |
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section added; LTM/NTM non-interchangeable rule; period type semantic conflict example |
 | Deal Summary | `prompts/deal_summary.md` | 0.9 | 2026-07-28 | V2-2026-07-28 | Input fields updated to V2 names; RECAPITALIZATION framing added; NTM multiples in framing rule |
 | Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |

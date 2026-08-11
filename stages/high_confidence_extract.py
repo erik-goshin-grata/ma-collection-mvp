@@ -33,7 +33,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.12"
+_VERSION = "0.13"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal", "financials_disclosure_status"})
@@ -296,6 +296,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 d.get("rumor_date"),                 # new
                 v.get("amount"), v.get("currency"), v.get("type"),
                 v.get("type_confidence"), v.get("qualifier"), v.get("per_share_price"),
+                txn.get("round_size"),   # primary-capital capture (value fields null when set)
                 tf.get("revenue_amount"),
                 tf.get("revenue_period_type"),       # legacy column
                 rev_period_v2,                       # new: target_revenue_period_type_v2
@@ -329,6 +330,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         rumor_date = ?,
                         value_amount = ?,  value_currency = ?,  value_type = ?,
                         value_type_confidence = ?,  value_qualifier = ?,  per_share_price = ?,
+                        round_size = ?,
                         target_revenue = ?,
                         target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
                         target_revenue_period_end = ?,
@@ -377,6 +379,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         rumor_date,
                         value_amount, value_currency, value_type,
                         value_type_confidence, value_qualifier, per_share_price,
+                        round_size,
                         target_revenue,
                         target_revenue_period_type, target_revenue_period_type_v2,
                         target_revenue_period_end,
@@ -391,7 +394,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",
