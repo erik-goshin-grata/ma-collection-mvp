@@ -202,25 +202,24 @@ def _derive_is_take_private(fields: dict) -> int:
 
 _MINORITY_STAKE_TRANSITIONS = frozenset({
     "NEW_MINORITY_STAKE",
-    "MINORITY_INCREASING_STAKE",
-})
-
-_NON_MINORITY_STAKE_TRANSITIONS = frozenset({
-    "FULL_ACQUISITION",
     "MINORITY_ACQUIRING_MAJORITY",
     "MAJORITY_ACQUIRE_REMAINING",
     "MINORITY_ACQUIRING_REMAINING",
     "MAJORITY_INCREASING_STAKE",
+    "MINORITY_INCREASING_STAKE",
 })
+
+_NON_MINORITY_STAKE_TRANSITIONS = frozenset({"FULL_ACQUISITION"})
 
 
 def _derive_is_minority(fields: dict) -> int:
     """Derived minority-status flag.
 
-    Prefer explicit stake-transition evidence: minority means the buyer/investor
-    remains below control after the current transaction, not merely that the
-    current stake acquired is below 50%. Fall back to legacy taxonomy and stated
-    pct only when no transition evidence exists.
+    Prefer explicit stake-transition evidence: minority means the transaction
+    involves a minority interest/stake characteristic. It is not a proxy for
+    whether the buyer/investor has or obtains control after the transaction.
+    Fall back to legacy taxonomy and stated pct only when no transition evidence
+    exists.
     """
     transition = fields.get("stake_transition_type")
     if transition in _MINORITY_STAKE_TRANSITIONS:

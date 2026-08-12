@@ -263,8 +263,8 @@ CLASSIFICATION RULES:
   buyer's resulting ownership after the transaction. For example, if a buyer
   previously acquired an 80% controlling stake and the current release announces
   acquisition of the remaining 20%, the current event is ACQUISITION; the
-  remaining-stake transition is captured downstream by extraction, not by
-  changing the core event type, setting `is_minority`, or treating
+  remaining-stake transition and minority-stake feature are captured downstream
+  by extraction/aggregation, not by changing the core event type or treating
   pct_acquired as 100%.
 - If the release describes a deal closing, classify based on the original deal
   structure, but use event_history_type = CLOSED only when this is a later

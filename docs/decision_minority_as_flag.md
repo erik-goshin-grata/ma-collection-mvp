@@ -43,9 +43,10 @@ Why:
 
 Status: **accepted in harness.**
 
-Lumina/TNQTech showed that `pct_acquired < 50` is not sufficient to derive
-`is_minority = true`: an existing 80% owner acquiring the remaining 20% is not a
-minority investment.
+Lumina/TNQTech showed that `pct_acquired < 50` is not sufficient to describe
+post-transaction control state: an existing 80% owner acquiring the remaining
+20% is already in control and becomes a 100% owner. It still involves a
+minority-sized stake in the current transaction.
 
 Decision:
 
@@ -57,9 +58,10 @@ Decision:
 - `NULL`, not `UNKNOWN`, is the deliberate no-observation state. If the source
   does not provide enough explicit evidence, leave `stake_transition_type` null
   so aggregation can apply its conservative fallback rules.
-- Aggregation derives `is_minority` from `stake_transition_type` first, then
-  falls back to legacy `MINORITY_INVESTMENT` and stated `pct_acquired < 50` only
-  when no explicit transition evidence exists.
+- Aggregation derives `is_minority` from `stake_transition_type` first, using it
+  as evidence that the transaction involves a minority interest/stake feature,
+  then falls back to legacy `MINORITY_INVESTMENT` and stated
+  `pct_acquired < 50` only when no explicit transition evidence exists.
 - Value formulas are unchanged in this slice.
 
 Harness enum:
@@ -77,10 +79,10 @@ evidence is represented by null.
 
 `is_minority` rule:
 
-- `true` for `NEW_MINORITY_STAKE` and `MINORITY_INCREASING_STAKE`.
-- `false` for `FULL_ACQUISITION`, `MINORITY_ACQUIRING_MAJORITY`,
-  `MAJORITY_ACQUIRE_REMAINING`, `MINORITY_ACQUIRING_REMAINING`, and
-  `MAJORITY_INCREASING_STAKE`.
+- `true` for `NEW_MINORITY_STAKE`, `MINORITY_INCREASING_STAKE`,
+  `MAJORITY_INCREASING_STAKE`, `MAJORITY_ACQUIRE_REMAINING`,
+  `MINORITY_ACQUIRING_MAJORITY`, and `MINORITY_ACQUIRING_REMAINING`.
+- `false` for `FULL_ACQUISITION`.
 - Fallback only: if `stake_transition_type` is null, legacy rows with
   `MINORITY_INVESTMENT` or a stated `pct_acquired < 50` derive `is_minority`.
 
@@ -92,7 +94,7 @@ Canonical Lumina/TNQTech result:
 - Core event type: `ACQUISITION`.
 - `pct_acquired`: `20`.
 - `stake_transition_type`: `MAJORITY_ACQUIRE_REMAINING`.
-- `is_minority`: `false`.
+- `is_minority`: `true`.
 - The resulting 100% ownership must not replace the current transaction's 20%
   stake acquired.
 
@@ -101,24 +103,25 @@ Regression expectations:
 | Transition | Core event type | pct_acquired | stake_transition_type | is_minority |
 |---|---:|---:|---:|---:|
 | 0% -> 20% | `ACQUISITION` if secondary; funding type if primary | `20` | `NEW_MINORITY_STAKE` | `true` |
-| 30% -> 60% | `ACQUISITION` | `30` | `MINORITY_ACQUIRING_MAJORITY` | `false` |
-| 20% -> 100% | `ACQUISITION` | `80` | `MINORITY_ACQUIRING_REMAINING` | `false` |
-| 60% -> 80% | `ACQUISITION` | `20` | `MAJORITY_INCREASING_STAKE` | `false` |
+| 30% -> 60% | `ACQUISITION` | `30` | `MINORITY_ACQUIRING_MAJORITY` | `true` |
+| 20% -> 100% | `ACQUISITION` | `80` | `MINORITY_ACQUIRING_REMAINING` | `true` |
+| 60% -> 80% | `ACQUISITION` | `20` | `MAJORITY_INCREASING_STAKE` | `true` |
 | 20% -> 35% | `ACQUISITION` | `15` | `MINORITY_INCREASING_STAKE` | `true` |
-| 80% -> 100% | `ACQUISITION` | `20` | `MAJORITY_ACQUIRE_REMAINING` | `false` |
+| 80% -> 100% | `ACQUISITION` | `20` | `MAJORITY_ACQUIRE_REMAINING` | `true` |
+| 0% -> 100% | `ACQUISITION` | `100` | `FULL_ACQUISITION` | `false` |
 
 Downstream value implication:
 
 - This slice intentionally does not change transaction-value, implied-equity,
   enterprise-value, or multiple formulas.
-- The new field prevents `is_minority` from being wrong in explicit step-up
-  cases, but control/debt valuation refinements remain a separate decision.
+- The new field prevents `is_minority` from being mistaken for post-transaction
+  control state. Control/debt valuation refinements remain a separate decision.
 
 Validation:
 
 - Four-story live validation rerun on 2026-08-12:
   - Lumina/TNQTech: `ACQUISITION`, `pct_acquired=20`,
-    `stake_transition_type=MAJORITY_ACQUIRE_REMAINING`, `is_minority=0`.
+    `stake_transition_type=MAJORITY_ACQUIRE_REMAINING`, `is_minority=1`.
   - LMPG/Platinum: `ACQUISITION`, no explicit transition evidence,
     `stake_transition_type=null`, stable current default behavior.
   - Lydian Series A: `VC_ROUND`, `stake_transition_type=null`, `is_minority=0`.

@@ -123,7 +123,7 @@ def _test_lumina_remaining_stake_regression(failures: list[str]) -> None:
         "stake_transition_type": "MAJORITY_ACQUIRE_REMAINING",
     }
     flag = _derive_flags(fields)["is_minority"]
-    _assert_equal(failures, "lumina_remaining_20_not_minority", flag, 0)
+    _assert_equal(failures, "lumina_remaining_20_is_minority_feature", flag, 1)
     _assert_equal(
         failures,
         "lumina_remaining_20_pct_resolves_as_stated",
@@ -151,11 +151,12 @@ def _test_lumina_remaining_stake_regression(failures: list[str]) -> None:
 def _test_stake_transition_regressions(failures: list[str]) -> None:
     cases = [
         ("0_to_20", "ACQUISITION", 20, "NEW_MINORITY_STAKE", 1),
-        ("30_to_60", "ACQUISITION", 30, "MINORITY_ACQUIRING_MAJORITY", 0),
-        ("20_to_100", "ACQUISITION", 80, "MINORITY_ACQUIRING_REMAINING", 0),
-        ("60_to_80", "ACQUISITION", 20, "MAJORITY_INCREASING_STAKE", 0),
+        ("30_to_60", "ACQUISITION", 30, "MINORITY_ACQUIRING_MAJORITY", 1),
+        ("20_to_100", "ACQUISITION", 80, "MINORITY_ACQUIRING_REMAINING", 1),
+        ("60_to_80", "ACQUISITION", 20, "MAJORITY_INCREASING_STAKE", 1),
         ("20_to_35", "ACQUISITION", 15, "MINORITY_INCREASING_STAKE", 1),
-        ("80_to_100_lumina", "ACQUISITION", 20, "MAJORITY_ACQUIRE_REMAINING", 0),
+        ("80_to_100_lumina", "ACQUISITION", 20, "MAJORITY_ACQUIRE_REMAINING", 1),
+        ("0_to_100", "ACQUISITION", 100, "FULL_ACQUISITION", 0),
     ]
     for name, event_type, pct, transition, expected_flag in cases:
         fields = {

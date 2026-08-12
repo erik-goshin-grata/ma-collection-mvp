@@ -21,7 +21,8 @@ Minority cleanup is now accepted and implemented in this validation harness:
 `MINORITY_INVESTMENT` is no longer a validated core classifier output, minority
 status is derived as `is_minority`, and explicit ownership step-ups are captured
 with nullable `stake_transition_type` (`NULL`, not `UNKNOWN`, means insufficient
-explicit evidence). This does not change Grata production schema/enums.
+explicit evidence). `is_minority` is a transaction feature/flag, not a proxy for
+post-transaction control state. This does not change Grata production schema/enums.
 
 ---
 
@@ -72,7 +73,7 @@ Current versions:
 | 6 | `sec_enrich` | Extended lookback/lookahead window |
 | 7 | `low_confidence_extract` | v0.5 |
 | 8 | `entity_cluster` | Running |
-| 9 | `aggregate` | V2 + funding fields; multiples gated off funding; value-model §4.1/4.2 landed; derives `is_minority` from `stake_transition_type` before pct fallback |
+| 9 | `aggregate` | V2 + funding fields; multiples gated off funding; value-model §4.1/4.2 landed; derives transaction-feature `is_minority` from `stake_transition_type` before pct fallback |
 | 10 | `sec_documents` | Running |
 | 11 | `agreement_extract` | Running |
 | 12 | `summarize` | v0.9 — V2 input fields; M&A framing only (funding framing v0.10 pending) |
@@ -131,7 +132,7 @@ Key config flags:
 **Validation:**
 - Minority cleanup validated on a four-story live set:
   Lumina/TNQTech now yields `ACQUISITION`, `pct_acquired=20`,
-  `stake_transition_type=MAJORITY_ACQUIRE_REMAINING`, `is_minority=0`;
+  `stake_transition_type=MAJORITY_ACQUIRE_REMAINING`, `is_minority=1`;
   LMPG/Platinum remains evidence-limited and stable; Lydian remains `VC_ROUND`;
   Paradium/InfoSentience remains full `ACQUISITION`.
 - Funding path test corpus **built** — `data/pl_funding.db` (68 stranded VC/venture-debt

@@ -118,7 +118,7 @@ def _test_prompt_remaining_stake_routing_language(failures: list[str]) -> None:
         "previously acquired an 80% controlling stake",
         "acquisition of the remaining 20%",
         "the current event is ACQUISITION",
-        "not by\n  changing the core event type, setting `is_minority`, or treating",
+        "not by changing the core event type or treating",
     ]
     for snippet in required:
         if snippet not in text:
