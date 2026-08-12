@@ -151,6 +151,30 @@ funding framing; apply `AGGREGATION_READ_SOURCE=observation` after a validation 
 
 ## Pending re-aggregation — §4.2 (2026-08-10)
 
+### DISCHARGE (2026-08-12): first §4.2 re-aggregation done on the two live DBs
+
+The first owed re-aggregation (item 1 below) is **discharged on `pl_funding.db` and `ma_mvp.db`** —
+the two live targets. Both routed through `init_db` (columns asserted), full AGGREGATED→CLUSTERED
+reset with row-count assertions, real Stage 9, diff classified by decision lineage. `ma_valu8.db`
+/ `ma_grata.db` remain deferred (control-heavy fixtures, not read from). **The second re-aggregation
+(item 2, after `total_debt`+`cash`) is still owed** — and per the dormancy finding above it is
+substantive: §4.2's `EQUITY_PLUS_TOTAL_DEBT` branch has produced zero values on real data to date.
+
+A mid-run verification surfaced a decision violation in `_derive_implied_equity` (below), which was
+**fixed before `ma_mvp` ran** (`065a87d`). A corrective re-aggregation of `pl_funding.db` nulled its
+manufactured implied values; `ma_mvp` re-aggregated with the fix in place, so it corrected by never
+creating. Net implied-equity outcome:
+- `pl_funding.db`: 9 violation values nulled (2 tv-fallback + **7 live `post_money`-branch** funding
+  violations, incl. Base Power 13B, DeepX 3.14T); 3 legitimate equity-grossed values preserved.
+- `ma_mvp.db`: 1 tv-fallback (Genesis) prevented; 3 equity-grossed preserved; 0 post-money.
+
+**Run-note worth keeping:** the "exactly two value-model fields changed" assertion on the corrective
+`pl_funding` pass *earned its place by failing* — it tripped at 9 rows, forcing the investigation
+that found the 7 live `post_money` violations. A looser check would have passed and nobody would have
+looked. And: any claim about how many rows hold a value must be measured against **state**, never
+inferred from a NULL→val **diff** (the error that put a false "latent" claim into `decisions.md`,
+since corrected).
+
 §4.2 landed as CODE only (equity_value now stake-level; transaction_value threshold;
 + total_debt / transaction_value / transaction_value_basis / pct_acquired_source columns).
 Aggregation is **incremental** (only CLUSTERED rows are derived; existing AGGREGATED rows
@@ -206,7 +230,7 @@ delta on six HC *descriptive* fields (target/acquirer name+description, ticker, 
 observation model's finer per-source granularity, not this work. It is a latent-divergence item to
 resolve before any switch to `AGGREGATION_READ_SOURCE=observation`, tracked separately from §4.2.
 
-### FINDING (2026-08-12): implied_equity_value grossed up from an unqualified transaction_value — DECISION VIOLATION
+### FINDING (2026-08-12): implied_equity_value grossed up from an unqualified transaction_value — DECISION VIOLATION [RESOLVED `065a87d`, decision "implied_equity_value Derives From equity_value Only"]
 
 Step-7 verification on `pl_funding.db` surfaced a live bug that violates a recorded decision.
 `decisions.md` — **"Transaction Size as Universal Magnitude"** — states an unqualified source
