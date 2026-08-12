@@ -99,6 +99,17 @@ Key config flags:
 - `transaction_event_history` as date write target
 - Agreement observation supersession
 
+**Open-deal monitoring (placeholder — later):**
+- Capability we do not have: keep watching a deal in `ANNOUNCED` status for
+  follow-on SEC filings until it closes or dies, and feed them back in. Today
+  the pipeline is one-shot per discovery.
+- Stop conditions are the lifecycle filings we already fetch: **2.01 (close)**
+  and **1.02 (termination)** — keep these grouped with 1.01/8.01 when designing.
+- Half-built already: the observation ledger's diff-surfacing (a value moving
+  across filings over time) and the `event_history` ANNOUNCED→AMENDED→CLOSED/
+  TERMINATED concept. Missing piece is the scheduler that re-checks EDGAR for
+  new filings on still-open deals. Not designed; do not start without a decision.
+
 **Awaiting eng input:**
 - Field inventory + parity test — method decided (generate by origin);
   `docs/spec_field_parity_test.md` is landed but **ON HOLD** pending eng-team

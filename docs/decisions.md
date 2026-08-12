@@ -795,3 +795,134 @@ Consequences:
   answer to drift is a test that fails, not a reference document that goes stale.
 - Any committed field inventory must be generated output, not hand-maintained, or it becomes
   the same stale-document problem one layer down.
+
+## 2026-08-11 - Observation Write Path Must Cover Every Field Aggregation Reads
+
+Status: accepted.
+
+Decision:
+
+- **Two invariants**, because the observed defects fall into two shapes:
+  1. **Read parity** — every `staging_extraction` column that `_FIELDS` reads must have a
+     corresponding observation write. A field readable on the staging path and absent on the
+     observation path is a defect, not a configuration.
+  2. **Extraction reaches a reader** — every field an extraction prompt emits into a
+     `staging_extraction` column must be read by aggregation, or be allow-listed with a reason.
+     Invariant 1 alone cannot catch a field that is absent from `_FIELDS` in the first place.
+- **Remediation is to wire, not to delete.** Where a field is described below as *dropped*, that
+  means the data is being lost, and the fix is to connect it. No column is removed by this entry.
+- Extend observation writing to `stages/funding_hc_extract.py` under a new
+  `observation_source_stage` value, `FUNDING_HC_EXTRACT`, and add it to the observation loader's
+  accepted stages.
+- Add the 19 unwired fields to the appropriate observation field group.
+- Fields legitimately exclusive to one path — derived rather than extracted — are declared in an
+  explicit allow-list **with a reason**, never omitted silently.
+- Enforced by check 2 of `docs/spec_field_parity_test.md`, which becomes the mechanism that stops
+  this recurring.
+
+Context:
+
+- **No migration has ever updated the observation writer.** Verified 2026-08-11 across both
+  migrations:
+
+  | Migration | Staging columns added | Wired to both paths | In `_FIELDS` only | Read by neither |
+  |---|---|---|---|---|
+  | `002_v2_prompt_alignment` | 13 | 3 | 7 | 3 |
+  | `003_funding_path` | 14 | 1 | 12 | 1 |
+
+  The three wired in 002 are precisely the classifier-side fields. The one wired in 003 is
+  `round_size`, added retroactively by `e66c88c` as a bug fix rather than by the migration.
+
+- `stages/funding_hc_extract.py` contains no reference to the observation writer; only Stages 4a
+  and 7 import it. There is no `FUNDING_HC_EXTRACT` among the `observation_source_stage` values.
+  `[verified: stages/funding_hc_extract.py, lib/observation_writer.py — 2026-08-11]`
+
+- **This completes the original decision rather than widening it.** "Guarded Observation-Backed
+  Stage 9 Read Path" limited the loader to four stages and excluded `AGREEMENT_EXTRACT` because
+  agreement supersession is a separate design problem. That reason does not apply to funding HC
+  extraction, which is structurally identical to Stage 4a: source row, extraction, staging, no
+  supersession. Stage 4b simply did not exist when the decision was written —
+  `003_funding_path.sql` postdates it.
+
+- The acceptance criterion for keeping the observation path was "zero canonical transaction
+  diffs." That guarantee is currently false and has been since 002.
+
+Consequences:
+
+- **`AGGREGATION_READ_SOURCE=observation` is not switchable today.** Switching now nulls every
+  funding-path field and the seven V2 fields from 002. The default remains `staging` until the
+  coverage gap closes and parity is re-validated.
+- The 12 tier-2 funding fields are mechanical — they have staging columns and `_FIELDS` entries
+  already, and need only observation writes.
+- **Tier 3 is not uniform, but every case resolves from evidence — no intent call is needed.**
+  - `round_stage_category` — legitimately unread. `_derive_round_stage_category` computes it, and
+    `003_funding_path.sql` says so in a comment. Allow-list, with that reason.
+  - `target_type_v2`, `spin_split_type_v2` — **data being dropped; wire them.** Add to `_FIELDS`
+    with the legacy-fallback read, and to the observation write path.
+    `002_v2_prompt_alignment.sql` states the rule in its migration notes: *"Aggregation reads
+    `_v2` columns when non-null, falls back to legacy."* Three of the five `_v2` columns implement
+    that; these two do not. The file already says what was supposed to happen.
+  - `signing_date_precision` — **data being dropped; wire it.** Add to `_FIELDS`, to the
+    observation write path, and add the missing `transaction_record` column. Added to staging in
+    the same batch as `announced_date_precision` and `closed_date_precision`, both of which are
+    read; it also never received a `transaction_record` column, unlike the other two, so the same
+    omission occurred twice.
+
+  These are **local migration artifacts and stay local.** The `_v2` columns exist only in this
+  repo — zero occurrences in eng's `schemas.py` or `enums.py` `[verified: 2026-08-11]`. They are
+  our shadow of the V2 vocabulary during an expand-and-contract that has not yet contracted.
+  Nothing here belongs in an eng-facing document.
+- **`consideration_type` is resolved and is not a drop.** It is derived by
+  `_derive_consideration_type` from `consideration_components`, and the extracted value is
+  intentionally ignored. Allow-list entry with that reason.
+  `[verified: stages/aggregate.py — 2026-08-11]`
+- Re-validation of the observation path is owed once coverage closes, and should not be bundled
+  with either of the two owed re-aggregations.
+
+**Nothing open.** An earlier revision of this entry parked `target_type_v2`,
+`spin_split_type_v2` and `signing_date_precision` as intent calls for Erik. All three were
+subsequently resolved from the migration files themselves — see the tier-3 breakdown above — and
+the remediation for each is to wire, not to delete. Once the two invariants are accepted, this
+entry is mechanical.
+
+## 2026-08-11 - Round Currency Enters the Derived-Value Currency Tag
+
+Status: accepted.
+
+Decision:
+
+- Add a `round_size` currency column to `staging_extraction` and `transaction_record`, populated
+  from the `round.currency` the funding HC prompt already emits.
+- Generalize `deal_value_currency` resolution from ordered precedence to **unanimity or null**:
+  collect every currency present among the contributing sources; if all agree, tag with it; if any
+  two disagree, null.
+- No conversion. Tag-and-defer is unchanged.
+
+Context:
+
+- `prompts/funding_hc_extraction.md` emits `round.currency`, but `round_size` is a bare `REAL`
+  with no currency column anywhere in `schema/*.sql` or the `db.py` migration list.
+  `[verified: 2026-08-11]` A €50M round therefore stores as `round_size = 50000000`, indistinguishable
+  from dollars.
+- This reaches past funding. `round_size` is an input to `_derive_investment_amount` and the first
+  funding rung of the `transaction_size` waterfall (`docs/handoff_transaction_size.md`).
+- **Unanimity-or-null is not a change to the recorded rule; it is the same rule generalized.**
+  "deal_value_currency: single currency tag on derived values" set precedence
+  `valuation_currency` then `value_currency`, with a mismatch guard nulling on conflict. With two
+  sources, "ordered precedence plus null-on-mismatch" and "unanimity or null" are the same
+  function. Stating it as unanimity extends to a third source without inventing a tiebreak, and
+  preserves the property the original entry relied on: **the null is the queryable signal.**
+- An ordered precedence with three sources would require deciding whether round currency outranks
+  post-money currency — a question with no principled answer, since a round stated in euros with a
+  post-money in dollars is a genuine mismatch rather than a ranking problem.
+
+Consequences:
+
+- Rows where a source states round size and post-money in different currencies become null-tagged
+  and enter the same queryable mismatch set the original entry defined. Expected, not a defect.
+- The column must land through `_apply_migrations` **before** either owed re-aggregation runs, or
+  the re-aggregation writes without it. Assert the column is present before running.
+- `scripts/test_deal_value_currency.py` needs a third-source case: three currencies agreeing tags,
+  any two disagreeing nulls.
+- Per-field `*_currency` columns remain deferred to the §2.10 currency/FX work. This adds one
+  input to the existing single tag; it does not start the per-field build.
