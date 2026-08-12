@@ -16,9 +16,9 @@ Two scenarios:
      funding-only field (post_money_valuation). This is what fails if round_size is
      left out of FUNDING_FIELDS.
   B. Integration reality (the real Stage 4b call, include_stage3+hc+funding):
-     round_size is observed on an accepted stage (HC wins the dedup since round_size
-     is also in HC_FIELDS — fine, it propagates), target_name is observed (HC_EXTRACT),
-     and v2_event_type is observed (DT_CLASSIFY).
+     round_size is stamped FUNDING_HC_EXTRACT — funding runs before HC in the writer
+     so it wins the dedup and stamps truthfully (round_size is the one field in both
+     groups). target_name is observed (HC_EXTRACT), v2_event_type (DT_CLASSIFY).
 
 No live API calls. Runs against a temp DB built by init_db.
 
@@ -118,8 +118,11 @@ def _run() -> int:
     rs = _obs(20, "round_size")
     if rs is None:
         failures.append("B: round_size NOT observed by the full Stage 4b call")
-    elif rs["observation_source_stage"] not in _ACCEPTED:
-        failures.append(f"B: round_size stage not accepted: {rs['observation_source_stage']}")
+    elif rs["observation_source_stage"] != "FUNDING_HC_EXTRACT":
+        # Funding runs before HC in the writer, so it wins the dedup and stamps
+        # truthfully even when HC_FIELDS also contains round_size.
+        failures.append(f"B: round_size stage should be FUNDING_HC_EXTRACT, "
+                        f"got {rs['observation_source_stage']}")
     tn = _obs(20, "target_name")
     if tn is None:
         failures.append("B: target_name NOT observed")
@@ -139,8 +142,8 @@ def _run() -> int:
         return 1
     print("PASS funding observation coverage: A) include_funding alone yields "
           "round_size@FUNDING_HC_EXTRACT + post_money (self-sufficient, no HC leak); "
-          "B) full Stage 4b call yields round_size + target_name@HC_EXTRACT + "
-          "v2_event_type@DT_CLASSIFY")
+          "B) full Stage 4b call yields round_size@FUNDING_HC_EXTRACT (funding wins "
+          "dedup) + target_name@HC_EXTRACT + v2_event_type@DT_CLASSIFY")
     return 0
 
 

@@ -429,6 +429,21 @@ def write_staging_observations_for_extraction(
             observation_source_stage=_stage_name(observation_source_stage, "DT_CLASSIFY"),
             columns=columns,
         )
+    # Funding runs BEFORE HC deliberately. round_size is the one field in both
+    # FUNDING_FIELDS and HC_FIELDS; whichever group writes first wins the
+    # INSERT OR IGNORE dedup and sets the observation_source_stage. Writing funding
+    # first means a Stage 4b row stamps round_size FUNDING_HC_EXTRACT (truthful — it
+    # came from the funding stage). On the M&A path include_funding is not requested,
+    # so round_size stamps HC_EXTRACT (also truthful). Do not reorder back.
+    if include_funding:
+        inserted += _write_field_group(
+            conn,
+            row,
+            fields=FUNDING_FIELDS,
+            prompt_version=_row_value(row, "hc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "FUNDING_HC_EXTRACT"),
+            columns=columns,
+        )
     if include_hc:
         inserted += _write_field_group(
             conn,
@@ -459,15 +474,6 @@ def write_staging_observations_for_extraction(
             row,
             prompt_version=_row_value(row, "lc_prompt_version"),
             observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
-            columns=columns,
-        )
-    if include_funding:
-        inserted += _write_field_group(
-            conn,
-            row,
-            fields=FUNDING_FIELDS,
-            prompt_version=_row_value(row, "hc_prompt_version"),
-            observation_source_stage=_stage_name(observation_source_stage, "FUNDING_HC_EXTRACT"),
             columns=columns,
         )
     return inserted
