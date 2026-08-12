@@ -212,11 +212,11 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     target_ebitda_period_end    TEXT,
     financials_currency         TEXT,
 
-    -- Valuation multiples (derived; populated when source financials and value_type permit)
-    ev_to_revenue_ltm           REAL,        -- enterprise_value / target_revenue (when period_type = LTM/TTM)
-    ev_to_revenue_ntm           REAL,        -- enterprise_value / target_revenue (when period_type = NTM)
-    ev_to_ebitda_ltm            REAL,        -- enterprise_value / target_ebitda (when period_type = LTM/TTM)
-    ev_to_ebitda_ntm            REAL,        -- enterprise_value / target_ebitda (when period_type = NTM)
+    -- Valuation multiples (derived; populated when whole-company EV and source financials permit)
+    ev_to_revenue_ltm           REAL,        -- implied_enterprise_value / target_revenue (when period_type = LTM/TTM)
+    ev_to_revenue_ntm           REAL,        -- implied_enterprise_value / target_revenue (when period_type = NTM)
+    ev_to_ebitda_ltm            REAL,        -- implied_enterprise_value / target_ebitda (when period_type = LTM/TTM)
+    ev_to_ebitda_ntm            REAL,        -- implied_enterprise_value / target_ebitda (when period_type = NTM)
     multiple_quality            TEXT,        -- CALCULATED | NM | NOT_CALCULABLE
 
     -- Derived valuations (finding #8; computed in aggregate from captured primitives)
@@ -224,11 +224,14 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     equity_value                REAL,        -- canonical equity value
     equity_value_basis          TEXT,        -- STATED | PER_SHARE_X_SHARES
     implied_equity_value        REAL,        -- equity grossed up to 100% (equity / (pct_acquired/100))
-    enterprise_value            REAL,        -- canonical enterprise value
-    enterprise_value_basis      TEXT,        -- STATED | EQUITY_PLUS_NET_DEBT
+    implied_enterprise_value    REAL,        -- 100%-basis enterprise value, stated or implied_equity_value + net_debt
+    implied_enterprise_value_basis TEXT,     -- STATED | IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT | IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT
+    enterprise_value            REAL,        -- legacy compatibility mirror of implied_enterprise_value
+    enterprise_value_basis      TEXT,        -- legacy compatibility mirror of implied_enterprise_value_basis
     investment_amount           REAL,        -- funding/minority check (round size); kept distinct from equity (bug #8)
     deal_value_currency         TEXT,        -- currency of the derived value fields (§4.7); null on a valuation/value mismatch
-    total_debt                  REAL,        -- total debt, NOT net of cash. Manual interim input (extracted metric later); preserved across re-aggregation; input to transaction_value at pct_acquired>=50; net_debt is a different field (feeds implied_enterprise_value)
+    total_debt                  REAL,        -- total debt, NOT net of cash. Manual interim input (extracted metric later); preserved across re-aggregation; input to transaction_value at pct_acquired>=50 and, with cash_st, calculated net_debt
+    cash_st                     REAL,        -- cash + short-term equivalents/investments used with total_debt to calculate net_debt; manual interim input
     transaction_value           REAL,        -- Tier-1 as-transacted value (§2.1.1); as-reported, else equity (+ total debt at pct>=50)
     transaction_value_basis     TEXT,        -- STATED | EQUITY_BELOW_CONTROL | EQUITY_PLUS_TOTAL_DEBT
     pct_acquired_source         TEXT,        -- §2.6: stated | assumed (100% default for control types when silent)

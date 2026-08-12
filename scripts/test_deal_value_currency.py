@@ -58,7 +58,7 @@ def check_db_invariant(conn: sqlite3.Connection) -> list[str]:
     """The two data-level assertions, for a re-aggregated DB."""
     problems = []
     derived = ("equity_value IS NOT NULL OR implied_equity_value IS NOT NULL "
-               "OR enterprise_value IS NOT NULL OR investment_amount IS NOT NULL")
+               "OR implied_enterprise_value IS NOT NULL OR investment_amount IS NOT NULL")
     conflict = ("valuation_currency IS NOT NULL AND value_currency IS NOT NULL "
                 "AND valuation_currency != value_currency")
     has_currency = "(valuation_currency IS NOT NULL OR value_currency IS NOT NULL)"

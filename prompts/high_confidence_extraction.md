@@ -243,6 +243,13 @@ EQUITY_VALUE and must be recorded as one, not diverted to round_size.
 If the source does not permit the distinction, set value.type_confidence = LOW and
 note the ambiguity.
 
+Debt/cash guard: this prompt does not extract total_debt, net_debt, or cash_st.
+If a source states those figures, mention them in notes only. The deterministic
+aggregation layer may later calculate net_debt from total_debt - cash_st and
+implied_enterprise_value from implied_equity_value + net_debt. Never assume
+missing debt or cash/ST is zero, and never derive whole-company EV from
+stake-level equity_value plus debt.
+
 round_size: Amount of primary capital raised by / invested into the company, as a
 number (no currency symbol). Populate ONLY for the primary-capital case above; null
 for ordinary acquisitions and secondary purchases.
@@ -265,8 +272,9 @@ value:
       product yourself — see rule 1)
     TRANSACTION_VALUE — total consideration including assumed debt; often
       labelled "transaction value" or "total consideration"
-    ENTERPRISE_VALUE — EV (equity + debt - cash); often labelled
-      "enterprise value"
+    ENTERPRISE_VALUE — source-stated whole-company EV; often labelled
+      "enterprise value" or "including net debt." Do not compute EV from
+      equity value, debt, or cash in this extraction prompt.
     UNDISCLOSED — source explicitly states terms are not disclosed
   Null if no value is stated and source does not say undisclosed.
 - type_confidence: HIGH / MEDIUM / LOW — how confident you are in the type

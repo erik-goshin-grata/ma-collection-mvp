@@ -271,7 +271,8 @@ Consequences:
 
 ## 2026-08-10 - Two-Tier Value Model
 
-Status: accepted in principle; enterprise-value implementation under review.
+Status: accepted; implied-enterprise-value rewire implemented in the validation
+harness on 2026-08-12.
 
 Decision:
 
@@ -298,13 +299,22 @@ Context:
 
 Consequences:
 
-- The `enterprise_value_*` field family is renamed to `implied_enterprise_value_*`.
+- The canonical field family is `implied_enterprise_value_*`. Legacy
+  `enterprise_value` / `enterprise_value_basis` remain temporarily as
+  compatibility mirrors pending a later downstream inventory/reorganization.
 - Multiples cannot be struck off as-transacted values structurally, rather than by
   convention.
-- Currency and period-coherence questions remain open and block implementation: implied
-  enterprise value adds consideration in deal currency to net debt in the target's
-  reporting currency, and net debt anchors to announced date while the multiple
-  denominator carries its own period basis.
+- Evidence hierarchy for `implied_enterprise_value`:
+  1. Source-stated whole-company `ENTERPRISE_VALUE` populates
+     `implied_enterprise_value` directly.
+  2. Otherwise, calculate `implied_enterprise_value = implied_equity_value + net_debt`.
+  3. Reported/manual `net_debt` is preferred when available.
+  4. Otherwise calculate `net_debt = total_debt - Cash_ST` only when both
+     components exist on an appropriate basis.
+  5. Missing debt or cash/ST is never assumed to be zero.
+- Multiples use canonical Tier 2 whole-company valuation numerators
+  (`implied_enterprise_value` or `implied_equity_value` where applicable), not
+  `transaction_value` or stake-level `equity_value`.
 - One item is parked: feeding `implied_enterprise_value` into `transaction_size` when
   neither transaction value nor equity value is available. Control deals only.
 
@@ -637,17 +647,18 @@ Consequences:
 
 ## 2026-08-10 - Debt and Cash Inputs
 
-Status: accepted; amended 2026-08-10 (cash defined as `Cash_ST`). `total_debt` landed as a
-manual column; extraction deferred.
+Status: accepted; amended 2026-08-10 (cash defined as `Cash_ST`) and
+implementation-refined 2026-08-12. `total_debt`, `net_debt`, and `Cash_ST` are
+manual/interim transaction-record inputs in the harness; extraction remains
+deferred.
 
 Decision:
 
 - `total_debt` is **total debt, not net of cash**. It is the input to
   `transaction_value` at `pct_acquired ≥ 50`.
 - `net_debt` remains the input to `implied_enterprise_value`.
-- Both are manual columns on `transaction_record` for now, preserved across
-  re-aggregation.
-- **When extracted, `total_debt` and `cash` belong in `target_financials`** alongside
+- `net_debt`, `total_debt`, and `Cash_ST` are preserved across re-aggregation.
+- **When extracted, `total_debt` and `cash_st` belong in `target_financials`** alongside
   `target_revenue` and `target_ebitda` — with period type and `period_end_date` — not as
   standalone columns. Balance-sheet figures without a period are not usable in a bridge.
 - **`cash` is captured as a single field, `Cash_ST`** — cash + cash equivalents +
@@ -656,8 +667,17 @@ Decision:
   `net_debt = total_debt − Cash_ST`, which feeds `implied_enterprise_value`. `Cash_ST` must
   carry the same `period_end_date` as `total_debt`, or the derivation is incoherent.
 - Collection is flexible: researchers may supply components (`total_debt`, `Cash_ST`) or only
-  `net_debt`. A row with only `net_debt` yields an enterprise value and no calculated
-  transaction value. That is expected, not a defect.
+  `net_debt`. Reported/manual `net_debt` is preferred when present; otherwise
+  `net_debt` is calculated only when both `total_debt` and `Cash_ST` exist. A row
+  with only `net_debt` yields an enterprise value and no calculated transaction
+  value. That is expected, not a defect.
+
+SEC enrichment boundary:
+
+- SEC evidence in this harness is limited to transaction/merger documents,
+  relevant exhibits such as 99s, and manually collected values. This is not a
+  mandate for general SEC financial-statement mining for shares outstanding,
+  debt, cash, or financial denominators.
 
 Context:
 
@@ -681,11 +701,12 @@ Consequences:
   nothing downstream will catch it.
 - QA check available on manual inputs: `total_debt >= net_debt` wherever both are populated.
   Cash is non-negative, so `total_debt` can never be below `net_debt`.
-- Extracting `total_debt` and `cash` requires the period-anchoring question to be settled
-  first — which is the same open item that blocks the implied tier. The two are one piece of
-  work, not two.
-- A `Cash_ST` column would move `net_debt` from manual entry to derived. Not urgent; the manual
-  path continues to serve the rows that already have it.
+- Broad extraction of `total_debt` and `Cash_ST` requires the period-anchoring
+  question to be settled first. The manual/reported `net_debt` path can already
+  populate `implied_enterprise_value`; broad component extraction remains a later
+  piece of work.
+- `Cash_ST` now enables calculated `net_debt` where both components exist, while
+  preserving the manual/reported `net_debt` path for rows that already have it.
 - **Considered and rejected: capturing cash and short-term investments as separate
   components.** Debt needs components because two derived fields consume different
   combinations — `transaction_value` needs total debt, `implied_enterprise_value` needs net debt. Cash
@@ -767,7 +788,8 @@ Decision:
     the enum values.
   - **Derived** — from the aggregation code, where the `_derive_*` functions already declare
     inputs and outputs.
-  - **Manual** — a short explicit list. Currently `net_debt`, `total_debt`.
+  - **Manual** — a short explicit list. Currently `net_debt`, `total_debt`,
+    `cash_st`.
 - **Definition precedes parity.** Establish what the field set should be before testing that
   each field reaches all its homes. A parity test over an undefined field set checks
   consistency without checking correctness.

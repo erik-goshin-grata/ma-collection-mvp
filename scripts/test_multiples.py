@@ -51,8 +51,7 @@ def check(name, got, expected_quality, expected_slots=None):
 
 # ─── Case 1: ENTERPRISE_VALUE + LTM revenue + LTM EBITDA, both in range ──────
 r = _compute_multiples(
-    value_amount=500_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=500_000_000,
     value_currency="USD",
     target_revenue=100_000_000,
     target_revenue_period_type="LTM",
@@ -68,8 +67,7 @@ check("Case 1 — EV+LTM rev+ebitda in range → CALCULATED",
 
 # ─── Case 2: ENTERPRISE_VALUE + NTM revenue only ──────────────────────────────
 r = _compute_multiples(
-    value_amount=300_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=300_000_000,
     value_currency="USD",
     target_revenue=60_000_000,
     target_revenue_period_type="NTM",
@@ -84,8 +82,7 @@ check("Case 2 — NTM revenue only → CALCULATED, _ntm populated",
 
 # ─── Case 3: ENTERPRISE_VALUE + LTM EBITDA at 250x → NM ─────────────────────
 r = _compute_multiples(
-    value_amount=500_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=500_000_000,
     value_currency="USD",
     target_revenue=None,
     target_revenue_period_type=None,
@@ -100,8 +97,7 @@ check("Case 3 — EBITDA at 250x → NM, value preserved",
 
 # ─── Case 4: ENTERPRISE_VALUE + LTM EBITDA at 0.5x → NM (below 1x bound) ────
 r = _compute_multiples(
-    value_amount=50_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=50_000_000,
     value_currency="USD",
     target_revenue=None,
     target_revenue_period_type=None,
@@ -113,10 +109,9 @@ r = _compute_multiples(
 check("Case 4 — EBITDA at 0.42x (below 1x bound) → NM",
       r, "NM")
 
-# ─── Case 5: TRANSACTION_VALUE gate fails → NOT_CALCULABLE ───────────────────
+# ─── Case 5: no Tier-2 EV numerator → NOT_CALCULABLE ────────────────────────
 r = _compute_multiples(
-    value_amount=500_000_000,
-    value_type="TRANSACTION_VALUE",
+    implied_enterprise_value=None,
     value_currency="USD",
     target_revenue=100_000_000,
     target_revenue_period_type="LTM",
@@ -125,14 +120,13 @@ r = _compute_multiples(
     financials_currency="USD",
     log=log, cluster_id="tc_test5",
 )
-check("Case 5 — TRANSACTION_VALUE → NOT_CALCULABLE",
+check("Case 5 — Tier-1 transaction/stake values unavailable as EV numerator → NOT_CALCULABLE",
       r, "NOT_CALCULABLE",
       {"ev_to_revenue_ltm": None, "ev_to_ebitda_ltm": None})
 
 # ─── Case 6: UNDISCLOSED + null financials → NOT_CALCULABLE ──────────────────
 r = _compute_multiples(
-    value_amount=None,
-    value_type="UNDISCLOSED",
+    implied_enterprise_value=None,
     value_currency=None,
     target_revenue=None,
     target_revenue_period_type=None,
@@ -146,8 +140,7 @@ check("Case 6 — UNDISCLOSED + null financials → NOT_CALCULABLE",
 
 # ─── Case 7: Currency mismatch (USD value, EUR EBITDA) → NM ──────────────────
 r = _compute_multiples(
-    value_amount=500_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=500_000_000,
     value_currency="USD",
     target_revenue=None,
     target_revenue_period_type=None,
@@ -162,8 +155,7 @@ check("Case 7 — currency mismatch USD/EUR → NM",
 
 # ─── Case 8: TTM treated as LTM → CALCULATED, populated in _ltm slot ─────────
 r = _compute_multiples(
-    value_amount=500_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=500_000_000,
     value_currency="USD",
     target_revenue=100_000_000,
     target_revenue_period_type="TTM",
@@ -178,8 +170,7 @@ check("Case 8 — TTM treated as LTM → CALCULATED, ev_to_revenue_ltm populated
 
 # ─── Case 9: FY period_type → NOT_CALCULABLE (no LTM/NTM slot) ───────────────
 r = _compute_multiples(
-    value_amount=500_000_000,
-    value_type="ENTERPRISE_VALUE",
+    implied_enterprise_value=500_000_000,
     value_currency="USD",
     target_revenue=100_000_000,
     target_revenue_period_type="FY",

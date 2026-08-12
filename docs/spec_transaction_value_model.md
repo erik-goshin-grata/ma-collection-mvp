@@ -101,7 +101,7 @@ Whole-company valuation, normalized for comparison. **The only legal multiple nu
 | Field | Definition | Scope |
 |---|---|---|
 | `implied_equity_value` | Equity value on a 100% basis. | M&A |
-| `implied_enterprise_value` | `implied_equity_value` + total_debt − cash. | M&A |
+| `implied_enterprise_value` | Source-stated whole-company EV, otherwise `implied_equity_value` + `net_debt`. | M&A |
 
 > **"Implied" means 100%-basis, not "derived."**
 > A source-stated figure populates these fields exactly as a computed one does.
@@ -111,23 +111,20 @@ Whole-company valuation, normalized for comparison. **The only legal multiple nu
 
 Funding rounds do not populate Tier 2. See §2.11.
 
+For calculated EV, reported/manual `net_debt` is preferred. If `net_debt` is not
+reported, it may be calculated as `total_debt - Cash_ST` only when both inputs
+exist on an appropriate basis. Missing debt or cash/ST is never assumed to be
+zero.
+
 ---
 
 ### 2.2 One EV field
 
-`enterprise_value` (stake-level) is **removed**. Partial equity plus full debt corresponds to
-no economic quantity.
-
-**The defect is currently latent, not live**
-`[verified: stages/aggregate.py, stages/export.py, 2026-08-10]`. Multiples strike off the
-*stated* enterprise value — `_compute_multiples` gates on `value_type == ENTERPRISE_VALUE`
-and reads `value_amount` — so the derived figure never reaches a multiple. It is also absent
-from `export.py`, and it only computes where a researcher has supplied `net_debt` manually.
-
-Two changes would make it live, and neither should happen before the rewire:
-
-- **Exporting the derived enterprise value**
-- **Pointing multiples at the derived figure instead of the stated one**
+`enterprise_value` (stake-level) is **removed from the target semantic model**.
+Partial equity plus full debt corresponds to no economic quantity. In the current
+harness implementation, legacy `enterprise_value` / `enterprise_value_basis`
+remain temporarily as compatibility mirrors of `implied_enterprise_value` /
+`implied_enterprise_value_basis`; they are not canonical downstream fields.
 
 All three routes to an EV converge on `implied_enterprise_value`:
 
@@ -135,12 +132,13 @@ All three routes to an EV converge on `implied_enterprise_value`:
 |---|---|
 | Source states an EV at a partial stake | `as_reported` |
 | Source states an EV generally | `as_reported` |
-| Computed from `implied_equity_value` + total_debt − cash | `calculated` |
+| Computed from `implied_equity_value` + reported `net_debt` | `calculated` |
+| Computed from `implied_equity_value` + (`total_debt` − `Cash_ST`) | `calculated` |
 
 At 100% the gross-up is a no-op, so the control case needs no separate field.
 
 **Reconciliation identity (control deals at 100%):**
-`transaction_value − cash = implied_enterprise_value`
+`transaction_value − Cash_ST = implied_enterprise_value`
 
 The identity does not hold below control, where TV carries no debt by design (§2.1.1).
 
@@ -450,10 +448,10 @@ position into control — see §2.1.1.
 
 Funding rounds populate `post_money_valuation` and **not** `implied_equity_value`.
 
-This is enforced structurally rather than by rule. `implied_enterprise_value` is defined as
-`implied_equity_value + total_debt − cash`; with no implied equity for funding rounds, no EV can
-compute. "Funding never produces an EV" holds because the inputs do not exist, not because a
-rule is remembered.
+This is enforced structurally rather than by rule. Calculated
+`implied_enterprise_value` requires `implied_equity_value + net_debt`; with no
+implied equity for funding rounds, no EV can compute. "Funding never produces an
+EV" holds because the inputs do not exist, not because a rule is remembered.
 
 **Two leaks this closes.** Neither is currently blocked:
 
@@ -539,22 +537,18 @@ derived valuation fields are latent, because nothing downstream consumes them ye
    reader must decode. Apply **jointly with the `transaction_value` redefinition** (§2.1.1),
    since both alter partial-stake meaning.
 
-3. **`implied_enterprise_value` does not exist in code. — LATENT. Parked.**
-   `_derive_enterprise_value` returns `equity_value + net_debt` with no control gate, fed a
-   stake-level equity. Coherent only at 100%.
-   **Fix (when unparked):** feed it `implied_equity_value`, rename the output to
-   `implied_enterprise_value`, delete the stake-level path, and make the tier boundary
-   structural — stake-level `equity_value` is a terminal leaf that never reaches EV or
-   multiples.
+3. **`implied_enterprise_value` rewire is implemented.**
+   `_derive_implied_enterprise_value` now consumes source-stated whole-company EV,
+   or `implied_equity_value + net_debt`. Reported/manual `net_debt` is preferred;
+   otherwise `net_debt` is calculated from `total_debt - Cash_ST` only when both
+   components exist. Stake-level `equity_value` is a terminal Tier 1 leaf that
+   never reaches EV or multiples. Legacy `enterprise_value` mirrors the canonical
+   field for compatibility only.
 
-   **Blocked on §2.10 items 1 and 2** (currency, period coherence), which the tier model names
-   as dependencies. Latent today; **the guard is not to export the derived EV and not to
-   repoint multiples at it** before the rewire lands.
-
-4. **`net_debt` is manual and unsplit.** Not extracted or derived; researcher-supplied and
-   preserved across re-aggregation. **Open:** single `net_debt` vs separate `debt` + `cash`.
-   Note that period anchoring is unresolved either way — debt and cash must come from the same
-   period, anchored to the announced date, or the bridge is incoherent.
+4. **`net_debt` may be reported or component-derived.** `net_debt`, `total_debt`,
+   and `Cash_ST` are preserved across re-aggregation. Period anchoring remains
+   unresolved for broad extraction: debt and cash must come from the same period,
+   anchored to the announced date, or the bridge is incoherent.
 
 5. **Share count dormant.** The `per_share_price × shares` path is inert because `sec_shares`
    is hardcoded `None`. Public-deal equity value depends on diluted share count from the SEC
@@ -681,8 +675,10 @@ Ordered by live-vs-latent, not by section number.
    capture-field prerequisite.
 3. **§4.2 + re-aggregation. Latent, cleanup.** Consistent stake-level `equity_value`, applied
    jointly with the `transaction_value` redefinition.
-4. **§2.10 items 1 and 2 — currency and period coherence.** These unblock the implied tier.
-5. **§4.3 — EV rewire.** Parked until step 4 resolves.
+4. **§2.10 items 1 and 2 — currency and period coherence.** These unblock broad
+   balance-sheet extraction for `total_debt` and `Cash_ST`.
+5. **§4.3 — EV rewire.** Implemented in the harness; legacy `enterprise_value`
+   cleanup is deferred to downstream inventory/reorganization.
 6. **§4.6 — export the valuation fields.** Must follow steps 3 and 5; it is the change that
    makes the latent gaps live.
 7. **§4.5, §4.7, §4.8** — share count, currency insert, enum alignment.

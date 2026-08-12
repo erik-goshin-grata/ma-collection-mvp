@@ -101,6 +101,19 @@ employee_group, spac, consortium, other_financial_sponsor, unknown
 value_type values: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE,
 UNDISCLOSED
 
+Value model:
+- transaction_value is Tier 1 as-transacted transaction size/value.
+- equity_value is Tier 1 stake-level equity consideration for the stake acquired.
+- implied_equity_value is Tier 2 100%-basis equity value.
+- implied_enterprise_value is the canonical Tier 2 100%-basis enterprise value.
+- Source-stated whole-company ENTERPRISE_VALUE may feed implied_enterprise_value.
+- Otherwise implied_enterprise_value is calculated from implied_equity_value +
+  net_debt. net_debt may be reported directly or calculated from total_debt -
+  cash_st. Never assume missing debt or cash/ST is zero.
+- Never derive whole-company EV from stake-level equity_value + debt.
+- Financial multiples use Tier 2 whole-company valuation numerators, not
+  transaction_value or stake-level equity_value.
+
 period_type values: LTM, NTM, ANNUAL, QUARTERLY, INTERIM_YTD
 
 date_precision values: exact, month, quarter, year
@@ -283,10 +296,10 @@ Output:
   "chosen_observation_id": 2,
   "chosen_value": 3800000000,
   "aggregation_confidence": "HIGH",
-  "reasoning": "T1 equity value is the more precise figure; T2 enterprise value includes debt assumption. Both are valid but represent different things — equity value is the canonical deal value, EV should populate enterprise_value field separately.",
+  "reasoning": "T1 equity value is the more precise stake-level figure; T2 enterprise value is a whole-company EV figure. Both are valid but represent different things — equity value is Tier 1 stake-level consideration, while EV should populate implied_enterprise_value separately.",
   "flagged_for_review": true,
   "conflict_severity": "SEMANTIC",
-  "notes": "Orchestrator should populate both value_amount (equity) and enterprise_value (from T2) rather than treating this as a conflict.",
+  "notes": "Orchestrator should preserve both value_amount (equity) and implied_enterprise_value (from T2/source-stated EV) rather than treating this as a simple numeric conflict.",
   "prompt_version": "aggregation:0.4"
 }
 ```

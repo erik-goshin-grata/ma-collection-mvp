@@ -21,6 +21,7 @@ from stages.aggregate import (
     _derive_enterprise_value,
     _derive_flags,
     _derive_implied_equity,
+    _derive_implied_enterprise_value,
     _derive_transaction_value,
     _resolve_pct_acquired,
 )
@@ -101,18 +102,19 @@ def _test_valuation_guards(failures: list[str]) -> None:
         (600.0, "EQUITY_BELOW_CONTROL"),
     )
 
-    # Existing EV derivation remains independent of minority flag.
+    # Whole-company EV may be source stated, but not calculated from stake-level
+    # equity_value + debt/cash without implied_equity_value.
     _assert_equal(
         failures,
-        "enterprise_value_stated_preserved",
-        _derive_enterprise_value(125.0, "ENTERPRISE_VALUE", None, None),
+        "implied_enterprise_value_stated_preserved",
+        _derive_implied_enterprise_value(125.0, "ENTERPRISE_VALUE", None, None, None, None),
         (125.0, "STATED"),
     )
     _assert_equal(
         failures,
-        "enterprise_value_equity_plus_net_debt_preserved",
+        "legacy_enterprise_value_no_stake_level_calc",
         _derive_enterprise_value(None, None, 100.0, 20.0),
-        (120.0, "EQUITY_PLUS_NET_DEBT"),
+        (None, None),
     )
 
 

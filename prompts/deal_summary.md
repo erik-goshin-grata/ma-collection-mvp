@@ -196,6 +196,11 @@ VALUE FRAMING
 - TRANSACTION_VALUE: "valued at approximately $X"
 - UNDISCLOSED: "Financial terms were not disclosed"
 
+Tier guard: transaction value and stake-level equity value describe what changed
+hands. They are not financial-multiple numerators. EV/Revenue and EV/EBITDA
+multiples, when present in the input, are derived from a Tier 2 whole-company
+valuation numerator such as implied_enterprise_value.
+
 When premium stated in source: "representing a Y% premium to [Target]'s prior
 closing price." Only when explicit in source — do not compute.
 
@@ -347,7 +352,7 @@ Output:
   "summary_text": "On April 15, 2026, Acme Capital Partners, a private equity firm focused on technology and industrial software platforms, announced an agreement to acquire BetaCo, Inc. (NASDAQ: BETA) for $42.00 per share in cash, valuing the company at approximately $2.4 billion. The transaction values BetaCo at approximately 7.5x LTM revenue and 25.3x LTM EBITDA. Upon completion, BetaCo will become a private company. Goldman Sachs served as financial advisor and Skadden as legal counsel to BetaCo; Evercore served as financial advisor and Kirkland & Ellis as legal counsel to Acme Capital.",
   "word_count": 94,
   "model_confidence": "HIGH",
-  "notes": "Take-private flag true; per-share and aggregate equity value framing. LTM multiples included.",
+  "notes": "Take-private flag true; per-share and aggregate equity value framing. LTM multiples included from the derived Tier 2 whole-company EV numerator.",
   "prompt_version": "deal_summary:0.9"
 }
 ```

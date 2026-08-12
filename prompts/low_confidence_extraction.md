@@ -392,7 +392,7 @@ Input:
 V2 EVENT TYPE: ACQUISITION
 TARGET TYPE: standalone_company
 EVENT HISTORY TYPE: ANNOUNCED
-DEAL VALUE: 4500000000 USD (ENTERPRISE_VALUE)
+DEAL VALUE: 4500000000 USD (EQUITY_VALUE)
 
 TITLE: Acme Corp to Be Acquired by Zenith Capital in $4.5 Billion Transaction
 BODY: Acme Corp (NYSE: ACME) entered into a definitive merger agreement with Zenith Capital Partners for $45.00 per share in cash. The agreement includes a 35-day "go-shop" period during which Acme's board may solicit alternative proposals. A termination fee of $135 million is payable by Acme if the agreement is terminated under specified circumstances. Zenith will pay a reverse termination fee of $270 million, representing approximately 6% of the equity value, if the transaction fails to close due to regulatory reasons. The transaction is subject to customary regulatory approvals, including HSR clearance.
@@ -403,7 +403,7 @@ Output:
 {
   "advisors": [],
   "consideration_components": [
-    {"form": "CASH", "amount": 4500000000, "percentage": 100.0, "description": "$45.00 per share cash"}
+    {"form": "CASH", "amount": 4500000000, "percentage": 100.0, "description": "$45.00 per share cash aggregate equity consideration"}
   ],
   "flags": {
     "includes_earnout": false,

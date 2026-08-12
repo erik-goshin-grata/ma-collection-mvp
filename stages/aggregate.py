@@ -310,8 +310,7 @@ def _derive_round_stage_category(round_label: str | None) -> str | None:
 
 
 def _compute_multiples(
-    value_amount: float | None,
-    value_type: str | None,
+    implied_enterprise_value: float | None,
     value_currency: str | None,
     target_revenue: float | None,
     target_revenue_period_type: str | None,
@@ -324,8 +323,8 @@ def _compute_multiples(
 ) -> dict:
     """Compute EV/Revenue and EV/EBITDA multiples.
 
-    Requires value_type = ENTERPRISE_VALUE. TTM is treated as LTM (interchangeable
-    industry usage). Cross-currency pairs are flagged NM without conversion.
+    Requires a whole-company implied_enterprise_value. TTM is treated as LTM
+    (interchangeable industry usage). Cross-currency pairs are flagged NM without conversion.
     Plausible ranges: EV/Revenue 0.1x–50x, EV/EBITDA 1x–100x.
     """
     result: dict[str, Any] = {
@@ -340,7 +339,7 @@ def _compute_multiples(
     if v2_event_type in _FUNDING_EVENT_TYPES:
         return result
 
-    if value_type != "ENTERPRISE_VALUE" or not value_amount or value_amount <= 0:
+    if not implied_enterprise_value or implied_enterprise_value <= 0:
         return result
 
     currency_mismatch = bool(
@@ -373,7 +372,7 @@ def _compute_multiples(
         if currency_mismatch:
             calculated_out_of_range = True
             continue
-        multiple = round(value_amount / raw_value, 2)
+        multiple = round(implied_enterprise_value / raw_value, 2)
         result[slot] = multiple
         lo, hi = _RANGES[metric]
         if lo <= multiple <= hi:
@@ -547,24 +546,44 @@ def _derive_implied_equity(
     return equity_value
 
 
+def _derive_implied_enterprise_value(
+    value_amount: float | None,
+    value_type: str | None,
+    implied_equity_value: float | None,
+    net_debt: float | None,
+    total_debt: float | None,
+    cash_st: float | None,
+) -> tuple[float | None, str | None]:
+    """Canonical 100%-basis enterprise value + basis.
+
+    STATED                                — source stated a whole-company EV.
+    IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT — implied_equity_value + source/manual net_debt.
+    IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT — implied_equity_value + total_debt - cash_st.
+    Returns (None, None) when neither path is satisfiable.
+    """
+    if value_type == "ENTERPRISE_VALUE" and value_amount and value_amount > 0:
+        return float(value_amount), "STATED"
+    if implied_equity_value is None:
+        return None, None
+    if net_debt is not None:
+        return round(implied_equity_value + net_debt, 2), "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT"
+    if total_debt is not None and cash_st is not None:
+        return round(implied_equity_value + total_debt - cash_st, 2), "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT"
+    return None, None
+
+
 def _derive_enterprise_value(
     value_amount: float | None,
     value_type: str | None,
     equity_value: float | None,
     net_debt: float | None,
 ) -> tuple[float | None, str | None]:
-    """Canonical enterprise value + basis.
-
-    STATED               — source stated an EV figure (value_type=ENTERPRISE_VALUE).
-    EQUITY_PLUS_NET_DEBT — equity + net_debt. net_debt is a manual collection input
-                           in the interim (not extracted), so this basis is null until
-                           a researcher supplies net_debt.
-    Returns (None, None) when neither path is satisfiable.
+    """Legacy compatibility wrapper; canonical code should use
+    _derive_implied_enterprise_value. The old stake-level equity + net debt path
+    is intentionally disabled.
     """
     if value_type == "ENTERPRISE_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if equity_value is not None and net_debt is not None:
-        return round(equity_value + net_debt, 2), "EQUITY_PLUS_NET_DEBT"
     return None, None
 
 
@@ -1026,26 +1045,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             txn_status = _derive_transaction_status(
                 field_values.get("event_history_type"), field_values.get("closed_date")
             )
-            multiples = _compute_multiples(
-                value_amount=field_values.get("value_amount"),
-                value_type=field_values.get("value_type"),
-                value_currency=field_values.get("value_currency"),
-                target_revenue=field_values.get("target_revenue"),
-                target_revenue_period_type=(
-                    field_values.get("target_revenue_period_type_v2")
-                    or field_values.get("target_revenue_period_type")
-                ),
-                target_ebitda=field_values.get("target_ebitda"),
-                target_ebitda_period_type=(
-                    field_values.get("target_ebitda_period_type_v2")
-                    or field_values.get("target_ebitda_period_type")
-                ),
-                financials_currency=field_values.get("financials_currency"),
-                log=log,
-                cluster_id=cluster_id,
-                v2_event_type=field_values.get("v2_event_type") or field_values.get("deal_type"),
-            )
-
             # Derive round_stage_category from round_label
             round_stage_category = _derive_round_stage_category(
                 field_values.get("round_label")
@@ -1054,18 +1053,19 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Check for existing transaction_record to determine version and to
             # preserve the manual net_debt input across re-aggregation.
             existing = conn.execute(
-                "SELECT aggregation_version, net_debt, total_debt FROM transaction_record WHERE transaction_id=?",
+                "SELECT aggregation_version, net_debt, total_debt, cash_st FROM transaction_record WHERE transaction_id=?",
                 (cluster_id,),
             ).fetchone()
             agg_version = (existing["aggregation_version"] + 1) if existing else 1
 
             # Derive valuations (the deterministic job — LLM captured primitives only).
             # sec_shares comes from SEC enrichment once it runs; None on PR-only data.
-            # net_debt and total_debt are manual collection inputs in the interim
-            # (total_debt extraction is a later piece); keep any stored value.
+            # net_debt, total_debt, and cash_st are manual collection inputs in
+            # the interim; keep any stored value.
             sec_shares = None
             net_debt = existing["net_debt"] if existing else None
             total_debt = existing["total_debt"] if existing else None
+            cash_st = existing["cash_st"] if existing else None
             pct_resolved, pct_acquired_source = _resolve_pct_acquired(
                 field_values, derived["is_minority"]
             )
@@ -1082,11 +1082,35 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Currency companion for the derived value fields; null on a genuine
             # currency mismatch (§4.7 — the null is itself the queryable signal).
             deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
-            enterprise_value, enterprise_value_basis = _derive_enterprise_value(
+            implied_enterprise_value, implied_enterprise_value_basis = _derive_implied_enterprise_value(
                 field_values.get("value_amount"),
                 field_values.get("value_type"),
-                equity_value,
+                implied_equity_value,
                 net_debt,
+                total_debt,
+                cash_st,
+            )
+            # Legacy compatibility columns mirror the canonical Tier-2 field until
+            # downstream readers are moved.
+            enterprise_value = implied_enterprise_value
+            enterprise_value_basis = implied_enterprise_value_basis
+            multiples = _compute_multiples(
+                implied_enterprise_value=implied_enterprise_value,
+                value_currency=field_values.get("value_currency"),
+                target_revenue=field_values.get("target_revenue"),
+                target_revenue_period_type=(
+                    field_values.get("target_revenue_period_type_v2")
+                    or field_values.get("target_revenue_period_type")
+                ),
+                target_ebitda=field_values.get("target_ebitda"),
+                target_ebitda_period_type=(
+                    field_values.get("target_ebitda_period_type_v2")
+                    or field_values.get("target_ebitda_period_type")
+                ),
+                financials_currency=field_values.get("financials_currency"),
+                log=log,
+                cluster_id=cluster_id,
+                v2_event_type=field_values.get("v2_event_type") or field_values.get("deal_type"),
             )
 
             # Upsert transaction_record
@@ -1122,11 +1146,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     use_of_proceeds, has_board_seat, board_seat_notes,
                     is_current, aggregation_version, updated_at,
                     net_debt, equity_value, equity_value_basis,
-                    implied_equity_value, enterprise_value, enterprise_value_basis,
+                    implied_equity_value, implied_enterprise_value, implied_enterprise_value_basis,
+                    enterprise_value, enterprise_value_basis,
                     investment_amount, deal_value_currency,
-                    total_debt, transaction_value, transaction_value_basis, pct_acquired_source
+                    total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1227,11 +1252,14 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     equity_value,
                     equity_value_basis,
                     implied_equity_value,
+                    implied_enterprise_value,
+                    implied_enterprise_value_basis,
                     enterprise_value,
                     enterprise_value_basis,
                     investment_amount,
                     deal_value_currency,
                     total_debt,
+                    cash_st,
                     transaction_value,
                     transaction_value_basis,
                     pct_acquired_source,

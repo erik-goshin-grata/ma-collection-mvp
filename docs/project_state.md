@@ -13,9 +13,15 @@ as-transacted (`equity_value` stake-level, `transaction_value`, `transaction_siz
 vs Tier 2 100%-basis (`implied_equity_value`, `implied_enterprise_value`, the only
 legal multiple numerators). Design is landed in `docs/decisions.md` (2026-08-10
 entries) and `docs/spec_transaction_value_model.md`; code landings §4.1/4.2/4.7 are
-in. The first §4.2 re-aggregation is discharged on the two live DBs; the second
-re-aggregation remains owed after `total_debt` + `Cash_ST` extraction. All 14
-stages + the funding branch remain wired and running.
+in, and the implied-enterprise-value rewire is now implemented in the harness.
+Canonical `implied_enterprise_value` is populated from source-stated whole-company
+EV or from `implied_equity_value + net_debt`; reported/manual `net_debt` is
+preferred, otherwise `net_debt = total_debt - Cash_ST` only when both components
+exist. Missing debt or cash/ST remains null; no zero assumptions. Legacy
+`enterprise_value` remains only as a compatibility mirror pending later inventory
+and reorganization. The first §4.2 re-aggregation is discharged on the two live
+DBs; the second re-aggregation remains owed after broader `total_debt` + `Cash_ST`
+collection/extraction. All 14 stages + the funding branch remain wired and running.
 
 Minority cleanup is now accepted and implemented in this validation harness:
 `MINORITY_INVESTMENT` is no longer a validated core classifier output, minority
@@ -146,7 +152,10 @@ Key config flags:
 - The implied-equity violation found during §4.2 verification is fixed:
   `implied_equity_value` derives from `equity_value` only, never from an
   unqualified `transaction_value` or `post_money_valuation`.
-- Currency + period anchoring not yet validated (blocks the implied tier).
+- Currency + period anchoring not yet validated for broad balance-sheet extraction;
+  SEC enrichment remains limited to transaction/merger documents, relevant
+  exhibits such as 99s, and manually collected values, not general financial-
+  statement mining.
 - First §4.2 re-aggregation discharged on `pl_funding.db` and `ma_mvp.db`; the
   second re-aggregation remains owed after `total_debt` + `Cash_ST`.
 
@@ -156,8 +165,8 @@ Key config flags:
 
 Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
 
-1. **Currency + period anchoring** (§2.10 items 1–2) — blocks the implied tier;
-   extracting `total_debt`/`Cash_ST` needs period anchoring anyway, so one piece of work.
+1. **Currency + period anchoring** (§2.10 items 1–2) — still required before broad
+   `total_debt`/`Cash_ST` extraction as `target_financials` metrics.
 2. **`total_debt` + `Cash_ST` as `target_financials` metrics** — with period type
    and `period_end_date`; activates the dormant `transaction_value` total-debt branch and
    lets `net_debt` derive from `total_debt − Cash_ST`.
@@ -167,8 +176,9 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    columns as reviewer-facing Grata enum fields.
 4. **`transaction_size` + export column** — the reviewer-facing deliverable now that
    the first §4.2 re-aggregation is discharged (`docs/handoff_transaction_size.md`).
-5. **EV rewire** (§4.3) — parked until step 1 clears. Guard: do not export the derived EV
-   and do not repoint multiples at it before its fix exists.
+5. **Legacy value-field inventory/reorganization** — `enterprise_value` is now a
+   compatibility mirror of `implied_enterprise_value`; decide later whether to
+   remove, alias, or formally deprecate it after downstream consumers are known.
 
 Owed operational: the **second re-aggregation** below — route through `run.py` so
 `_apply_migrations` adds the columns first.
