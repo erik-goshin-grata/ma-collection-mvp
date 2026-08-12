@@ -62,9 +62,11 @@ _FIELDS = [
     ("v2_event_type", "string"),
     ("event_history_type", "string"),
     ("spin_split_type", "string"),
+    ("spin_split_type_v2", "string"),
     ("distribution_mechanism", "string"),
     ("recap_type", "string"),
     ("target_type", "string"),
+    ("target_type_v2", "string"),
     ("event_type", "string"),
     ("target_status", "string"),
     ("target_name", "string"),
@@ -86,6 +88,7 @@ _FIELDS = [
     ("closed_date", "date"),
     ("closed_date_precision", "string"),
     ("signing_date", "date"),
+    ("signing_date_precision", "string"),
     ("rumor_date", "date"),
     ("value_amount", "number"),
     ("value_currency", "string"),
@@ -725,6 +728,11 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.announced_date_precision, se.closed_date_precision, se.rumor_date,
                se.target_revenue_period_type_v2, se.target_ebitda_period_type_v2,
                se.financials_disclosure_status,
+               -- Tier-3 wiring (2026-08-11): _v2 fields were written to transaction_record
+               -- as perpetual NULL (absent from _FIELDS); signing_date_precision was never
+               -- read. Now read like acquirer_type_v2 — transaction_record keeps both the
+               -- legacy and _v2 column; downstream coalesces.
+               se.target_type_v2, se.spin_split_type_v2, se.signing_date_precision,
                -- Funding fields (Stage 4b) — required so funding deal value/round data propagates
                se.round_label, se.round_size, se.pre_money_valuation, se.post_money_valuation,
                se.valuation_currency, se.facility_size, se.total_raised_to_date,
@@ -832,6 +840,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
           AND COALESCE(tfo.observation_source_stage, 'BACKFILL') IN (
               'DT_CLASSIFY',
               'HC_EXTRACT',
+              'FUNDING_HC_EXTRACT',
               'LC_EXTRACT',
               'BACKFILL'
           )
@@ -1029,7 +1038,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     parent_seller_name, parent_seller_ticker,
                     target_description, acquirer_description, acquirer_sponsor_name, parent_seller_description,
                     announced_date, announced_date_precision, closed_date, closed_date_precision,
-                    signing_date, rumor_date,
+                    signing_date, signing_date_precision, rumor_date,
                     value_amount, value_currency, value_type, per_share_price, pct_acquired,
                     target_revenue, target_revenue_period_type, target_revenue_period_type_v2, target_revenue_period_end,
                     target_ebitda, target_ebitda_period_type, target_ebitda_period_type_v2, target_ebitda_period_end,
@@ -1053,7 +1062,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     investment_amount, deal_value_currency,
                     total_debt, transaction_value, transaction_value_basis, pct_acquired_source
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1089,6 +1098,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("closed_date"),
                     field_values.get("closed_date_precision"),
                     field_values.get("signing_date"),
+                    field_values.get("signing_date_precision"),
                     field_values.get("rumor_date"),
                     field_values.get("value_amount"),
                     field_values.get("value_currency"),

@@ -370,6 +370,12 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("transaction_value",                "REAL"),
         ("transaction_value_basis",          "TEXT"),
         ("pct_acquired_source",              "TEXT"),
+        # Observation coverage (2026-08-11): signing_date_precision reached
+        # staging in 002 but never received a transaction_record column, unlike
+        # announced_date_precision / closed_date_precision. Added so the now-wired
+        # _FIELDS read has a home to write. (Decision: "Observation Write Path
+        # Must Cover Every Field Aggregation Reads".)
+        ("signing_date_precision",           "TEXT"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")

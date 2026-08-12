@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from config import Config
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
+from lib.observation_writer import write_staging_observations_for_extraction
 
 _PROMPT_NAME = "funding_hc_extraction"
 _VERSION = "0.1"
@@ -310,6 +311,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
             # Write investors to staging_investor
             target_eid = eid if i == 0 else (cur.lastrowid if i > 0 else eid)
+
+            # Dual-write source-row observations for this funding extraction so the
+            # observation read path reaches parity with staging (decision: "Observation
+            # Write Path Must Cover Every Field Aggregation Reads"). include_funding
+            # carries the round fields (incl. round_size); include_hc/stage3 carry the
+            # target + date + classifier fields the funding row also populates (nulls
+            # are skipped). transaction_id is filled later by backfill after clustering.
+            write_staging_observations_for_extraction(
+                conn,
+                int(target_eid),
+                observation_source_stage="FUNDING_HC_EXTRACT",
+                include_stage3=True,
+                include_hc=True,
+                include_funding=True,
+            )
             investors = txn.get("investors") or []
             for inv in investors:
                 conn.execute(

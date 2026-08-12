@@ -18,8 +18,12 @@ STAGE3_FIELDS = (
     "event_history_type",
     "recap_type",
     "spin_split_type",
+    # Observation coverage (2026-08-11): _v2 classifier fields previously written
+    # to transaction_record as perpetual NULL (absent from _FIELDS/observation).
+    "spin_split_type_v2",
     "distribution_mechanism",
     "target_type",
+    "target_type_v2",
     "event_type",
     "target_status",
 )
@@ -54,6 +58,16 @@ HC_FIELDS = (
     "target_ebitda_period_type",
     "target_ebitda_period_end",
     "financials_currency",
+    # Observation coverage (2026-08-11): V2 + precision HC fields, present in
+    # _FIELDS / staging read but never written as observations (all HC-stage).
+    "acquirer_type_v2",
+    "announced_date_precision",
+    "closed_date_precision",
+    "signing_date_precision",
+    "rumor_date",
+    "target_revenue_period_type_v2",
+    "target_ebitda_period_type_v2",
+    "financials_disclosure_status",
 )
 
 LC_SCALAR_FIELDS = (
@@ -67,6 +81,30 @@ LC_SCALAR_FIELDS = (
     "target_fee_percentage",
     "acquirer_fee_amount",
     "acquirer_fee_percentage",
+)
+
+# Stage 4b funding extraction (observation coverage, 2026-08-11). round_size is
+# tier-1 and also lives in HC_FIELDS — it was put there because MINORITY_INVESTMENT
+# stays on the M&A/HC path per §4.1, not because of the funding path. It is included
+# here so this group is self-sufficient: a VC_ROUND row that requests include_funding
+# alone still gets a round_size observation (its primary magnitude, first rung of the
+# transaction_size waterfall, input to _derive_investment_amount). The HC_FIELDS
+# overlap is dedup-safe (partial unique index on (staging_extraction_id, field_name,
+# field_value) + INSERT OR IGNORE).
+FUNDING_FIELDS = (
+    "round_label",
+    "round_size",
+    "pre_money_valuation",
+    "post_money_valuation",
+    "valuation_currency",
+    "facility_size",
+    "total_raised_to_date",
+    "is_extension_round",
+    "is_down_round",
+    "is_bridge_round",
+    "use_of_proceeds",
+    "has_board_seat",
+    "board_seat_notes",
 )
 
 SOURCE_ROW_PRESENT_FIELD = "__source_row_present"
@@ -359,8 +397,9 @@ def write_staging_observations_for_extraction(
     include_stage3: bool = False,
     include_hc: bool = False,
     include_lc: bool = False,
+    include_funding: bool = False,
 ) -> int:
-    """Dual-write or backfill Stage 3/4/7 source-row observations."""
+    """Dual-write or backfill Stage 3/4/4b/7 source-row observations."""
     row = conn.execute(
         """
         SELECT se.*, sr.source_type, sr.source_tier, sr.published_date
@@ -422,6 +461,15 @@ def write_staging_observations_for_extraction(
             observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
             columns=columns,
         )
+    if include_funding:
+        inserted += _write_field_group(
+            conn,
+            row,
+            fields=FUNDING_FIELDS,
+            prompt_version=_row_value(row, "hc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "FUNDING_HC_EXTRACT"),
+            columns=columns,
+        )
     return inserted
 
 
@@ -466,6 +514,7 @@ def backfill_staging_observations(conn: sqlite3.Connection) -> int:
             include_stage3=True,
             include_hc=True,
             include_lc=True,
+            include_funding=True,
         )
     return conn.total_changes - before
 
