@@ -473,30 +473,28 @@ def _derive_equity_value(
 
 
 def _derive_implied_equity(
-    fv: dict,
     equity_value: float | None,
+    pct: float | None,
 ) -> float | None:
-    """Whole-company (100%) equity value.
+    """Whole-company (100%) equity value: equity_value grossed to 100% by pct, or
+    (future) source-stated.
 
-    Non-control: a stated post-money is the whole-company value; else gross the check
-    up by the stake (investment / pct_acquired); else None. The pct gross-up happens
-    exactly once — the check is NOT also written to equity_value (avoids double-count).
+    NEVER from transaction_value (value_amount) or post_money_valuation — decision
+    "implied_equity_value Derives From equity_value Only" (2026-08-12). `pct` MUST be
+    §2.6-resolved by the caller (decision "pct_acquired Must Be Resolved Before
+    Threshold Evaluation"): NULL/non-positive pct yields None, not a 100% gross-up,
+    which would reopen the manufactured-numerator defect through a pct-null door.
+    Funding rounds vacate equity_value, so they produce no implied by construction.
 
-    Control: gross the stated equity_value up by pct_acquired (unchanged behaviour).
+    No fv param by design — a source-stated implied lookup (with Named Value Fields,
+    later) will reintroduce one; until then there is deliberately no field-values
+    surface to read pct off.
     """
-    pct = fv.get("pct_acquired")
-    if _event_type(fv) in _NON_CONTROL_TYPES:
-        pm = fv.get("post_money_valuation")
-        if pm and pm > 0:
-            return float(pm)
-        inv = _derive_investment_amount(fv)
-        if inv and pct and 0 < pct < 100:
-            return round(inv / (pct / 100.0), 2)
-        return None
-
     if equity_value is None or equity_value <= 0:
         return None
-    if pct and 0 < pct < 100:
+    if pct is None or pct <= 0:
+        return None
+    if pct < 100:
         return round(equity_value / (pct / 100.0), 2)
     return equity_value
 
@@ -1025,7 +1023,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 field_values.get("per_share_price"),
                 sec_shares,
             )
-            implied_equity_value = _derive_implied_equity(field_values, equity_value)
+            implied_equity_value = _derive_implied_equity(equity_value, pct_resolved)
             investment_amount = _derive_investment_amount(field_values)
             transaction_value, transaction_value_basis = _derive_transaction_value(
                 field_values, equity_value, total_debt, pct_resolved

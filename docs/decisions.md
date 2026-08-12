@@ -931,3 +931,80 @@ Consequences:
   any two disagreeing nulls.
 - Per-field `*_currency` columns remain deferred to the §2.10 currency/FX work. This adds one
   input to the existing single tag; it does not start the per-field build.
+
+## 2026-08-12 - implied_equity_value Derives From equity_value Only
+
+Status: accepted. Implements an existing prohibition that proved too implicit to prevent a
+violation.
+
+Decision:
+
+- `implied_equity_value` is derived from `equity_value` — the stake-level, qualified-as-equity
+  figure — grossed to 100% basis by `pct_acquired`. Or it is source-stated.
+- **It is never derived from `transaction_value`, under any basis**, and **never from
+  `post_money_valuation`.** Where `equity_value` is null and no source states an implied figure,
+  `implied_equity_value` is null.
+- **The change is "replace," not "remove."** The non-control branch of `_derive_implied_equity`
+  grossed up `_derive_investment_amount`, which returns `round_size or value_amount` — so the
+  `transaction_value` route is one indirection deeper than "a `transaction_value` reference."
+  Deleting the branch would also strip the *correct* case, which reaches its right answer through
+  the same path. Gross up `equity_value` instead.
+- **The `post_money_valuation` branch goes too.** It returned an implied equity for non-control
+  types including funding, inverting the Funding Valuation Scope prohibition. Latent today — no
+  funding row carries an implied value — but latent is how the stake-level enterprise-value defect
+  has persisted, and unlike that one this fix is not blocked on anything.
+- **`pct_acquired` must be §2.6-resolved, not read raw.** `_derive_implied_equity` takes the
+  resolved `pct` as a parameter (the same one `_derive_transaction_value` receives from the single
+  `_resolve_pct_acquired` call), never `fv.get("pct_acquired")`. A raw NULL pct on an
+  inherently-partial type must yield None, not fall through to a 100% gross-up — that would
+  reopen the manufactured-numerator defect through a `pct`-null door. `NULL`/non-positive pct → None.
+- Guard by test, not by comment: assert `implied_equity_value` is null wherever `equity_value` is
+  null and no source-stated implied value exists; that no funding-type row carries one; and that a
+  partial-type row with `equity_value` populated but `pct_acquired` NULL yields null.
+
+Context:
+
+- **This is a restatement, not a new rule.** "Transaction Size as Universal Magnitude" already
+  prohibits it: an unqualified source figure populates `transaction_value` and `transaction_size`
+  only, and must never populate equity value or either implied value, because grossing up an
+  unqualified number and striking a multiple off it manufactures a figure no source ever qualified.
+- The prohibition was written in terms of *unqualified figures*. The implementation read
+  `transaction_value` as an acceptable input. Both readings are defensible from the original text,
+  which is why the rule needs stating in terms of the **field** rather than the **qualification**.
+- Three instances found, all with the same signature — `equity_value` NULL, `transaction_value`
+  with basis `STATED`, `implied_equity_value` = `transaction_value / pct_acquired`:
+  - TC Skyward — implied 3.892B from a stated 1.946B at pct 50
+  - KG Mobility `tc_616c` — implied 750M from a stated 75M at pct 10
+  - Genesis Digital Assets (`ma_mvp.db`, dry run) — implied 1.305B from a stated 500M at pct 38.3
+
+  `[verified: pl_funding.db post-step-7, ma_mvp.db dry run on copy — 2026-08-12]`
+
+- **The contrast case proves the correct path already works.** KG Mobility `tc_9731` — the same
+  deal, from a different article that failed to cluster — has `equity_value` 75M stated and
+  `implied_equity_value` 750M, a ratio of exactly `100/pct`. Both KG rows reach the number through
+  the *same* code branch and differ only in whether `equity_value` is populated — which is why the
+  fix is a replacement, and why a literal "remove the fallback" would have deleted the correct case
+  along with the violations.
+- **Grossing up `equity_value` enforces Funding Valuation Scope structurally.** Funding rounds
+  vacate `equity_value`, so with `equity_value` the sole input there is nothing for a funding round
+  to gross up. The constraint holds because the input does not exist.
+- **Why a three-row bug matters more than three rows.** `implied_equity_value` is one of the two
+  legal multiple numerators. No multiple has been computed off these figures only because no
+  denominator exists in those DBs — the manufactured numerator is already in place.
+
+Consequences:
+
+- **A corrective re-aggregation is owed on `pl_funding.db`** to null the two manufactured values.
+  This is not the second owed re-aggregation (`total_debt` + `cash`), which remains separate.
+- **`ma_mvp.db` step 7 waits for this fix**, so the run corrects rather than creates.
+- Coverage narrows: deals whose only value figure is an unqualified `transaction_value` now yield
+  no implied equity, and therefore no implied enterprise value and no multiples. **That is the
+  intended outcome.** `transaction_size` still carries their magnitude.
+- **Deferred, tracked as the recurrence guard:** an `implied_equity_value_basis` stamp
+  (`STATED | GROSSED_UP_FROM_EQUITY`) would make the derivation path legible in the data. Not
+  bundled here — it adds a column while re-aggregations are in flight, and the test guards more
+  cheaply. It belongs with the implied-tier work.
+- The underlying cause is upstream: the single `value.amount` + `value.type` slot forces the model
+  to *classify* rather than *record*, so the same figure routes to `equity_value` in one extraction
+  and `transaction_value` in another — the "Named Value Fields Replace the Single Value Slot"
+  decision (accepted, unmigrated). **This fix bounds the damage; it does not remove the cause.**
