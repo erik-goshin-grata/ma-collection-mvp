@@ -330,6 +330,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # Separate from valuation_currency (pre/post-money). Decision:
         # "Round Currency Enters the Derived-Value Currency Tag".
         ("round_currency", "TEXT"),
+        # Nullable harness-only ownership transition enum. Populated only when
+        # prior/current/resulting ownership evidence is explicit in the source.
+        ("stake_transition_type", "TEXT"),
     ]:
         if col not in se_cols:
             conn.execute(f"ALTER TABLE staging_extraction ADD COLUMN {col} {col_type}")
@@ -339,6 +342,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # Drop 3.16
         ("has_earnout",                      "INTEGER DEFAULT 0"),
         ("has_cvr",                          "INTEGER DEFAULT 0"),
+        # Minority-as-flag foundation — derived in aggregate like is_take_private.
+        ("is_minority",                      "INTEGER DEFAULT 0"),
         # Drop 3.19
         ("linked_filings_count",             "INTEGER DEFAULT 0"),
         # Drop 3.20a
@@ -379,6 +384,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("transaction_value",                "REAL"),
         ("transaction_value_basis",          "TEXT"),
         ("pct_acquired_source",              "TEXT"),
+        ("stake_transition_type",            "TEXT"),
         # Observation coverage (2026-08-11): signing_date_precision reached
         # staging in 002 but never received a transaction_record column, unlike
         # announced_date_precision / closed_date_precision. Added so the now-wired

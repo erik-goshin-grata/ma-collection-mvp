@@ -43,13 +43,13 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_type_classifier"
-_VERSION = "0.6"
+_VERSION = "0.7"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 # V2 EventType enum values
 _VALID_V2_EVENT_TYPES = frozenset({
     "ACQUISITION", "MERGER", "SPIN_OFF", "SPLIT_OFF", "REVERSE_MERGER",
-    "JOINT_VENTURE", "MINORITY_INVESTMENT", "RECAPITALIZATION",
+    "JOINT_VENTURE", "RECAPITALIZATION",
     "VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT",
     "UNKNOWN",
 })
@@ -157,9 +157,11 @@ def _resolve_v2_event_type(result: dict) -> str | None:
 
 def _validate(result: dict) -> str | None:
     # Must have at least one of v2_event_type or deal_type
+    raw_v2et = result.get("v2_event_type")
+    if raw_v2et is not None and raw_v2et not in _VALID_V2_EVENT_TYPES:
+        return f"invalid v2_event_type: {raw_v2et!r}"
+
     v2et = _resolve_v2_event_type(result)
-    if v2et is not None and v2et not in _VALID_V2_EVENT_TYPES:
-        return f"invalid v2_event_type: {v2et!r}"
 
     dt = result.get("deal_type")
     if dt is not None and dt not in _VALID_DEAL_TYPES:

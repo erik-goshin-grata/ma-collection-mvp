@@ -11,7 +11,7 @@ are logged to aggregation_conflict_log.
 
 After field resolution:
   - consideration_type is derived from consideration_components
-  - is_take_private / is_add_on / is_divestiture are derived from deal context
+  - is_take_private / is_minority / is_add_on / is_divestiture are derived from deal context
   - A transaction_record row is upserted (INSERT or UPDATE in place)
   - transaction_source rows are inserted linking the transaction to its sources
   - All cluster members transition to status = AGGREGATED
@@ -95,6 +95,7 @@ _FIELDS = [
     ("value_type", "string"),
     ("per_share_price", "number"),
     ("pct_acquired", "number"),
+    ("stake_transition_type", "string"),
     ("target_revenue", "number"),
     ("target_revenue_period_type", "string"),
     ("target_revenue_period_type_v2", "string"),
@@ -199,12 +200,51 @@ def _derive_is_take_private(fields: dict) -> int:
     return 0
 
 
+_MINORITY_STAKE_TRANSITIONS = frozenset({
+    "NEW_MINORITY_STAKE",
+    "MINORITY_INCREASING_STAKE",
+})
+
+_NON_MINORITY_STAKE_TRANSITIONS = frozenset({
+    "FULL_ACQUISITION",
+    "MINORITY_ACQUIRING_MAJORITY",
+    "MAJORITY_ACQUIRE_REMAINING",
+    "MINORITY_ACQUIRING_REMAINING",
+    "MAJORITY_INCREASING_STAKE",
+})
+
+
+def _derive_is_minority(fields: dict) -> int:
+    """Derived minority-status flag.
+
+    Prefer explicit stake-transition evidence: minority means the buyer/investor
+    remains below control after the current transaction, not merely that the
+    current stake acquired is below 50%. Fall back to legacy taxonomy and stated
+    pct only when no transition evidence exists.
+    """
+    transition = fields.get("stake_transition_type")
+    if transition in _MINORITY_STAKE_TRANSITIONS:
+        return 1
+    if transition in _NON_MINORITY_STAKE_TRANSITIONS:
+        return 0
+    if _event_type(fields) == "MINORITY_INVESTMENT":
+        return 1
+    pct = fields.get("pct_acquired")
+    if pct is None:
+        return 0
+    try:
+        return int(float(pct) < 50.0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _derive_flags(fields: dict) -> dict:
     acquirer_type = fields.get("acquirer_type")
     target_type = fields.get("target_type")
     deal_type = fields.get("deal_type")
     return {
         "is_take_private": _derive_is_take_private(fields),
+        "is_minority": _derive_is_minority(fields),
         "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
         "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY", "ASSETS")),
         "is_de_spac": int(deal_type == "REVERSE_MERGER" and acquirer_type == "SPAC"),
@@ -403,17 +443,24 @@ def _derive_deal_value_currency(
     return next(iter(distinct), None)
 
 
-def _resolve_pct_acquired(fv: dict) -> tuple[float | None, str | None]:
+def _resolve_pct_acquired(
+    fv: dict,
+    is_minority: int | bool | None = None,
+) -> tuple[float | None, str | None]:
     """§2.6 — resolve pct_acquired for threshold and gross-up use.
 
     A stated value is used as-is (source 'stated'). A null on a control event type
-    defaults to 100 ('assumed'). A null on an inherently-partial type stays None
-    (unknown), so the default never converts a minority stake into a whole-company buy.
+    defaults to 100 ('assumed') only when there is no independent minority signal.
+    A null on an inherently-partial type stays None (unknown), so the default never
+    converts a minority stake into a whole-company buy.
     Returns (pct, source).
     """
     pct = fv.get("pct_acquired")
     if pct is not None:
         return float(pct), "stated"
+    minority_flag = _derive_is_minority(fv) if is_minority is None else int(bool(is_minority))
+    if minority_flag:
+        return None, None
     if _event_type(fv) in _CONTROL_DEFAULT_TYPES:
         return 100.0, "assumed"
     return None, None
@@ -725,6 +772,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.target_description, se.acquirer_description, se.acquirer_sponsor_name, se.parent_seller_description,
                se.announced_date, se.closed_date, se.signing_date,
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
+               se.stake_transition_type,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
                se.financials_currency,
@@ -1017,7 +1065,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             sec_shares = None
             net_debt = existing["net_debt"] if existing else None
             total_debt = existing["total_debt"] if existing else None
-            pct_resolved, pct_acquired_source = _resolve_pct_acquired(field_values)
+            pct_resolved, pct_acquired_source = _resolve_pct_acquired(
+                field_values, derived["is_minority"]
+            )
             equity_value, equity_value_basis = _derive_equity_value(
                 field_values,
                 field_values.get("per_share_price"),
@@ -1052,6 +1102,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     announced_date, announced_date_precision, closed_date, closed_date_precision,
                     signing_date, signing_date_precision, rumor_date,
                     value_amount, value_currency, value_type, per_share_price, pct_acquired,
+                    stake_transition_type,
                     target_revenue, target_revenue_period_type, target_revenue_period_type_v2, target_revenue_period_end,
                     target_ebitda, target_ebitda_period_type, target_ebitda_period_type_v2, target_ebitda_period_end,
                     financials_currency, financials_disclosure_status,
@@ -1061,7 +1112,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     has_go_shop, go_shop_period_days,
                     target_fee_amount, target_fee_percentage,
                     acquirer_fee_amount, acquirer_fee_percentage,
-                    is_take_private, is_add_on, is_divestiture, is_de_spac,
+                    is_take_private, is_minority, is_add_on, is_divestiture, is_de_spac,
                     has_earnout, has_cvr,
                     round_label, round_stage_category, round_size,
                     pre_money_valuation, post_money_valuation, valuation_currency, round_currency,
@@ -1074,7 +1125,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     investment_amount, deal_value_currency,
                     total_debt, transaction_value, transaction_value_basis, pct_acquired_source
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1117,6 +1168,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("value_type"),
                     field_values.get("per_share_price"),
                     pct_resolved,  # §2.6-resolved: 100 (assumed) for control types when silent
+                    field_values.get("stake_transition_type"),
                     field_values.get("target_revenue"),
                     field_values.get("target_revenue_period_type"),
                     field_values.get("target_revenue_period_type_v2"),
@@ -1145,6 +1197,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("acquirer_fee_amount"),
                     field_values.get("acquirer_fee_percentage"),
                     derived["is_take_private"],
+                    derived["is_minority"],
                     derived["is_add_on"],
                     derived["is_divestiture"],
                     derived["is_de_spac"],

@@ -33,7 +33,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.13"
+_VERSION = "0.14"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal", "financials_disclosure_status"})
@@ -48,6 +48,15 @@ _VALID_PERIOD_TYPES_V2 = frozenset({"LTM", "NTM", "ANNUAL", "QUARTERLY", "INTERI
 _VALID_DATE_PRECISIONS = frozenset({"exact", "month", "quarter", "year"})
 _VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
 _VALID_CONSIDERATION_TYPES = frozenset({"cash", "stock", "cash_and_stock", "election", "other"})
+_VALID_STAKE_TRANSITION_TYPES = frozenset({
+    "NEW_MINORITY_STAKE",
+    "FULL_ACQUISITION",
+    "MINORITY_ACQUIRING_MAJORITY",
+    "MAJORITY_ACQUIRE_REMAINING",
+    "MINORITY_ACQUIRING_REMAINING",
+    "MAJORITY_INCREASING_STAKE",
+    "MINORITY_INCREASING_STAKE",
+})
 
 # Normalize legacy uppercase acquirer_type values to V2 lowercase
 _LEGACY_ACQUIRER_TYPE_MAP: dict[str, str] = {
@@ -119,6 +128,10 @@ def _validate(result: dict) -> str | None:
     ct = result.get("consideration_type")
     if ct is not None and ct not in _VALID_CONSIDERATION_TYPES:
         return f"invalid consideration_type: {ct!r}"
+
+    stt = (result.get("deal") or {}).get("stake_transition_type")
+    if stt is not None and stt not in _VALID_STAKE_TRANSITION_TYPES:
+        return f"invalid deal.stake_transition_type: {stt!r}"
 
     # date_precision fields — optional but must be valid if present
     dates = result.get("dates") or {}
@@ -289,6 +302,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 ps.get("name"), ps.get("ticker"),
                 ps.get("description"),
                 (txn.get("deal") or {}).get("pct_acquired"),
+                (txn.get("deal") or {}).get("stake_transition_type"),
                 d.get("announced_date"), d.get("closed_date"), d.get("signing_date"),
                 d.get("announced_date_precision"),   # new
                 d.get("closed_date_precision"),      # new
@@ -324,7 +338,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         acquirer_sponsor_name = ?,
                         parent_seller_name = ?,  parent_seller_ticker = ?,
                         parent_seller_description = ?,
-                        pct_acquired = ?,
+                        pct_acquired = ?,  stake_transition_type = ?,
                         announced_date = ?,  closed_date = ?,  signing_date = ?,
                         announced_date_precision = ?,  closed_date_precision = ?,  signing_date_precision = ?,
                         rumor_date = ?,
@@ -373,7 +387,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         acquirer_sponsor_name,
                         parent_seller_name, parent_seller_ticker,
                         parent_seller_description,
-                        pct_acquired,
+                        pct_acquired, stake_transition_type,
                         announced_date, closed_date, signing_date,
                         announced_date_precision, closed_date_precision, signing_date_precision,
                         rumor_date,

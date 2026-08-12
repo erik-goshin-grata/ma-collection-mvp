@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.13 (V2 alignment)
+**Version:** 0.14 (stake transition)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -155,6 +155,33 @@ deal:
 - pct_acquired: Percentage of target being acquired. Null if 100% or unstated.
   Extract for minority investments and partial acquisitions only. Do not
   extract 100 — leave null for full acquisitions.
+  Current transaction only: distinguish prior ownership, the stake acquired in
+  this transaction, and post-transaction ownership. When a source says the
+  buyer acquires the "remaining X%," extract pct_acquired = X. Do not substitute
+  resulting ownership for the percentage acquired in the current transaction.
+  Example: if the buyer previously acquired/owned an 80% controlling stake and
+  this announcement says it acquired the remaining 20%, pct_acquired = 20, even
+  if the target becomes a 100% wholly owned subsidiary after the transaction.
+- stake_transition_type: Nullable explicit ownership-transition classification.
+  Populate ONLY when the source explicitly states enough ownership evidence to
+  distinguish prior ownership, current stake acquired, and/or resulting
+  ownership/control. Otherwise null. Do not infer from pct_acquired alone.
+  Values:
+    NEW_MINORITY_STAKE — buyer/investor owned 0% or no prior stake is stated,
+      acquires less than 50%, and remains below control.
+    FULL_ACQUISITION — buyer/investor owned 0% or no prior stake is stated, and
+      acquires 100% or the full company.
+    MINORITY_ACQUIRING_MAJORITY — buyer was below 50% before and crosses to 50%
+      or more, but does not acquire all remaining shares.
+    MAJORITY_ACQUIRE_REMAINING — buyer was already at 50% or more and acquires
+      all remaining shares, resulting in 100% ownership. Lumina/TNQTech pattern:
+      prior ownership 80%, current pct_acquired 20%, resulting ownership 100%.
+    MINORITY_ACQUIRING_REMAINING — buyer was below 50% and acquires all
+      remaining shares, resulting in 100% ownership.
+    MAJORITY_INCREASING_STAKE — buyer was already at 50% or more and increases
+      ownership, but does not acquire all remaining shares.
+    MINORITY_INCREASING_STAKE — buyer was below 50% and increases ownership but
+      remains below 50%.
 
 DATES
 
@@ -453,7 +480,8 @@ Extract all transactions from this source.
         "description": "string | null"
       },
       "deal": {
-        "pct_acquired": "number | null"
+        "pct_acquired": "number | null",
+        "stake_transition_type": "NEW_MINORITY_STAKE | FULL_ACQUISITION | MINORITY_ACQUIRING_MAJORITY | MAJORITY_ACQUIRE_REMAINING | MINORITY_ACQUIRING_REMAINING | MAJORITY_INCREASING_STAKE | MINORITY_INCREASING_STAKE | null"
       },
       "dates": {
         "announced_date": "YYYY-MM-DD | null",
@@ -1036,3 +1064,4 @@ Output:
 | 0.10 | 2026-07-22 | Announcement vs Close semantics — CLOSE reserved for separate later releases |
 | 0.11 | 2026-07-22 | Take-private note updated; sponsor_name handling clarified |
 | 0.12 | 2026-07-28 | V2 alignment. acquirer.type values lowercased and expanded (pe_portfolio, growth_equity, hedge_fund, consortium, management, employee_group, other_financial_sponsor added). revenue_period_type and ebitda_period_type values aligned to V2 period_type enum (LTM, NTM, ANNUAL, QUARTERLY, INTERIM_YTD); null explicitly required when period not stated. date_precision fields added for all dates. rumor_date added. financials_disclosure_status added as required field. consideration_type added as interim field (pending consideration_component table). ANNOUNCED/CLOSED replace ANNOUNCEMENT/CLOSE in event_type references. Example 6 added for NTM financials. |
+| 0.14 | 2026-08-12 | Added nullable `deal.stake_transition_type` for explicit ownership-transition cases. |

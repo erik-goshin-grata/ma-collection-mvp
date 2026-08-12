@@ -15,8 +15,8 @@ July 28, 2026.
 
 | Prompt | File | Current Version | Last Changed | V2 Enum Target | Notes |
 |---|---|---|---|---|---|
-| Deal Type Classifier | `prompts/deal_type_classifier.md` | 0.6 | 2026-07-28 | V2-2026-07-28 | v2_event_type + event_history_type rename; SPIN_OFF/SPLIT_OFF top-level; RECAPITALIZATION added; target_type lowercase |
-| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.13 | 2026-08-10 | V2-2026-07-28 | 0.13: capital-raised precondition + `round_size` capture (primary capital → round_size, value fields null; spec §4.1 / gap 1). Prior: acquirer_type lowercase; period_type enum enforced; date_precision; rumor_date; financials_disclosure_status; consideration_type |
+| Deal Type Classifier | `prompts/deal_type_classifier.md` | 0.7 | 2026-08-12 | V2-2026-07-28 + harness minority cleanup | Removes `MINORITY_INVESTMENT` from core output vocabulary; routes minority transactions to underlying core event; public PIPE/primary issuance does not force Growth/VC |
+| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.14 | 2026-08-12 | V2-2026-07-28 + harness stake transition | 0.14: nullable `deal.stake_transition_type` when explicit. 0.13: capital-raised precondition + `round_size` capture |
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section added; LTM/NTM non-interchangeable rule; period type semantic conflict example |
 | Deal Summary | `prompts/deal_summary.md` | 0.9 | 2026-07-28 | V2-2026-07-28 | Input fields updated to V2 names; RECAPITALIZATION framing added; NTM multiples in framing rule |
 | Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |
@@ -40,6 +40,7 @@ July 28, 2026.
 
 | Date | Prompts Changed | Versions | Change | Enum Target |
 |---|---|---|---|---|
+| 2026-08-12 | Deal Type Classifier, High Confidence Extraction | classifier 0.7, hc_extract 0.14 | Harness minority cleanup: minority is derived flag, not core event type; explicit `stake_transition_type` added for ownership step-ups including Lumina/TNQTech | V2-2026-07-28 + harness minority cleanup |
 | 2026-07-28 | All five | classifier 0.6, hc_extract 0.12, aggregation 0.4, deal_summary 0.9, strategic_rationale 0.5 | V2 vocabulary alignment — event type rename, lowercase acquirer_type and target_type, period_type enum enforcement, RECAPITALIZATION added, date precision fields, rumor_date, financials_disclosure_status, consideration_type interim field | V2-2026-07-28 |
 
 ---

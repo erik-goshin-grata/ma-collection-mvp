@@ -1,11 +1,11 @@
 # Project State
 **Updated:** 2026-08-12
-**Last commit:** `aa09422`
+**Last commit:** this commit
 **Branch:** `main`
 
 ---
 
-## Current Drop: Transaction Value Model
+## Current Drop: Transaction Value Model + Minority Cleanup
 
 V2 prompt vocabulary and the funding event path are landed and operational (prior
 drop). The active workstream is the **two-tier transaction value model** — Tier 1
@@ -16,6 +16,12 @@ entries) and `docs/spec_transaction_value_model.md`; code landings §4.1/4.2/4.7
 in. The first §4.2 re-aggregation is discharged on the two live DBs; the second
 re-aggregation remains owed after `total_debt` + `Cash_ST` extraction. All 14
 stages + the funding branch remain wired and running.
+
+Minority cleanup is now accepted and implemented in this validation harness:
+`MINORITY_INVESTMENT` is no longer a validated core classifier output, minority
+status is derived as `is_minority`, and explicit ownership step-ups are captured
+with nullable `stake_transition_type`. This does not change Grata production
+schema/enums.
 
 ---
 
@@ -30,7 +36,7 @@ asserts all paths reach one canonical column set (verified across 10 historical 
 | `001_initial.sql` | Yes | Base schema — 16 tables incl. `staging_extraction`, `transaction_record`, `transaction_field_observation`, `staging_investor` |
 | `002_v2_prompt_alignment.sql` | Yes | 12 new nullable V2 columns on `staging_extraction` and `transaction_record` |
 | `003_funding_path.sql` | Yes | `staging_investor` table + funding scalar columns |
-| `db.py _apply_migrations` ALTERs | Yes | Value-model columns not in any .sql file: `investment_amount`, `deal_value_currency`, `total_debt`, `transaction_value`, `transaction_value_basis`, `pct_acquired_source` (db.py §4.1/§4.2 blocks) |
+| `db.py _apply_migrations` ALTERs | Yes | Value-model / harness columns not in historical DBs: `investment_amount`, `deal_value_currency`, `total_debt`, `transaction_value`, `transaction_value_basis`, `pct_acquired_source`, `is_minority`, `stake_transition_type`, precision/round observation columns |
 
 ---
 
@@ -40,8 +46,8 @@ See `docs/prompt_versions.md` for full cross-prompt version table.
 
 Current versions:
 - `relevancy_filter` 0.5
-- `deal_type_classifier` 0.6
-- `high_confidence_extraction` 0.13 (0.13: §4.1 capital-raised precondition + `round_size` capture)
+- `deal_type_classifier` 0.7 (minority-as-flag routing; no core `MINORITY_INVESTMENT`)
+- `high_confidence_extraction` 0.14 (0.14: nullable explicit `stake_transition_type`)
 - `funding_hc_extraction` 0.1 (NEW)
 - `funding_lc_extraction` 0.1 (NEW — stage code not yet written)
 - `low_confidence_extraction` 0.5
@@ -59,14 +65,14 @@ Current versions:
 |---|---|---|
 | 1 | `scrape_pr_newswire` | Running |
 | 2 | `relevancy_filter` | v0.5 — funding events in scope |
-| 3 | `deal_type_classify` | v0.6 — V2 event types, funding types classifiable |
-| 4a | `high_confidence_extract` | v0.13 — V2 vocabulary; §4.1 capital-raised precondition + `round_size` |
+| 3 | `deal_type_classify` | v0.7 — V2 event types, funding types classifiable; `MINORITY_INVESTMENT` rejected as core output |
+| 4a | `high_confidence_extract` | v0.14 — V2 vocabulary; §4.1 capital-raised precondition + `round_size`; nullable `stake_transition_type` when explicit |
 | 4b | `funding_hc_extract` | v0.1 — NEW; routes VC_ROUND/GROWTH_EQUITY/VENTURE_DEBT |
 | 5 | `sec_trigger_detect` | Running |
 | 6 | `sec_enrich` | Extended lookback/lookahead window |
 | 7 | `low_confidence_extract` | v0.5 |
 | 8 | `entity_cluster` | Running |
-| 9 | `aggregate` | V2 + funding fields; multiples gated off funding; value-model §4.1/4.2 landed (stake-level `equity_value`, `transaction_value` at `pct_acquired ≥ 50`) |
+| 9 | `aggregate` | V2 + funding fields; multiples gated off funding; value-model §4.1/4.2 landed; derives `is_minority` from `stake_transition_type` before pct fallback |
 | 10 | `sec_documents` | Running |
 | 11 | `agreement_extract` | Running |
 | 12 | `summarize` | v0.9 — V2 input fields; M&A framing only (funding framing v0.10 pending) |
@@ -123,6 +129,11 @@ Key config flags:
   "Funding Valuation Scope".)_
 
 **Validation:**
+- Minority cleanup validated on a four-story live set:
+  Lumina/TNQTech now yields `ACQUISITION`, `pct_acquired=20`,
+  `stake_transition_type=MAJORITY_ACQUIRE_REMAINING`, `is_minority=0`;
+  LMPG/Platinum remains evidence-limited and stable; Lydian remains `VC_ROUND`;
+  Paradium/InfoSentience remains full `ACQUISITION`.
 - Funding path test corpus **built** — `data/pl_funding.db` (68 stranded VC/venture-debt
   rounds + the KG / 10x `MINORITY_INVESTMENT` cases); funding run surfaced bugs #5–#9,
   all fixed and committed.

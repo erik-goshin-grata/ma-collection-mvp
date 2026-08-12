@@ -1,13 +1,13 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.6 (V2 alignment)
+**Version:** 0.7 (minority-as-flag routing)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
 
 ## 1. Purpose
 
-Classify each relevant press release into one of 9 mutually exclusive deal
+Classify each relevant press release into one of 11 mutually exclusive deal
 types (V2 `event_type` vocabulary). For SPIN_OFF and SPLIT_OFF transactions,
 also extract two discriminator fields. Separately, classify the target entity
 type (standalone, business unit, subsidiary) because this drives parent_seller
@@ -51,7 +51,7 @@ classifier may overrule it if the full text disagrees.
 
 ```
 You are a deal type classifier for an M&A data collection pipeline. Given the
-title and body of a press release, classify it into exactly one of nine deal
+title and body of a press release, classify it into exactly one of eleven deal
 types. For SPIN_OFF and SPLIT_OFF transactions, also determine two discriminator
 fields.
 
@@ -92,34 +92,29 @@ DEAL TYPES (v2_event_type):
    pursue a business activity. Distinct from ACQUISITION because no existing
    entity is being purchased.
 
-7. MINORITY_INVESTMENT — An investor takes a non-controlling equity stake in a
-   company. Includes strategic minority investments and PIPEs into public
-   companies. Distinguish from ACQUISITION by whether control is transferred.
-   Note: VC rounds and growth equity are separate types below.
-
-8. RECAPITALIZATION — A company restructures its capital structure without a
+7. RECAPITALIZATION — A company restructures its capital structure without a
    change of control. Includes dividend recaps, equity recaps, leveraged
    recaps, and sponsor recaps. When deal_type = RECAPITALIZATION, also
    populate recap_type (see discriminators below).
 
-9. VC_ROUND — A priced or unpriced venture capital funding round. Seed through
+8. VC_ROUND — A priced or unpriced venture capital funding round. Seed through
    Series N, angel, crowdfunding, convertible notes as primary funding
    instrument. The company raising capital is the target; the investors are
    the capital providers. No change of control.
 
-10. GROWTH_EQUITY — A growth equity investment by a growth equity or late-stage
+9. GROWTH_EQUITY — A growth equity investment by a growth equity or late-stage
     investor. Distinct from VC_ROUND by investor type and company maturity:
     growth equity investors (e.g., General Atlantic, Summit Partners, TA
     Associates) taking a minority stake in a profitable or near-profitable
     company. When unclear between VC_ROUND and GROWTH_EQUITY, use VC_ROUND.
 
-11. VENTURE_DEBT — A debt facility to a venture-backed or growth-stage company.
+10. VENTURE_DEBT — A debt facility to a venture-backed or growth-stage company.
     Includes venture lending, revenue-based financing, convertible notes used
     primarily as debt instruments, and bridge facilities to venture-backed
     companies. Distinct from RECAPITALIZATION by company stage (early/growth
     stage, not mature/PE-backed).
 
-12. UNKNOWN — The release clearly describes a transaction event but the type
+11. UNKNOWN — The release clearly describes a transaction event but the type
     cannot be determined from the text alone.
 
 OUT OF SCOPE (not classifiable under this prompt):
@@ -143,6 +138,16 @@ IMPORTANT DISTINCTIONS:
   ACQUISITION from the Parent's side. Same deal, different perspective.
 - "Split-Off" is now a top-level type (SPLIT_OFF), not a discriminator within
   SPIN_OFF. Use SPLIT_OFF when the exchange offer mechanism is present.
+- "Minority investment" is NOT a separate type. Minority status is a shared
+  characteristic derived downstream. Use the underlying economic event:
+  secondary purchase of a non-controlling stake is ACQUISITION; growth equity
+  investment is GROWTH_EQUITY only when the source supports genuine growth/private
+  equity financing; venture funding is VC_ROUND only when the source supports
+  genuine venture financing; venture lending is VENTURE_DEBT. A public-company
+  PIPE, primary share issuance, registered direct offering, or other public-company
+  minority capital raise is not automatically GROWTH_EQUITY or VC_ROUND merely
+  because it is primary capital. If no existing supported core type clearly fits,
+  use UNKNOWN with notes. Do not output MINORITY_INVESTMENT.
 
 SPIN_OFF / SPLIT_OFF DISCRIMINATORS:
 
@@ -208,8 +213,9 @@ When target_type is subsidiary, business_unit, or assets, parent_seller must
 exist (extracted by a later prompt). Flag in notes if the Parent is ambiguous.
 
 For JOINT_VENTURE, target_type is null.
-For MINORITY_INVESTMENT and REVERSE_MERGER, target_type = standalone_company
-unless stated otherwise.
+For REVERSE_MERGER, target_type = standalone_company unless stated otherwise.
+For minority stake purchases and funding rounds, use target_type =
+standalone_company unless stated otherwise.
 
 EVENT HISTORY TYPE:
 
@@ -253,6 +259,13 @@ TARGET STATUS:
 CLASSIFICATION RULES:
 
 - Use the full text of the release, not just the headline.
+- Classify the current event based on what is being transacted now, not the
+  buyer's resulting ownership after the transaction. For example, if a buyer
+  previously acquired an 80% controlling stake and the current release announces
+  acquisition of the remaining 20%, the current event is ACQUISITION; the
+  remaining-stake transition is captured downstream by extraction, not by
+  changing the core event type, setting `is_minority`, or treating
+  pct_acquired as 100%.
 - If the release describes a deal closing, classify based on the original deal
   structure, but use event_history_type = CLOSED only when this is a later
   release for a previously announced transaction.
@@ -278,7 +291,7 @@ code fences, no preamble.
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 
 All fields are required. Use null for optional fields that have no value.
@@ -323,7 +336,7 @@ target status.
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -331,7 +344,7 @@ target status.
 
 | Field | Type | Values |
 | :--- | :--- | :--- |
-| `v2_event_type` | enum | `ACQUISITION`, `MERGER`, `SPIN_OFF`, `SPLIT_OFF`, `REVERSE_MERGER`, `JOINT_VENTURE`, `MINORITY_INVESTMENT`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `UNKNOWN` |
+| `v2_event_type` | enum | `ACQUISITION`, `MERGER`, `SPIN_OFF`, `SPLIT_OFF`, `REVERSE_MERGER`, `JOINT_VENTURE`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `UNKNOWN` |
 | `deal_type` | enum | Same as `v2_event_type` — transitional alias, deprecated in future version |
 | `spin_split_type` | enum or null | `SPIN_OFF`, `SPLIT_OFF`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `distribution_mechanism` | enum or null | `PRO_RATA`, `EXCHANGE_OFFER`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
@@ -372,7 +385,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": null,
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -401,7 +414,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Take-Private context: public target, PE acquirer. Downstream derives Take-Private flag from target_status + acquirer_type.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -429,7 +442,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Business unit divestiture; parent_seller is MegaCorp (extracted downstream).",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -459,7 +472,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Parent retains 15% residual stake, consistent with SPIN_OFF tax-free treatment.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -488,7 +501,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Practitioner term 'Split-Off' = SPLIT_OFF top-level type + EXCHANGE_OFFER mechanism.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -517,7 +530,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "New entity formed; no existing company acquired.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -545,7 +558,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Debt-funded special dividend to PE sponsor; no change of control.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -573,7 +586,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Series B funding round. Venture Partners is lead investor. Funding extraction prompt handles investor list and round details.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -603,7 +616,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Growth equity minority investment by named growth equity firm (TA Associates). Profitable company, management partnership framing — GROWTH_EQUITY not VC_ROUND.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -633,7 +646,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Venture lending facility to a Series B-stage company. Explicitly framed as debt extending runway to next equity round.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -660,7 +673,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "First public announcement of a completed private acquisition; not a separate later closing release.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -687,7 +700,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Advisor tombstone; no prior announcement referenced — treat as first observed announcement.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -716,7 +729,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Definitive agreement with pending-close language; event is announcement, not close.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -744,7 +757,7 @@ Output:
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
   "notes": "Separate later completion release explicitly references a previously announced acquisition.",
-  "prompt_version": "deal_type_classifier:0.6"
+  "prompt_version": "deal_type_classifier:0.7"
 }
 ```
 
@@ -761,7 +774,7 @@ Output:
 | Model populates recap_type for non-RECAPITALIZATION types | Parser rejects (schema violation) |
 | Model returns SPIN_SPLIT (legacy v0.5 value) | Parser rejects — use SPIN_OFF or SPLIT_OFF |
 | Model uses TAKE_PRIVATE or CARVE_OUT as v2_event_type | Parser rejects — removed in v0.2 |
-| Model classifies VC round as MINORITY_INVESTMENT | QA monitors — prompt explicitly routes VC to UNKNOWN with note |
+| Model returns MINORITY_INVESTMENT | Parser rejects — minority is a derived flag, not a core event type |
 | Model over-uses UNKNOWN on clearly classifiable releases | Tracked in QA. Prompt revision if rate exceeds 10%. |
 
 ---
@@ -776,3 +789,4 @@ Output:
 | 0.4 | 2026-04-23 | Added ASSETS to target_type enum. |
 | 0.5 | 2026-07-22 | Clarified event_type semantics — CLOSE reserved for separate later releases. Added examples 8–11. |
 | 0.6 | 2026-07-28 | V2 alignment. `deal_type` → `v2_event_type` (deal_type retained as transitional alias). `event_type` → `event_history_type` (eliminates V2 field name collision). SPIN_SPLIT split into SPIN_OFF and SPLIT_OFF as top-level types; SPLIT renamed SPLIT_OFF. RECAPITALIZATION added with recap_type discriminator. VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT added as classifiable types — previously routed to UNKNOWN. target_type values lowercased; spinco added for spin/split targets. ANNOUNCED/CLOSED replace ANNOUNCEMENT/CLOSE in event_history_type. Examples expanded to 14 — added recap (7), VC_ROUND (8), GROWTH_EQUITY (9), VENTURE_DEBT (10). Funding extraction handled by separate funding HC prompt (future workstream). |
+| 0.7 | 2026-08-12 | Removed MINORITY_INVESTMENT from core classifier output vocabulary. Minority status routes to the underlying economic event and is derived downstream as `is_minority`. |

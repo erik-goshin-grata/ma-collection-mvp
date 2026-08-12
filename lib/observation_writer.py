@@ -51,6 +51,7 @@ HC_FIELDS = (
     "per_share_price",
     "round_size",
     "pct_acquired",
+    "stake_transition_type",
     "target_revenue",
     "target_revenue_period_type",
     "target_revenue_period_end",

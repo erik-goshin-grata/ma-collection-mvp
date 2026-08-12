@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
     value_qualifier             TEXT,
     per_share_price             REAL,
     pct_acquired                REAL,        -- e.g. 51.0 for 51% stake; NULL when implicit 100% or not stated
+    stake_transition_type       TEXT,        -- nullable explicit ownership transition enum; current harness only
     target_revenue              REAL,
     target_revenue_period_type  TEXT,        -- LTM | FY | TTM | CY | QUARTER | NTM | UNKNOWN
     target_revenue_period_end   TEXT,
@@ -200,6 +201,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     value_type                  TEXT,
     per_share_price             REAL,
     pct_acquired                REAL,        -- e.g. 51.0 for 51% stake; NULL when implicit 100% or not stated
+    stake_transition_type       TEXT,        -- nullable explicit ownership transition enum; current harness only
 
     -- Target financials
     target_revenue              REAL,
@@ -253,6 +255,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
 
     -- Derived flags (computed downstream from deal context)
     is_take_private             INTEGER,     -- public standalone target acquired into private/non-public ownership; excludes public-acquirer mergers
+    is_minority                 INTEGER DEFAULT 0,  -- 1 when buyer/investor remains below control after current transaction
     is_add_on                   INTEGER,     -- acquirer_type=PE_PORTFOLIO
     is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY, ASSETS)
     is_de_spac                  INTEGER DEFAULT 0,  -- 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC
