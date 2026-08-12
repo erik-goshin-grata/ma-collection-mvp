@@ -97,6 +97,7 @@ FUNDING_FIELDS = (
     "pre_money_valuation",
     "post_money_valuation",
     "valuation_currency",
+    "round_currency",
     "facility_size",
     "total_raised_to_date",
     "is_extension_round",

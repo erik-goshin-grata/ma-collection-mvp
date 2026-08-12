@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Test Stage 9 deal_value_currency derivation and its mismatch guard (§4.7).
 
-Two properties, matching the invariant in docs/decisions.md:
-  1. deal_value_currency is non-null wherever a currency is present and the
-     valuation_currency / value_currency do not conflict.
-  2. Where they conflict (both present, differing), deal_value_currency is null.
-     The null is the queryable mismatch signal — assertion 2 proves the guard fires.
+Unanimity-or-null over three currency sources (valuation_currency, value_currency,
+round_currency — the third added 2026-08-11):
+  1. deal_value_currency is non-null wherever a currency is present and every source
+     present agrees.
+  2. Where any two present sources differ, deal_value_currency is null. The null is
+     the queryable mismatch signal — assertion 2 proves the guard fires.
+  3. The third source (round_currency) participates: it can supply the tag on its own,
+     and it can break unanimity that the other two had.
 
 Unit cases run with no DB. Pass a sqlite path to also check the DB invariant on a
 re-aggregated database (only meaningful after Stage 9 has run with this code).
@@ -33,6 +36,12 @@ CASES = [
     # Assertion 2 — genuine mismatch -> null (the guard fires)
     ("conflict_eur_usd_null", {"valuation_currency": "EUR", "value_currency": "USD"}, None),
     ("conflict_krw_usd_null", {"valuation_currency": "KRW", "value_currency": "USD"}, None),
+    # Assertion 3 — third source (round_currency) participates in unanimity-or-null
+    ("round_only_tags", {"round_currency": "GBP"}, "GBP"),
+    ("three_agree_tags", {"valuation_currency": "USD", "value_currency": "USD", "round_currency": "USD"}, "USD"),
+    ("round_agrees_valuation", {"valuation_currency": "EUR", "round_currency": "EUR"}, "EUR"),
+    ("round_breaks_unanimity_null", {"valuation_currency": "USD", "value_currency": "USD", "round_currency": "EUR"}, None),
+    ("round_vs_valuation_conflict_null", {"round_currency": "EUR", "valuation_currency": "USD"}, None),
 ]
 
 

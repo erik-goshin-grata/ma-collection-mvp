@@ -122,6 +122,7 @@ _FIELDS = [
     ("pre_money_valuation", "number"),
     ("post_money_valuation", "number"),
     ("valuation_currency", "string"),
+    ("round_currency", "string"),
     ("facility_size", "number"),
     ("total_raised_to_date", "number"),
     ("is_extension_round", "boolean"),
@@ -367,26 +368,39 @@ def _derive_deal_value_currency(
     fv: dict, log: Any = None, cluster_id: str | None = None
 ) -> str | None:
     """Currency companion for the derived value fields (tag-and-defer; no USD
-    conversion). Precedence: valuation_currency (post-money-based funding values),
-    then value_currency (control-deal values).
+    conversion). Unanimity-or-null over every currency source present:
+    `valuation_currency` (post-money-based funding values), `value_currency`
+    (control-deal values), and `round_currency` (funding round amounts).
 
-    On a genuine mismatch — both present and differing, e.g. a cross-border round
-    with a USD check and a EUR post-money — return None rather than guess. The null
-    is itself the queryable mismatch signal: a row with derived values populated but
+    Collect the distinct currencies actually present; if they agree, tag with that
+    currency; if any two differ, return None rather than guess. The null is itself
+    the queryable mismatch signal — a row with derived values populated but
     deal_value_currency null is detectable in SQL, so no flag column is needed. The
     log warning is a run-time convenience only.
+
+    Generalizes the original two-source precedence-plus-mismatch-guard rule: with
+    two sources the two are the same function; stating it as unanimity extends to the
+    third (round) currency without inventing a tiebreak, and preserves the property
+    the original relied on — the null is the signal. (decisions.md 2026-08-11,
+    "Round Currency Enters the Derived-Value Currency Tag").
     """
-    vc = fv.get("valuation_currency")
-    cc = fv.get("value_currency")
-    if vc and cc and vc != cc:
+    distinct = {
+        c
+        for c in (
+            fv.get("valuation_currency"),
+            fv.get("value_currency"),
+            fv.get("round_currency"),
+        )
+        if c
+    }
+    if len(distinct) > 1:
         if log is not None:
             log.warning(
-                "cluster_id=%s currency mismatch valuation_currency=%s value_currency=%s "
-                "— deal_value_currency set null",
-                cluster_id, vc, cc,
+                "cluster_id=%s currency mismatch among %s — deal_value_currency set null",
+                cluster_id, sorted(distinct),
             )
         return None
-    return vc or cc
+    return next(iter(distinct), None)
 
 
 def _resolve_pct_acquired(fv: dict) -> tuple[float | None, str | None]:
@@ -735,7 +749,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.target_type_v2, se.spin_split_type_v2, se.signing_date_precision,
                -- Funding fields (Stage 4b) — required so funding deal value/round data propagates
                se.round_label, se.round_size, se.pre_money_valuation, se.post_money_valuation,
-               se.valuation_currency, se.facility_size, se.total_raised_to_date,
+               se.valuation_currency, se.round_currency, se.facility_size, se.total_raised_to_date,
                se.is_extension_round, se.is_down_round, se.is_bridge_round,
                se.use_of_proceeds, se.has_board_seat, se.board_seat_notes,
                sr.source_type, sr.source_tier, sr.published_date, sr.clean_text
@@ -1052,7 +1066,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     is_take_private, is_add_on, is_divestiture, is_de_spac,
                     has_earnout, has_cvr,
                     round_label, round_stage_category, round_size,
-                    pre_money_valuation, post_money_valuation, valuation_currency,
+                    pre_money_valuation, post_money_valuation, valuation_currency, round_currency,
                     facility_size, total_raised_to_date,
                     is_extension_round, is_down_round, is_bridge_round,
                     use_of_proceeds, has_board_seat, board_seat_notes,
@@ -1062,7 +1076,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     investment_amount, deal_value_currency,
                     total_debt, transaction_value, transaction_value_basis, pct_acquired_source
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1145,6 +1159,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("pre_money_valuation"),
                     field_values.get("post_money_valuation"),
                     field_values.get("valuation_currency"),
+                    field_values.get("round_currency"),
                     field_values.get("facility_size"),
                     field_values.get("total_raised_to_date"),
                     field_values.get("is_extension_round"),

@@ -321,6 +321,15 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     for col, col_type in [
         ("multi_transaction_index", "INTEGER DEFAULT 0"),
         ("multi_transaction_total", "INTEGER DEFAULT 1"),
+        # Round-object currency (2026-08-11). One tag from the funding prompt's
+        # `round.currency`, covering the round-object amounts: round_size,
+        # facility_size, total_raised_to_date. Deliberate simplification — it is NOT
+        # authoritative for total_raised_to_date (cumulative across prior rounds, may
+        # historically span currencies) and facility_size is a different instrument
+        # (venture debt); it records the currency the round amounts were stated in.
+        # Separate from valuation_currency (pre/post-money). Decision:
+        # "Round Currency Enters the Derived-Value Currency Tag".
+        ("round_currency", "TEXT"),
     ]:
         if col not in se_cols:
             conn.execute(f"ALTER TABLE staging_extraction ADD COLUMN {col} {col_type}")
@@ -376,6 +385,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # _FIELDS read has a home to write. (Decision: "Observation Write Path
         # Must Cover Every Field Aggregation Reads".)
         ("signing_date_precision",           "TEXT"),
+        # Round-object currency, propagated by aggregation alongside round_size.
+        # See staging_extraction.round_currency for scope + caveats.
+        ("round_currency",                   "TEXT"),
     ]:
         if col not in tr_cols:
             conn.execute(f"ALTER TABLE transaction_record ADD COLUMN {col} {col_type}")
