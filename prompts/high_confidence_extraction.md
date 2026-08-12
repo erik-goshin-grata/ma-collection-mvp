@@ -166,6 +166,7 @@ deal:
   Populate ONLY when the source explicitly states enough ownership evidence to
   distinguish prior ownership, current stake acquired, and/or resulting
   ownership/control. Otherwise null. Do not infer from pct_acquired alone.
+  Do not return UNKNOWN for this field; null is the no-observation state.
   Values:
     NEW_MINORITY_STAKE — buyer/investor owned 0% or no prior stake is stated,
       acquires less than 50%, and remains below control.

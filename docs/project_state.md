@@ -20,8 +20,8 @@ stages + the funding branch remain wired and running.
 Minority cleanup is now accepted and implemented in this validation harness:
 `MINORITY_INVESTMENT` is no longer a validated core classifier output, minority
 status is derived as `is_minority`, and explicit ownership step-ups are captured
-with nullable `stake_transition_type`. This does not change Grata production
-schema/enums.
+with nullable `stake_transition_type` (`NULL`, not `UNKNOWN`, means insufficient
+explicit evidence). This does not change Grata production schema/enums.
 
 ---
 

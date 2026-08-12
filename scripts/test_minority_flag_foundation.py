@@ -218,6 +218,12 @@ def _test_hc_stake_transition_validation(failures: list[str]) -> None:
         _validate_hc(_hc_result("MINORITY_INVESTMENT")),
         "invalid deal.stake_transition_type: 'MINORITY_INVESTMENT'",
     )
+    _assert_equal(
+        failures,
+        "HC rejects UNKNOWN transition",
+        _validate_hc(_hc_result("UNKNOWN")),
+        "invalid deal.stake_transition_type: 'UNKNOWN'",
+    )
 
 
 def _test_schema_column(failures: list[str]) -> None:

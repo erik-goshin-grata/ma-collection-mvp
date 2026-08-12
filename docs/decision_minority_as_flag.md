@@ -54,6 +54,9 @@ Decision:
 - HC extraction populates it only when the source explicitly states enough
   ownership-transition evidence to distinguish prior ownership, current stake
   acquired, and/or resulting ownership/control.
+- `NULL`, not `UNKNOWN`, is the deliberate no-observation state. If the source
+  does not provide enough explicit evidence, leave `stake_transition_type` null
+  so aggregation can apply its conservative fallback rules.
 - Aggregation derives `is_minority` from `stake_transition_type` first, then
   falls back to legacy `MINORITY_INVESTMENT` and stated `pct_acquired < 50` only
   when no explicit transition evidence exists.
@@ -68,6 +71,9 @@ Harness enum:
 - `MINORITY_ACQUIRING_REMAINING`
 - `MAJORITY_INCREASING_STAKE`
 - `MINORITY_INCREASING_STAKE`
+
+`UNKNOWN` is intentionally not part of this enum. Ambiguity or insufficient
+evidence is represented by null.
 
 `is_minority` rule:
 
