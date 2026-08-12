@@ -206,6 +206,50 @@ delta on six HC *descriptive* fields (target/acquirer name+description, ticker, 
 observation model's finer per-source granularity, not this work. It is a latent-divergence item to
 resolve before any switch to `AGGREGATION_READ_SOURCE=observation`, tracked separately from §4.2.
 
+### FINDING (2026-08-12): implied_equity_value grossed up from an unqualified transaction_value — DECISION VIOLATION
+
+Step-7 verification on `pl_funding.db` surfaced a live bug that violates a recorded decision.
+`decisions.md` — **"Transaction Size as Universal Magnitude"** — states an unqualified source
+figure "must never populate equity value or either implied value, because grossing up an
+unqualified number and striking a multiple off it manufactures a figure no source ever qualified."
+Aggregation does exactly that: on rows where the source states only an unqualified value (lands as
+`transaction_value` with `transaction_value_basis='STATED'`) and no separate equity figure,
+`_derive_*` grosses that value up into `implied_equity_value` via `transaction_value / pct_acquired`.
+
+Confirmed instances (all `equity_value` NULL, `implied` = `transaction_value / pct` exactly):
+- `pl_funding.db`: **TC Skyward** (pct 50, tv 1.946B → implied **3.892B**); **KG Mobility tc_616c**
+  (pct 10, tv 75M → implied **750M**).
+- `ma_mvp.db` (dry-run on copy, not yet live): **1 row** — Genesis Digital Assets (pct 38.3, tv
+  500M → implied **1.305B**).
+
+Severity: `implied_equity_value` is one of the two *legal multiple numerators*. These are
+manufactured numerators one step from a manufactured multiple — the multiples gate held only
+because no revenue/EBITDA denominator computed, not because the input was sound. **This is the
+phase-3 evidence** (a manufactured numerator from our own data), in a different shape than the
+predicted "multiple struck off a stake-level value."
+
+Fix is owed and is a **design decision (Claude authors, Code lands)**: the derivation must not
+gross an unqualified/`STATED` `transaction_value` into `implied_equity_value`. Correcting it needs
+a small re-aggregation of the affected rows (2 on pl_funding, 1 on ma_mvp) afterward.
+
+### FINDING (2026-08-12): KG Mobility double-counted — Stage 8 clustering miss
+
+Two `transaction_record`s exist for the same KG Mobility ← Chery 10% deal (`tc_616c` from source 9,
+`tc_9731` from source 151) — two source articles that did not cluster together. Separate from the
+value model; a Stage 8 (`entity_cluster`) dedup gap affecting counts/aggregates. It also acted as an
+accidental controlled experiment: the same figure routed as `equity_value` in one record (coherent
+two-tier: 75M/750M, ratio exactly 100/pct) and as `transaction_value` in the other (the violation
+above) — the first real-data instance of the classify-or-lose problem the **"Named Value Fields
+Replace the Single Value Slot"** decision (accepted, unmigrated) was written to fix.
+
+### Phase-3 framing note
+
+Grata's silver header carries **named scalars** (`deal_value`, `reported_ev`, `amount_raised`,
+`post_evaluation`) pivoting into `financial_metric` rows in gold — no single classify-or-lose slot,
+so it does not have this defect. This is a place to **adopt from eng rather than push back** — worth
+stating plainly in the phase-3 memo, since conceding where their model is better buys credibility for
+where ours does.
+
 Schema drift is now guarded by `scripts/test_schema_convergence.py`: `init_db` brings any DB
 (a fresh one, a 001-base one, or a historical `data/*.db`) to one canonical schema — verified
 across all 6 historical DBs.
