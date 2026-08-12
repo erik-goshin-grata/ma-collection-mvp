@@ -114,6 +114,33 @@ being tangled with re-aggregation diffs that are expected anyway.
 
 `AGGREGATION_READ_SOURCE` **stays `staging`** until this passes.
 
+**Canonical parity is necessary but not sufficient.** The harness also compares LLM conflict
+counts, and a delta there fails the run even when `transaction_record_diffs` is empty. That check
+is not pedantry: identical outputs reached through more LLM adjudications is *latent* divergence,
+not equivalence. Those extra resolutions agree today; a model version bump, a temperature change,
+or one marginal case and they stop agreeing, at which point the canonical parity silently ceases to
+hold with nothing indicating why. There is also a plain cost signal — extra Opus conflict calls on
+every run.
+
+Pin which fields drive any delta before signing this step off. Two hypotheses to separate:
+
+- **Benign** — the observation path now sees newly-covered fields, so more same-tier disagreements
+  surface and happen to resolve identically.
+- **Artifact** — the backfill wrote competing observations for one field. The dedup index is on
+  `(staging_extraction_id, field_name, field_value)`, so **field value is part of the key**: the
+  same field written twice with different string representations yields two live observations and
+  a spurious conflict. Check whether any field reachable from two groups is normalised
+  differently, given `_string_value` takes a `bool_as_int_text` flag.
+
+### Baseline measurement — record, but do not over-read
+
+`pl_funding.db` predates the value model: `deal_value_currency` does not exist on it, nor
+`transaction_value`, `total_debt`, or `pct_acquired_source`. **There is no two-source baseline to
+take here.** The third-source null-rate question moves to phase 2 and needs a corpus containing
+genuine cross-currency funding — a euro round at a dollar post-money. `pl_funding.db` is thin on
+that (`valuation_currency`: 52 null, 6 USD, 1 KRW, 1 EUR), so corpus design has to supply it
+deliberately. A run producing zero mismatches proves nothing either way.
+
 ---
 
 ## 7. §4.2 joint re-aggregation
@@ -121,15 +148,59 @@ being tangled with re-aggregation diffs that are expected anyway.
 The re-aggregation owed since 2026-08-10. **Both changes together — stake-level `equity_value` and
 the transaction-value threshold — never one without the other**, or a third semantics is created.
 
+That constraint is about the **code** being in place, not about any one DB exercising both halves.
+Both landed together in `18720b7`.
+
+### 7a. Target DBs — two runs
+
+§4.2 has two halves and no single fixture exercises both.
+
+- **`pl_funding.db`** — the `equity_value` half. The decision's own framing is that the control
+  path already stored stake-level equity while the funding path stored the 100% figure, and this
+  DB is 55 `VC_ROUND` + 20 `MINORITY_INVESTMENT` — 75 of 91 rows on exactly the path whose
+  semantics changed. Pristine snapshot already exists at `data/pl_funding_pre_step5.db`.
+- **One M&A DB** — the transaction-value / debt half, which `pl_funding.db` cannot exercise
+  (`total_debt` does not exist on it, so there are zero control-plus-debt-known cases).
+  **Confirm which of `ma_mvp.db` / `ma_valu8.db` / `ma_grata.db` is actually read from before
+  choosing** — a permanently mixed column only matters where the data is live, and regenerable
+  fixtures do not need it. Snapshot before running, as with `pl_funding.db`.
+
+### 7b. Precondition — the AGGREGATED→CLUSTERED reset
+
+Aggregation is incremental: it derives `WHERE status = 'CLUSTERED'`, then moves rows to
+`AGGREGATED`. **A DB whose rows are all `AGGREGATED` has nothing to re-derive.**
+`pl_funding.db` is in exactly that state — zero `CLUSTERED` rows.
+
+So the reset is a required, deliberate step, not an implementation detail. `validate_331c` performs
+it internally on its own copy; a real step-7 run does not inherit that.
+
+**Assert row counts before and after the reset, and after the run.** Without the assertion, step 7
+executes cleanly against zero rows and reports success — a silent no-op wearing a green tick,
+which is worse than a failure because nothing prompts a second look.
+
+### 7c. Running
+
 - Route through `run.py`, or call `init_db()` first. A bare `get_connection` skips
   `_apply_migrations`.
-- **Assert the new currency column from step 4 exists before running.** If it does not, the
+- **Assert the `round_currency` column from step 4 exists before running.** If it does not, the
   re-aggregation writes without it and step 4 is undone.
-- **Expect unattributable diffs.** Aggregation has always been incremental, so the DB holds
-  several historical derivation semantics. Diffs that do not trace to §4.2 are expected, not
-  regressions.
 - Cheap re-confirmation of step 6 afterwards is worth it, since the loaders are unchanged but the
   underlying rows are not.
+
+### 7d. Expected diffs — three categories, only one unattributable
+
+1. **§4.2 semantics** — stake-level `equity_value`, the transaction-value threshold. The point of
+   the run.
+2. **Tier-3 columns NULL → populated** — `target_type_v2` and `spin_split_type_v2` have written
+   perpetual NULL to `transaction_record` since `002`; step 3e wired them. On `pl_funding.db` that
+   is ~83 of 91 rows. Large, visually alarming, entirely ours, entirely predictable. **Name it in
+   advance so it is not swept into category 3.**
+3. **Historical derivation semantics** — genuinely unattributable. Aggregation has always been
+   incremental, so the DB holds several generations of semantics. Expected, not regressions.
+
+`round_currency` and `deal_value_currency` should not move at all on historical rows —
+`round_currency` is NULL everywhere, having never been captured. **If `deal_value_currency` moves,
+stop.** Nothing in this work order should have changed it on data where `round_currency` is absent.
 
 ---
 
@@ -137,8 +208,9 @@ the transaction-value threshold — never one without the other**, or a third se
 
 - `scripts/test_schema_convergence.py` passes across all historical DBs.
 - `scripts/test_deal_value_currency.py` passes, including the new three-source case.
-- Update `project_state.md`: the §4.2 re-aggregation is discharged, one re-aggregation remains
-  owed (after `total_debt` + `cash` extraction).
+- Update `project_state.md`: the §4.2 re-aggregation is discharged **on the DBs named in 7a, and
+  which ones** — a DB not listed still carries mixed semantics. One re-aggregation remains owed
+  (after `total_debt` + `Cash_ST` extraction).
 
 ---
 
@@ -163,7 +235,7 @@ cheaper to keep than to rebuild.
 
 ## Not in this work order
 
-- **The Grata enum/schema comparison.** Phase 3. Separate repo, Claude drafting.
+- **The Grata enum/schema comparison.** Phase 3. Separate repo, ChatGPT drafting.
 - **`transaction_size`** — unblocked once step 7 lands, but deliberately not in phase 1.
 - **EV rewire (§4.3)** — still parked on currency and period anchoring.
 - **The field parity test** (`docs/spec_field_parity_test.md`, checks 2–4). This order fixes the

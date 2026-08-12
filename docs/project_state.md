@@ -1,6 +1,6 @@
 # Project State
-**Updated:** 2026-08-11
-**Last commit:** `02db22e`
+**Updated:** 2026-08-12
+**Last commit:** `aa09422`
 **Branch:** `main`
 
 ---
@@ -13,8 +13,9 @@ as-transacted (`equity_value` stake-level, `transaction_value`, `transaction_siz
 vs Tier 2 100%-basis (`implied_equity_value`, `implied_enterprise_value`, the only
 legal multiple numerators). Design is landed in `docs/decisions.md` (2026-08-10
 entries) and `docs/spec_transaction_value_model.md`; code landings §4.1/4.2/4.7 are
-in; two re-aggregations are owed (see bottom of this doc). All 14 stages + the
-funding branch remain wired and running.
+in. The first §4.2 re-aggregation is discharged on the two live DBs; the second
+re-aggregation remains owed after `total_debt` + `Cash_ST` extraction. All 14
+stages + the funding branch remain wired and running.
 
 ---
 
@@ -22,7 +23,7 @@ funding branch remain wired and running.
 
 Schema of record is `schema/*.sql` (001+002+003) **plus** the additive ALTERs in
 `db.py _apply_migrations`, which run on every `init_db`. `test_schema_convergence.py`
-asserts all paths reach one canonical column set (verified across 6 historical DBs).
+asserts all paths reach one canonical column set (verified across 10 historical DBs).
 
 | Source | Applied | Contents |
 |---|---|---|
@@ -110,11 +111,12 @@ Key config flags:
   TERMINATED concept. Missing piece is the scheduler that re-checks EDGAR for
   new filings on still-open deals. Not designed; do not start without a decision.
 
-**Awaiting eng input:**
+**Internal consistency guardrails:**
 - Field inventory + parity test — method decided (generate by origin);
-  `docs/spec_field_parity_test.md` is landed but **ON HOLD** pending eng-team
-  info on schema/enum locations (Erik supplying). See value-model handoff §6 and
-  decisions.md "Field Inventory Method and Naming Conventions".
+  `docs/spec_field_parity_test.md` is landed and its ON HOLD gate is lifted.
+  Checks 2–4 test this repo's internal consistency and do not depend on Grata
+  schema/enum locations. See value-model handoff §6 and decisions.md
+  "Field Inventory Method and Naming Conventions".
 - _(The former `docs/enum_schema_gaps.md` reference was removed — that file does
   not exist in the repo. Funding-valuation scope since resolved:
   `post_money_valuation` only, no implied EV/multiples — decisions.md
@@ -124,8 +126,15 @@ Key config flags:
 - Funding path test corpus **built** — `data/pl_funding.db` (68 stranded VC/venture-debt
   rounds + the KG / 10x `MINORITY_INVESTMENT` cases); funding run surfaced bugs #5–#9,
   all fixed and committed.
+- Observation coverage and round-currency work is landed: the observation write
+  path covers every field Stage 9 reads, Stage 4b dual-writes funding observations,
+  and `round_currency` feeds the three-source unanimity rule for `deal_value_currency`.
+- The implied-equity violation found during §4.2 verification is fixed:
+  `implied_equity_value` derives from `equity_value` only, never from an
+  unqualified `transaction_value` or `post_money_valuation`.
 - Currency + period anchoring not yet validated (blocks the implied tier).
-- Two owed re-aggregations not yet run (see bottom of this doc).
+- First §4.2 re-aggregation discharged on `pl_funding.db` and `ma_mvp.db`; the
+  second re-aggregation remains owed after `total_debt` + `Cash_ST`.
 
 ---
 
@@ -134,16 +143,20 @@ Key config flags:
 Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
 
 1. **Currency + period anchoring** (§2.10 items 1–2) — blocks the implied tier;
-   extracting `total_debt`/`cash` needs period anchoring anyway, so one piece of work.
-2. **`total_debt` + `cash` (Cash_ST) as `target_financials` metrics** — with period type
+   extracting `total_debt`/`Cash_ST` needs period anchoring anyway, so one piece of work.
+2. **`total_debt` + `Cash_ST` as `target_financials` metrics** — with period type
    and `period_end_date`; activates the dormant `transaction_value` total-debt branch and
    lets `net_debt` derive from `total_debt − Cash_ST`.
-3. **`transaction_size` + export column** — the reviewer-facing deliverable; depends on
-   the §4.2 re-aggregation (`docs/handoff_transaction_size.md`).
-4. **EV rewire** (§4.3) — parked until step 1 clears. Guard: do not export the derived EV
+3. **Review export value-model surface** — expose the current value-model fields
+   (`equity_value`, `implied_equity_value`, `transaction_value`, `investment_amount`,
+   `deal_value_currency`, and funding round fields) without treating `_v2` shadow
+   columns as reviewer-facing Grata enum fields.
+4. **`transaction_size` + export column** — the reviewer-facing deliverable now that
+   the first §4.2 re-aggregation is discharged (`docs/handoff_transaction_size.md`).
+5. **EV rewire** (§4.3) — parked until step 1 clears. Guard: do not export the derived EV
    and do not repoint multiples at it before its fix exists.
 
-Owed operational: the **two re-aggregations** below — route through `run.py` so
+Owed operational: the **second re-aggregation** below — route through `run.py` so
 `_apply_migrations` adds the columns first.
 
 Still open, lower priority: write `stages/funding_lc_extract.py`; `deal_summary` v0.10
@@ -157,7 +170,7 @@ The first owed re-aggregation (item 1 below) is **discharged on `pl_funding.db` 
 the two live targets. Both routed through `init_db` (columns asserted), full AGGREGATED→CLUSTERED
 reset with row-count assertions, real Stage 9, diff classified by decision lineage. `ma_valu8.db`
 / `ma_grata.db` remain deferred (control-heavy fixtures, not read from). **The second re-aggregation
-(item 2, after `total_debt`+`cash`) is still owed** — and per the dormancy finding above it is
+(item 2, after `total_debt` + `Cash_ST`) is still owed** — and per the dormancy finding above it is
 substantive: §4.2's `EQUITY_PLUS_TOTAL_DEBT` branch has produced zero values on real data to date.
 
 A mid-run verification surfaced a decision violation in `_derive_implied_equity` (below), which was
@@ -175,23 +188,20 @@ looked. And: any claim about how many rows hold a value must be measured against
 inferred from a NULL→val **diff** (the error that put a false "latent" claim into `decisions.md`,
 since corrected).
 
-§4.2 landed as CODE only (equity_value now stake-level; transaction_value threshold;
-+ total_debt / transaction_value / transaction_value_basis / pct_acquired_source columns).
-Aggregation is **incremental** (only CLUSTERED rows are derived; existing AGGREGATED rows
-keep old semantics), so a normal run does NOT re-derive existing rows. **Two deliberate
-re-aggregations are owed — track here, not just in conversation; forgetting leaves a
-permanently mixed column, which is exactly what "re-aggregate, don't stamp" avoids:**
+§4.2 landed as CODE first (equity_value now stake-level; transaction_value threshold;
++ total_debt / transaction_value / transaction_value_basis / pct_acquired_source columns),
+then was applied to the two live DBs by deliberate re-aggregation. Aggregation remains
+**incremental** (only CLUSTERED rows are derived; existing AGGREGATED rows keep old
+semantics), so any future semantic change still needs an explicit reset-and-run, not a normal
+pipeline pass. **One deliberate re-aggregation remains owed:**
 
-1. **After §4.2:** re-aggregate the affected clusters once (both changes together — never
-   between them). Route through `run.py` (or call `init_db()` first) so `_apply_migrations`
-   adds the new columns before writing; assert the columns are present before running.
-2. **After total_debt + Cash_ST extraction (the next piece):** re-aggregate again to populate
+1. **After total_debt + Cash_ST extraction (the next piece):** re-aggregate again to populate
    the transaction_value total-debt branch (dormant until then) and derive net_debt from
    `total_debt − Cash_ST` (cash is defined as `Cash_ST` — see decisions.md "Debt and Cash
    Inputs").
 
 Expect **unattributable diffs** from re-aggregation: the DB holds several historical
-derivation semantics (aggregation has always been incremental), not just the two §4.2
+derivation semantics (aggregation has always been incremental), not just a single expected
 creates. Diffs that don't trace to §4.2 are expected, not regressions.
 
 ### Finding (2026-08-12): §4.2's transaction-value/debt branch has never run on real data
@@ -252,9 +262,9 @@ because no revenue/EBITDA denominator computed, not because the input was sound.
 phase-3 evidence** (a manufactured numerator from our own data), in a different shape than the
 predicted "multiple struck off a stake-level value."
 
-Fix is owed and is a **design decision (Claude authors, Code lands)**: the derivation must not
-gross an unqualified/`STATED` `transaction_value` into `implied_equity_value`. Correcting it needs
-a small re-aggregation of the affected rows (2 on pl_funding, 1 on ma_mvp) afterward.
+Resolved in `065a87d`: the derivation no longer grosses an unqualified/`STATED`
+`transaction_value` into `implied_equity_value`. Corrective re-aggregation nulled the affected
+`pl_funding.db` values, and `ma_mvp.db` re-aggregated with the fix in place.
 
 ### FINDING (2026-08-12): KG Mobility double-counted — Stage 8 clustering miss
 
@@ -276,7 +286,7 @@ where ours does.
 
 Schema drift is now guarded by `scripts/test_schema_convergence.py`: `init_db` brings any DB
 (a fresh one, a 001-base one, or a historical `data/*.db`) to one canonical schema — verified
-across all 6 historical DBs.
+across all 10 historical DBs.
 
 _Retracted:_ an earlier note here flagged `v2_event_type` as undocumented CREATE/reality drift.
 That was a false positive from reading `001_initial.sql` alone — it is defined in

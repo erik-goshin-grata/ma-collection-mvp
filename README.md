@@ -22,10 +22,10 @@ Authoritative current-state docs, in freshness order:
 
 | Doc | Role |
 | :--- | :--- |
-| `docs/session_handoff_2026_08_10_value_model.md` | Latest workstream (value model) |
-| `docs/CONTEXT.md` | Code-derived pipeline contract (all stages, enums, bugs) |
+| `docs/project_state.md` | Living state, including discharged and owed re-aggregations |
+| `docs/session_handoff_2026_08_12_field_coverage.md` | Latest handoff: field coverage, value-model evidence, Grata memo framing |
 | `docs/decisions.md` | Authoritative decision log — source of truth |
-| `docs/project_state.md` | Living state, incl. owed re-aggregations |
+| `docs/CONTEXT.md` | Code-derived pipeline contract (all stages, enums, bugs) |
 
 `mvp_goal_and_schema.md` is the **original v0.1 scope doc and is superseded** — it describes a 100-deal proof loop and tables that were ultimately built as columns. Kept for history; do not treat as current.
 
@@ -37,7 +37,7 @@ Authoritative current-state docs, in freshness order:
 | Anthropic + OpenAI providers, per-stage model tiering | Implemented |
 | SQLite schema (migrations 001–003) | Implemented |
 | Funding path (VC / growth / venture debt) | Implemented; `funding_lc_extract` stage still pending |
-| Two-tier value model | Design landed; two re-aggregations owed (see `project_state.md`) |
+| Two-tier value model | Design + §4.1/§4.2/§4.7 code landed; first §4.2 re-aggregation discharged on live DBs; second re-aggregation owed after `total_debt` + `Cash_ST` extraction |
 
 ---
 
@@ -249,14 +249,15 @@ No pipeline stage halts on an individual row failure. Failures are logged to `ex
 
 ## Next Steps
 
-Current queue (from `docs/session_handoff_2026_08_10_value_model.md`):
+Current queue (see `docs/project_state.md` for the freshest state):
 
 1. Currency + period anchoring — blocks the implied-valuation tier.
-2. `total_debt` + `cash` as `target_financials` metrics — activates the dormant total-debt branch; lets `net_debt` derive.
-3. `transaction_size` + its export column — the reviewer-facing deliverable; depends on the §4.2 re-aggregation.
-4. EV rewire — parked until currency/period anchoring clears.
+2. `total_debt` + `Cash_ST` as `target_financials` metrics — activates the dormant total-debt branch; lets `net_debt` derive.
+3. Review export value-model surface — expose current value-model and funding fields without treating `_v2` shadow columns as reviewer-facing Grata enum fields.
+4. `transaction_size` + its export column — the reviewer-facing deliverable now that the first §4.2 re-aggregation is discharged.
+5. EV rewire — parked until currency/period anchoring clears.
 
-Owed operational work: **two re-aggregations** (after §4.2, and after `total_debt`+`cash` lands) — route through `run.py` so migrations apply first. See `docs/project_state.md`.
+Owed operational work: the **second re-aggregation** after `total_debt` + `Cash_ST` lands — route through `run.py` so migrations apply first. See `docs/project_state.md`.
 
 ---
 
