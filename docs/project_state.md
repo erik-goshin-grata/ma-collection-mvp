@@ -170,6 +170,42 @@ Expect **unattributable diffs** from re-aggregation: the DB holds several histor
 derivation semantics (aggregation has always been incremental), not just the two §4.2
 creates. Diffs that don't trace to §4.2 are expected, not regressions.
 
+### Finding (2026-08-12): §4.2's transaction-value/debt branch has never run on real data
+
+`total_debt` exists on **no** database — not `pl_funding.db`, `ma_mvp.db`, `ma_valu8.db`, or
+`ma_grata.db`. It is a manual column, never populated. So §4.2's control-path branch
+(`transaction_value = equity_value + total_debt` at `pct_acquired ≥ 50`) **cannot fire against
+any existing data** — every control deal takes the debt-unknown fallback (`transaction_value =
+equity_value`, or null). The **second owed re-aggregation is therefore substantive, not a
+formality**: the total-debt branch will run against real data for the *first time* only after
+`total_debt` + `Cash_ST` extraction lands. The first re-aggregation (below) can only exercise the
+stake-level `equity_value` change and the TV=equity fallback.
+
+Target choice for re-aggregation follows *live data*, not interesting data: re-aggregation is
+remediation of a mixed column someone reads, not a test of a code path (that's a unit test).
+Live targets: `pl_funding.db` (75/91 rows on the changed funding/minority path) and `ma_mvp.db`
+(config-live per `.env`; all 92 rows non-control = the changed `equity_value` path).
+`ma_valu8.db` / `ma_grata.db` (control-heavy) are deferred unless someone reads them.
+
+### Precondition (was missing from the work order): AGGREGATED→CLUSTERED reset
+
+Aggregation derives `WHERE status='CLUSTERED'` then moves rows to `AGGREGATED`. A DB whose rows
+are all `AGGREGATED` (which `pl_funding.db` and `ma_mvp.db` both are — 0 CLUSTERED) has nothing to
+re-derive; step 7 would run clean against zero rows and report success — a silent no-op. **The
+reset is a required, deliberate step; assert row counts before the reset, after it, and after the
+run.**
+
+### Phase-1 progress (2026-08-11/12): observation coverage + round currency landed
+
+Steps 1–6 of `docs/workorder_code_2026_08_11.md` are complete and committed. The observation
+write path now covers every field aggregation reads (funding group + tier-2/tier-3 wiring);
+`round_currency` is captured and `deal_value_currency` is unanimity-or-null over three sources.
+Step-6 parity on `pl_funding.db`: **zero canonical transaction diffs**. A residual +10 LLM-conflict
+delta on six HC *descriptive* fields (target/acquirer name+description, ticker, per_share_price) is
+**pre-existing** — verified identical on the pristine pre-backfill snapshot — and reflects the
+observation model's finer per-source granularity, not this work. It is a latent-divergence item to
+resolve before any switch to `AGGREGATION_READ_SOURCE=observation`, tracked separately from §4.2.
+
 Schema drift is now guarded by `scripts/test_schema_convergence.py`: `init_db` brings any DB
 (a fresh one, a 001-base one, or a historical `data/*.db`) to one canonical schema — verified
 across all 6 historical DBs.
