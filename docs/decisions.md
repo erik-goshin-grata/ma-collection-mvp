@@ -869,9 +869,14 @@ Consequences:
     omission occurred twice.
 
   These are **local migration artifacts and stay local.** The `_v2` columns exist only in this
-  repo — zero occurrences in eng's `schemas.py` or `enums.py` `[verified: 2026-08-11]`. They are
-  our shadow of the V2 vocabulary during an expand-and-contract that has not yet contracted.
-  Nothing here belongs in an eng-facing document.
+  repo. They are our shadow of the V2 vocabulary during an expand-and-contract that has not yet
+  contracted, and nothing here belongs in a Grata-facing document.
+
+  The supporting claim — zero occurrences of `_v2` in Grata's `enums.py` and `schemas.py` — was
+  checked against copies of those files supplied by Erik on 2026-08-11 from
+  `grataio/datawarehouse`, `DBX/data_financial_transaction/code/`. **Those files are not in this
+  repo and the check cannot be reproduced from it.** Re-verify against the source repo before
+  relying on it; treat it as accurate as of that date rather than as a standing fact.
 - **`consideration_type` is resolved and is not a drop.** It is derived by
   `_derive_consideration_type` from `consideration_components`, and the extracted value is
   intentionally ignored. Allow-list entry with that reason.
