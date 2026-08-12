@@ -1,7 +1,11 @@
 # Spec: Field parity test
 
-**Status: ON HOLD** — pending eng-team information on schema and enum locations. Do not
-implement from this document yet; the field inventory it tests against has not been built.
+**Status: checks 2–4 UNGATED (2026-08-11); check 1 superseded.** Per
+`docs/workorder_code_2026_08_11.md`, checks 2–4 test this repo's internal consistency and never
+depended on Grata, so their ON HOLD gate is lifted; building `scripts/test_field_parity.py` is
+the natural follow-on to phase 1. The allow-list below is declared now (work order step 2). The
+former blanket ON HOLD — pending eng-team schema/enum locations — applied to the field-inventory
+generation, which remains the sequencing precondition for a full run.
 
 **Purpose:** catch field-level drift the way `test_reason_code_parity.py` catches enum drift.
 **Deliverable:** `scripts/test_field_parity.py`
@@ -97,6 +101,24 @@ Every field written by an aggregation derivation has its input fields present in
 **Rationale:** the `round_size` bug in one sentence — `_derive_investment_amount` reads
 `round_size`, which wasn't in `HC_FIELDS`. A derivation whose inputs aren't loaded returns null
 and looks like sparse data rather than a wiring fault.
+
+---
+
+## Allow-list — declared path exclusions
+
+Fields legitimately exclusive to one path (derived rather than extracted). Each is declared here
+**with a reason**, per `decisions.md` — "Observation Write Path Must Cover Every Field Aggregation
+Reads" (2026-08-11). Checks 2 and 4 must treat these as expected exclusions, not drift. When
+`scripts/test_field_parity.py` is built it consumes this list (mirror it as a code constant whose
+divergence from this doc itself fails a test).
+
+| Field | Excluded from | Reason |
+|---|---|---|
+| `consideration_type` | staging read (`_FIELDS`) / observation read | Derived by `_derive_consideration_type` from `consideration_components`; the HC-extracted value is intentionally ignored in favour of the derivation. `[verified: stages/aggregate.py — 2026-08-11]` |
+| `round_stage_category` | staging read (`_FIELDS`) on the aggregation path | Derived by `_derive_round_stage_category` from `round_label`; `003_funding_path.sql` states this in a comment. `[verified: stages/aggregate.py:246, schema/003_funding_path.sql — 2026-08-11]` |
+
+Neither is a drop. Both are extracted/stored but deliberately superseded by a derivation; the
+allow-list records the intent so a future parity run does not flag them as missing wiring.
 
 ---
 
