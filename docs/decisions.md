@@ -950,9 +950,23 @@ Decision:
   Deleting the branch would also strip the *correct* case, which reaches its right answer through
   the same path. Gross up `equity_value` instead.
 - **The `post_money_valuation` branch goes too.** It returned an implied equity for non-control
-  types including funding, inverting the Funding Valuation Scope prohibition. Latent today — no
-  funding row carries an implied value — but latent is how the stake-level enterprise-value defect
-  has persisted, and unlike that one this fix is not blocked on anything.
+  types including funding, inverting the Funding Valuation Scope prohibition.
+
+  **Correction, 2026-08-12.** This entry originally described that branch as latent, on the basis
+  that no funding row carried an implied value. **That was false, and the error is instructive.**
+  Seven funding rows on `pl_funding.db` carried post-money-derived implied equity — Base Power
+  13B, DeepX 3.14T, Sarvam 1.5B, Sol.One, OLIX (×2), Horizon3 — every one a live Funding Valuation
+  Scope violation and a legal multiple numerator. `[verified: pl_funding_pre_fix.db — 2026-08-12]`
+
+  The claim came from reading a **diff** as a statement about **state**: a check reporting
+  `implied_equity_value` NULL→val on two rows was a count of rows that *changed*, and rows already
+  carrying the value never appeared in it. The conclusion was then written into this entry as a
+  fact about the data.
+
+  The practical consequence: removing this branch corrected seven active violations rather than
+  pre-empting a dormant one. Strict scope discipline — "don't fix what isn't firing" — would have
+  left them in place. **Any claim about how many rows hold a value must be measured against state,
+  never inferred from a diff.**
 - **`pct_acquired` must be §2.6-resolved, not read raw.** `_derive_implied_equity` takes the
   resolved `pct` as a parameter (the same one `_derive_transaction_value` receives from the single
   `_resolve_pct_acquired` call), never `fv.get("pct_acquired")`. A raw NULL pct on an
