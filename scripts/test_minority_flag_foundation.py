@@ -152,7 +152,7 @@ def _test_stake_transition_regressions(failures: list[str]) -> None:
     cases = [
         ("0_to_20", "ACQUISITION", 20, "NEW_MINORITY_STAKE", 1),
         ("30_to_60", "ACQUISITION", 30, "MINORITY_ACQUIRING_MAJORITY", 1),
-        ("20_to_100", "ACQUISITION", 80, "MINORITY_ACQUIRING_REMAINING", 1),
+        ("20_to_100", "ACQUISITION", 80, "MINORITY_ACQUIRING_REMAINING", 0),
         ("60_to_80", "ACQUISITION", 20, "MAJORITY_INCREASING_STAKE", 1),
         ("20_to_35", "ACQUISITION", 15, "MINORITY_INCREASING_STAKE", 1),
         ("80_to_100_lumina", "ACQUISITION", 20, "MAJORITY_ACQUIRE_REMAINING", 1),
@@ -181,6 +181,22 @@ def _test_stake_transition_regressions(failures: list[str]) -> None:
         "stake_transition_type": None,
     })["is_minority"]
     _assert_equal(failures, "pct_fallback_without_transition", fallback, 1)
+
+    pct_precedence = _derive_flags({
+        "v2_event_type": "ACQUISITION",
+        "deal_type": "ACQUISITION",
+        "pct_acquired": 80,
+        "stake_transition_type": "MAJORITY_ACQUIRE_REMAINING",
+    })["is_minority"]
+    _assert_equal(failures, "current_pct_overrides_transition_label", pct_precedence, 0)
+
+    transition_without_pct = _derive_flags({
+        "v2_event_type": "ACQUISITION",
+        "deal_type": "ACQUISITION",
+        "pct_acquired": None,
+        "stake_transition_type": "MAJORITY_ACQUIRE_REMAINING",
+    })["is_minority"]
+    _assert_equal(failures, "minority_transition_used_when_pct_missing", transition_without_pct, 1)
 
 
 def _hc_result(stake_transition_type):

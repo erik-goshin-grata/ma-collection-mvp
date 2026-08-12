@@ -22,7 +22,9 @@ Minority cleanup is now accepted and implemented in this validation harness:
 status is derived as `is_minority`, and explicit ownership step-ups are captured
 with nullable `stake_transition_type` (`NULL`, not `UNKNOWN`, means insufficient
 explicit evidence). `is_minority` is a transaction feature/flag, not a proxy for
-post-transaction control state. This does not change Grata production schema/enums.
+post-transaction control state; current `pct_acquired` takes precedence over
+ownership-history labels embedded in `stake_transition_type`. This does not
+change Grata production schema/enums.
 
 ---
 
@@ -73,7 +75,7 @@ Current versions:
 | 6 | `sec_enrich` | Extended lookback/lookahead window |
 | 7 | `low_confidence_extract` | v0.5 |
 | 8 | `entity_cluster` | Running |
-| 9 | `aggregate` | V2 + funding fields; multiples gated off funding; value-model §4.1/4.2 landed; derives transaction-feature `is_minority` from `stake_transition_type` before pct fallback |
+| 9 | `aggregate` | V2 + funding fields; multiples gated off funding; value-model §4.1/4.2 landed; derives transaction-feature `is_minority` from current pct/explicit minority evidence before transition fallback |
 | 10 | `sec_documents` | Running |
 | 11 | `agreement_extract` | Running |
 | 12 | `summarize` | v0.9 — V2 input fields; M&A framing only (funding framing v0.10 pending) |

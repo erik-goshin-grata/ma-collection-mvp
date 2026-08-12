@@ -200,41 +200,43 @@ def _derive_is_take_private(fields: dict) -> int:
     return 0
 
 
-_MINORITY_STAKE_TRANSITIONS = frozenset({
+_MINORITY_STAKE_TRANSITIONS_WITHOUT_PCT = frozenset({
     "NEW_MINORITY_STAKE",
     "MINORITY_ACQUIRING_MAJORITY",
     "MAJORITY_ACQUIRE_REMAINING",
-    "MINORITY_ACQUIRING_REMAINING",
     "MAJORITY_INCREASING_STAKE",
     "MINORITY_INCREASING_STAKE",
 })
 
-_NON_MINORITY_STAKE_TRANSITIONS = frozenset({"FULL_ACQUISITION"})
+_NON_MINORITY_STAKE_TRANSITIONS_WITHOUT_PCT = frozenset({
+    "FULL_ACQUISITION",
+    "MINORITY_ACQUIRING_REMAINING",
+})
 
 
 def _derive_is_minority(fields: dict) -> int:
     """Derived minority-status flag.
 
-    Prefer explicit stake-transition evidence: minority means the transaction
-    involves a minority interest/stake characteristic. It is not a proxy for
-    whether the buyer/investor has or obtains control after the transaction.
-    Fall back to legacy taxonomy and stated pct only when no transition evidence
-    exists.
+    Minority means the current transaction involves a minority interest/stake
+    characteristic, not that the buyer/investor has or lacks control after the
+    transaction. Current pct_acquired is the strongest structured evidence when
+    stated. Stake-transition labels are used only when pct is missing and the
+    label itself implies a current minority-sized stake.
     """
-    transition = fields.get("stake_transition_type")
-    if transition in _MINORITY_STAKE_TRANSITIONS:
-        return 1
-    if transition in _NON_MINORITY_STAKE_TRANSITIONS:
-        return 0
     if _event_type(fields) == "MINORITY_INVESTMENT":
         return 1
     pct = fields.get("pct_acquired")
-    if pct is None:
+    if pct is not None:
+        try:
+            return int(float(pct) < 50.0)
+        except (TypeError, ValueError):
+            return 0
+    transition = fields.get("stake_transition_type")
+    if transition in _MINORITY_STAKE_TRANSITIONS_WITHOUT_PCT:
+        return 1
+    if transition in _NON_MINORITY_STAKE_TRANSITIONS_WITHOUT_PCT:
         return 0
-    try:
-        return int(float(pct) < 50.0)
-    except (TypeError, ValueError):
-        return 0
+    return 0
 
 
 def _derive_flags(fields: dict) -> dict:

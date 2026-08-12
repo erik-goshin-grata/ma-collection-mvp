@@ -58,10 +58,12 @@ Decision:
 - `NULL`, not `UNKNOWN`, is the deliberate no-observation state. If the source
   does not provide enough explicit evidence, leave `stake_transition_type` null
   so aggregation can apply its conservative fallback rules.
-- Aggregation derives `is_minority` from `stake_transition_type` first, using it
-  as evidence that the transaction involves a minority interest/stake feature,
-  then falls back to legacy `MINORITY_INVESTMENT` and stated
-  `pct_acquired < 50` only when no explicit transition evidence exists.
+- Aggregation derives `is_minority` from the current stake characteristic:
+  legacy explicit minority language/reasoning first, then stated
+  `pct_acquired < 50`, then `stake_transition_type` only when pct is missing and
+  the transition label itself implies a current minority-sized stake.
+- Ownership-history labels embedded in `stake_transition_type` do not override a
+  stated current `pct_acquired`.
 - Value formulas are unchanged in this slice.
 
 Harness enum:
@@ -79,12 +81,15 @@ evidence is represented by null.
 
 `is_minority` rule:
 
-- `true` for `NEW_MINORITY_STAKE`, `MINORITY_INCREASING_STAKE`,
-  `MAJORITY_INCREASING_STAKE`, `MAJORITY_ACQUIRE_REMAINING`,
-  `MINORITY_ACQUIRING_MAJORITY`, and `MINORITY_ACQUIRING_REMAINING`.
-- `false` for `FULL_ACQUISITION`.
-- Fallback only: if `stake_transition_type` is null, legacy rows with
-  `MINORITY_INVESTMENT` or a stated `pct_acquired < 50` derive `is_minority`.
+- `true` when the current acquired stake is explicitly minority-sized
+  (`pct_acquired < 50`) or the legacy source/taxonomy explicitly says minority.
+- If `pct_acquired` is missing, transition labels that imply a current
+  minority-sized stake may derive `true`: `NEW_MINORITY_STAKE`,
+  `MINORITY_INCREASING_STAKE`, `MAJORITY_INCREASING_STAKE`,
+  `MAJORITY_ACQUIRE_REMAINING`, and `MINORITY_ACQUIRING_MAJORITY`.
+- `false` for `FULL_ACQUISITION`, for stated `pct_acquired >= 50`, and for
+  `MINORITY_ACQUIRING_REMAINING` when the current transaction acquires the
+  remaining majority-sized stake.
 
 Canonical Lumina/TNQTech result:
 
@@ -104,7 +109,7 @@ Regression expectations:
 |---|---:|---:|---:|---:|
 | 0% -> 20% | `ACQUISITION` if secondary; funding type if primary | `20` | `NEW_MINORITY_STAKE` | `true` |
 | 30% -> 60% | `ACQUISITION` | `30` | `MINORITY_ACQUIRING_MAJORITY` | `true` |
-| 20% -> 100% | `ACQUISITION` | `80` | `MINORITY_ACQUIRING_REMAINING` | `true` |
+| 20% -> 100% | `ACQUISITION` | `80` | `MINORITY_ACQUIRING_REMAINING` | `false` |
 | 60% -> 80% | `ACQUISITION` | `20` | `MAJORITY_INCREASING_STAKE` | `true` |
 | 20% -> 35% | `ACQUISITION` | `15` | `MINORITY_INCREASING_STAKE` | `true` |
 | 80% -> 100% | `ACQUISITION` | `20` | `MAJORITY_ACQUIRE_REMAINING` | `true` |
