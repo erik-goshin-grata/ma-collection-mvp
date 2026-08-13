@@ -573,6 +573,52 @@ def _derive_implied_enterprise_value(
     return None, None
 
 
+def _source_key(obs: dict) -> tuple[Any, Any] | Any:
+    return obs.get("source_key") or obs.get("observation_id")
+
+
+def _pick_value_amount_for_type(field_observations: dict[str, list[dict]], target_value_type: str) -> float | None:
+    """Pick a value_amount observation whose sibling value_type has the requested semantic type.
+
+    The legacy aggregate has one value_amount/value_type winner, but Tier 1 transaction
+    value and Tier 2 EV are independent canonical outputs. This helper lets each
+    derivation consume the best observation of its own semantic type.
+    """
+    typed_source_keys = {
+        _source_key(obs)
+        for obs in field_observations.get("value_type", [])
+        if obs.get("value") == target_value_type
+    }
+    if not typed_source_keys:
+        return None
+
+    amount_observations = [
+        obs
+        for obs in field_observations.get("value_amount", [])
+        if _source_key(obs) in typed_source_keys and obs.get("value") is not None
+    ]
+    if not amount_observations:
+        return None
+
+    chosen, needs_llm, conflict_obs = _pick_value("value_amount", "number", amount_observations)
+    if chosen is not None:
+        return float(chosen)
+    if needs_llm and conflict_obs:
+        # Avoid a second aggregation prompt in the deterministic derivation path.
+        # The canonical field still gets the best available typed amount by tier
+        # and confidence; same-tier/same-confidence conflicts remain logged by the
+        # legacy value_amount field if the raw amount itself conflicts.
+        ranked = sorted(
+            conflict_obs,
+            key=lambda o: (
+                TIER_ORDER.index(o.get("tier")) if o.get("tier") in TIER_ORDER else len(TIER_ORDER),
+                _CONF_RANK.get(o.get("model_confidence") or "MEDIUM", 1),
+            ),
+        )
+        return float(ranked[0]["value"])
+    return None
+
+
 def _derive_enterprise_value(
     value_amount: float | None,
     value_type: str | None,
@@ -847,8 +893,10 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
             })
             for field_name, _field_type in _FIELDS:
                 raw_val = member[field_name] if field_name in member.keys() else None
+                source_key = (member["extraction_id"], member["source_raw_id"])
                 bundle["field_observations"][field_name].append({
                     "observation_id": i + 1,
+                    "source_key": source_key,
                     "source_type": member["source_type"],
                     "tier": member["source_tier"],
                     "published_date": member["published_date"] or "",
@@ -954,6 +1002,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
 
         bundle["field_observations"][field_name].append({
             "observation_id": row["observation_id"],
+            "source_key": source_key,
             "source_type": row["source_type"],
             "tier": row["source_tier"],
             "published_date": row["published_date"] or "",
@@ -1077,15 +1126,35 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             )
             implied_equity_value = _derive_implied_equity(equity_value, pct_resolved)
             investment_amount = _derive_investment_amount(field_values)
+            typed_transaction_value_amount = _pick_value_amount_for_type(
+                bundle["field_observations"], "TRANSACTION_VALUE"
+            )
+            typed_enterprise_value_amount = _pick_value_amount_for_type(
+                bundle["field_observations"], "ENTERPRISE_VALUE"
+            )
+            transaction_value_fields = dict(field_values)
+            if typed_transaction_value_amount is not None:
+                transaction_value_fields["value_amount"] = typed_transaction_value_amount
+                transaction_value_fields["value_type"] = "TRANSACTION_VALUE"
             transaction_value, transaction_value_basis = _derive_transaction_value(
-                field_values, equity_value, total_debt, pct_resolved
+                transaction_value_fields, equity_value, total_debt, pct_resolved
             )
             # Currency companion for the derived value fields; null on a genuine
             # currency mismatch (§4.7 — the null is itself the queryable signal).
             deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
+            implied_enterprise_value_amount = (
+                typed_enterprise_value_amount
+                if typed_enterprise_value_amount is not None
+                else field_values.get("value_amount")
+            )
+            implied_enterprise_value_type = (
+                "ENTERPRISE_VALUE"
+                if typed_enterprise_value_amount is not None
+                else field_values.get("value_type")
+            )
             implied_enterprise_value, implied_enterprise_value_basis = _derive_implied_enterprise_value(
-                field_values.get("value_amount"),
-                field_values.get("value_type"),
+                implied_enterprise_value_amount,
+                implied_enterprise_value_type,
                 implied_equity_value,
                 net_debt,
                 total_debt,

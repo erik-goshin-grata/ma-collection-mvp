@@ -21,6 +21,7 @@ from stages.aggregate import (
     _derive_implied_enterprise_value,
     _derive_implied_equity,
     _derive_transaction_value,
+    _pick_value_amount_for_type,
 )
 
 
@@ -74,6 +75,69 @@ def main() -> None:
         "source_stated_ev_populates_directly",
         _derive_implied_enterprise_value(8_500_000_000.0, "ENTERPRISE_VALUE", None, None, None, None),
         (8_500_000_000.0, "STATED"),
+    )
+    mediaworks_observations = {
+        "value_amount": [
+            {
+                "observation_id": 1,
+                "source_key": ("bt", 11),
+                "tier": "T2",
+                "value": 130_000_000.0,
+                "model_confidence": "HIGH",
+            },
+            {
+                "observation_id": 2,
+                "source_key": ("smallcaps", 12),
+                "tier": "T2",
+                "value": 130_000_000.0,
+                "model_confidence": "HIGH",
+            },
+        ],
+        "value_type": [
+            {
+                "observation_id": 1,
+                "source_key": ("bt", 11),
+                "tier": "T2",
+                "value": "TRANSACTION_VALUE",
+                "model_confidence": "HIGH",
+            },
+            {
+                "observation_id": 2,
+                "source_key": ("smallcaps", 12),
+                "tier": "T2",
+                "value": "ENTERPRISE_VALUE",
+                "model_confidence": "HIGH",
+            },
+        ],
+    }
+    mediaworks_transaction_amount = _pick_value_amount_for_type(
+        mediaworks_observations, "TRANSACTION_VALUE"
+    )
+    mediaworks_ev_amount = _pick_value_amount_for_type(
+        mediaworks_observations, "ENTERPRISE_VALUE"
+    )
+    _assert_equal(failures, "mediaworks_transaction_value_observation_survives", mediaworks_transaction_amount, 130_000_000.0)
+    _assert_equal(failures, "mediaworks_ev_observation_survives", mediaworks_ev_amount, 130_000_000.0)
+    _assert_equal(
+        failures,
+        "mediaworks_transaction_value_and_stated_ev_coexist",
+        (
+            _derive_transaction_value(
+                {"value_amount": mediaworks_transaction_amount, "value_type": "TRANSACTION_VALUE"},
+                None,
+                None,
+                100.0,
+            ),
+            _derive_implied_enterprise_value(
+                mediaworks_ev_amount,
+                "ENTERPRISE_VALUE",
+                None,
+                None,
+                None,
+                None,
+            ),
+        ),
+        ((130_000_000.0, "STATED"), (130_000_000.0, "STATED")),
     )
     _assert_equal(
         failures,
@@ -141,7 +205,7 @@ def main() -> None:
         for failure in failures:
             print("FAIL", failure)
         raise SystemExit(1)
-    print("PASS implied_enterprise_value guards: 14 cases")
+    print("PASS implied_enterprise_value guards: 18 cases")
 
 
 if __name__ == "__main__":
