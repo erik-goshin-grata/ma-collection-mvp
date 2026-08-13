@@ -1,5 +1,5 @@
 # Project State
-**Updated:** 2026-08-12
+**Updated:** 2026-08-13
 **Last commit:** this commit
 **Branch:** `main`
 
@@ -31,6 +31,13 @@ explicit evidence). `is_minority` is a transaction feature/flag, not a proxy for
 post-transaction control state; current `pct_acquired` takes precedence over
 ownership-history labels embedded in `stake_transition_type`. This does not
 change Grata production schema/enums.
+
+Validation checkpoint: `NEW_MAJORITY_STAKE` is implemented. The 2026-08-12
+PredictLeads validation corpus completed with no aggregation execution failures
+and no core `MINORITY_INVESTMENT` outputs. MediaWorks/SEG exposed and validated
+independent preservation of source-supported `TRANSACTION_VALUE` and
+`ENTERPRISE_VALUE` semantics in aggregation. Erebor's `VC_ROUND` classification
+passed source review with a source-quality caveat.
 
 ---
 
