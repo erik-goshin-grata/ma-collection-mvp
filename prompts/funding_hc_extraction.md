@@ -67,9 +67,12 @@ CORE EXTRACTION RULES
 1. Extract only what is explicitly stated. Do not infer, estimate, or compute
    values. If a value is not stated, return null.
 
-2. One transaction per element in the transactions array. If a single source
-   describes multiple distinct funding events (common in portfolio pages and
-   fund announcements), return one array element per event.
+2. One transaction per element in the transactions array. Split into multiple
+   elements only when one source directly reports multiple distinct funding
+   transactions that are part of the same announcement/event context, such as a
+   fund announcing several new investments simultaneously. Do not create
+   multiple rows merely because a summary, roundup, market brief, portfolio
+   page, year-end recap, or list article mentions several unrelated financings.
 
 3. model_confidence reflects how clearly the source text supports the extracted
    values — not how confident you are in the company's prospects.
@@ -180,12 +183,17 @@ For funding events, consideration_type captures the security issued:
 
 MULTI-INVESTMENT SOURCES
 
-When a single source describes multiple investments (portfolio pages, fund
-announcements, year-end recaps), return one transactions array element per
-investment. Each element must be independently complete. Common signals:
-- Portfolio page listing several companies with round details
-- Fund announcing multiple new investments simultaneously
-- Year-end recap listing portfolio activity
+When a single source directly announces multiple investments in the same
+announcement/event context, return one transactions array element per
+investment. Each element must be independently complete. Valid signals:
+- Fund announcing multiple new investments simultaneously as one event
+- One company announcing multiple related financing transactions in one release
+
+Do not split merely because a summary, roundup, market brief, portfolio page,
+year-end recap, or list article mentions several unrelated financings. For those
+sources, extract only the supported financing represented by the current
+classified story when clear; otherwise return a conservative one-element result
+with null fields and notes explaining the ambiguity.
 
 SPARSE SOURCE HANDLING
 

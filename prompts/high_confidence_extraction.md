@@ -92,11 +92,13 @@ CORE EXTRACTION RULES
    uses authoritative (SEC) share counts. Populate `value.amount` only from a
    figure the source itself states.
 
-2. One transaction per element in the transactions array. If a single source
-   announces or references multiple distinct transactions (common in law firm
-   announcements), return one array element per transaction. Each element must
-   be independently complete — do not reference "the above" or carry fields
-   between elements.
+2. One transaction per element in the transactions array. Split into multiple
+   elements only when one source directly reports multiple distinct transactions
+   that are part of the same announcement/event context, such as one buyer
+   acquiring two separate targets or asset groups. Do not create multiple rows
+   merely because a summary, roundup, market brief, or list article mentions
+   several unrelated deals. Each element must be independently complete — do not
+   reference "the above" or carry fields between elements.
 
 3. Confidence applies to the extraction, not the deal. model_confidence
    reflects how clearly the source text supports the extracted values:
@@ -345,12 +347,18 @@ multiple). A dedicated ARR field is pending schema — see the QA notes header.
 
 MULTI-TRANSACTION SOURCES
 
-When a single source announces multiple transactions (common in law firm,
-advisor, or platform announcements), return one transactions array element per
-transaction. Signals for multiple transactions:
-- Law firm/advisor tombstone listing several deal closings
+When a single source directly announces multiple transactions in the same
+announcement/event context, return one transactions array element per
+transaction. Valid signals include:
+- One buyer acquiring two separate targets or asset groups in the same release
 - Platform company announcing multiple add-on acquisitions in one release
-- PE firm announcing several portfolio exits simultaneously
+- PE firm announcing several portfolio exits simultaneously as one firm event
+
+Do not split merely because a summary, roundup, market brief, tombstone list, or
+article digest mentions several unrelated deals. For those sources, extract only
+the supported transaction represented by the current classified story when clear;
+otherwise return a conservative one-element result with null/UNKNOWN fields and
+notes explaining the ambiguity.
 
 Each element must be independently complete. Do not share fields between
 elements.
