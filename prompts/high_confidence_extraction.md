@@ -172,6 +172,11 @@ deal:
   Values:
     NEW_MINORITY_STAKE — buyer/investor owned 0% or no prior stake is stated,
       acquires less than 50%, and remains below control.
+    NEW_MAJORITY_STAKE — buyer/investor owned 0% or no prior stake is stated,
+      acquires 50% or more but less than 100%, resulting in control. Fort
+      Tech/Logia pattern: no prior ownership stated, current pct_acquired 50.1%,
+      resulting stake/control is majority. TPG/Lotte Rental pattern: no prior
+      ownership stated, current pct_acquired 61.17%.
     FULL_ACQUISITION — buyer/investor owned 0% or no prior stake is stated, and
       acquires 100% or the full company.
     MINORITY_ACQUIRING_MAJORITY — buyer was below 50% before and crosses to 50%
@@ -498,7 +503,7 @@ Extract all transactions from this source.
       },
       "deal": {
         "pct_acquired": "number | null",
-        "stake_transition_type": "NEW_MINORITY_STAKE | FULL_ACQUISITION | MINORITY_ACQUIRING_MAJORITY | MAJORITY_ACQUIRE_REMAINING | MINORITY_ACQUIRING_REMAINING | MAJORITY_INCREASING_STAKE | MINORITY_INCREASING_STAKE | null"
+        "stake_transition_type": "NEW_MINORITY_STAKE | NEW_MAJORITY_STAKE | FULL_ACQUISITION | MINORITY_ACQUIRING_MAJORITY | MAJORITY_ACQUIRE_REMAINING | MINORITY_ACQUIRING_REMAINING | MAJORITY_INCREASING_STAKE | MINORITY_INCREASING_STAKE | null"
       },
       "dates": {
         "announced_date": "YYYY-MM-DD | null",

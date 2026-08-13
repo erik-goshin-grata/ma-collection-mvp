@@ -69,6 +69,7 @@ Decision:
 Harness enum:
 
 - `NEW_MINORITY_STAKE`
+- `NEW_MAJORITY_STAKE`
 - `FULL_ACQUISITION`
 - `MINORITY_ACQUIRING_MAJORITY`
 - `MAJORITY_ACQUIRE_REMAINING`
@@ -87,9 +88,9 @@ evidence is represented by null.
   minority-sized stake may derive `true`: `NEW_MINORITY_STAKE`,
   `MINORITY_INCREASING_STAKE`, `MAJORITY_INCREASING_STAKE`,
   `MAJORITY_ACQUIRE_REMAINING`, and `MINORITY_ACQUIRING_MAJORITY`.
-- `false` for `FULL_ACQUISITION`, for stated `pct_acquired >= 50`, and for
-  `MINORITY_ACQUIRING_REMAINING` when the current transaction acquires the
-  remaining majority-sized stake.
+- `false` for `NEW_MAJORITY_STAKE`, `FULL_ACQUISITION`, for stated
+  `pct_acquired >= 50`, and for `MINORITY_ACQUIRING_REMAINING` when the current
+  transaction acquires the remaining majority-sized stake.
 
 Canonical Lumina/TNQTech result:
 
@@ -108,6 +109,8 @@ Regression expectations:
 | Transition | Core event type | pct_acquired | stake_transition_type | is_minority |
 |---|---:|---:|---:|---:|
 | 0% -> 20% | `ACQUISITION` if secondary; funding type if primary | `20` | `NEW_MINORITY_STAKE` | `true` |
+| 0% -> 50.1% | `ACQUISITION` | `50.1` | `NEW_MAJORITY_STAKE` | `false` |
+| 0% -> 61.17% | `ACQUISITION` | `61.17` | `NEW_MAJORITY_STAKE` | `false` |
 | 30% -> 60% | `ACQUISITION` | `30` | `MINORITY_ACQUIRING_MAJORITY` | `true` |
 | 20% -> 100% | `ACQUISITION` | `80` | `MINORITY_ACQUIRING_REMAINING` | `false` |
 | 60% -> 80% | `ACQUISITION` | `20` | `MAJORITY_INCREASING_STAKE` | `true` |

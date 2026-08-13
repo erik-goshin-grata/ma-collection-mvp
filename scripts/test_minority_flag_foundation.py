@@ -153,6 +153,8 @@ def _test_lumina_remaining_stake_regression(failures: list[str]) -> None:
 def _test_stake_transition_regressions(failures: list[str]) -> None:
     cases = [
         ("0_to_20", "ACQUISITION", 20, "NEW_MINORITY_STAKE", 1),
+        ("0_to_50_1_fort_logia", "ACQUISITION", 50.1, "NEW_MAJORITY_STAKE", 0),
+        ("0_to_61_17_tpg_lotte", "ACQUISITION", 61.17, "NEW_MAJORITY_STAKE", 0),
         ("30_to_60", "ACQUISITION", 30, "MINORITY_ACQUIRING_MAJORITY", 1),
         ("20_to_100", "ACQUISITION", 80, "MINORITY_ACQUIRING_REMAINING", 0),
         ("60_to_80", "ACQUISITION", 20, "MAJORITY_INCREASING_STAKE", 1),
@@ -200,6 +202,14 @@ def _test_stake_transition_regressions(failures: list[str]) -> None:
     })["is_minority"]
     _assert_equal(failures, "minority_transition_used_when_pct_missing", transition_without_pct, 1)
 
+    new_majority_without_pct = _derive_flags({
+        "v2_event_type": "ACQUISITION",
+        "deal_type": "ACQUISITION",
+        "pct_acquired": None,
+        "stake_transition_type": "NEW_MAJORITY_STAKE",
+    })["is_minority"]
+    _assert_equal(failures, "new_majority_transition_not_minority_without_pct", new_majority_without_pct, 0)
+
 
 def _hc_result(stake_transition_type):
     return {
@@ -229,6 +239,12 @@ def _test_hc_stake_transition_validation(failures: list[str]) -> None:
         failures,
         "HC accepts Lumina transition",
         _validate_hc(_hc_result("MAJORITY_ACQUIRE_REMAINING")),
+        None,
+    )
+    _assert_equal(
+        failures,
+        "HC accepts new majority transition",
+        _validate_hc(_hc_result("NEW_MAJORITY_STAKE")),
         None,
     )
     _assert_equal(
