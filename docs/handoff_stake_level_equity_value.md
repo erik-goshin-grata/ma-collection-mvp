@@ -79,7 +79,7 @@ tier.
 | Source states one | As-reported. Takes precedence. |
 | `pct_acquired` < 50 | `equity_value` — no debt added |
 | `pct_acquired` ≥ 50 | `equity_value` + total debt |
-| `pct_acquired` ≥ 50, debt unknown, nothing stated | **null** — do not assume debt = 0 |
+| `pct_acquired` ≥ 50, debt unknown, qualified equity consideration stated | `equity_value`, basis `EQUITY_VALUE_ONLY` — does not assume debt = 0 |
 
 Cash is never netted.
 
@@ -172,9 +172,10 @@ control-crossing test would have — the stake is below 50, and control was also
 | Field | Expected |
 |---|---|
 | `equity_value` | 200 |
-| `transaction_value` | **null** |
+| `transaction_value` | 200, basis `EQUITY_VALUE_ONLY` |
 
-The null is the point. TV = 200 would assert debt = 0.
+The basis is the point. TV = 200 with `EQUITY_VALUE_ONLY` preserves the stated
+equity consideration and does not assert debt = 0.
 
 ### Everlane — as-reported takes precedence, and reconciles
 
@@ -196,6 +197,6 @@ should reconcile with the as-reported 80.
 
 - No `equity_value` on a funding-path row equals that row's `post_money_valuation`
 - `transaction_value` equals `equity_value` on every row where `pct_acquired` < 50
-- `transaction_value` is null on every row where `pct_acquired` ≥ 50, total debt is absent,
-  and no debt-inclusive figure was stated
+- `transaction_value` equals `equity_value` with basis `EQUITY_VALUE_ONLY` on rows where
+  `pct_acquired` ≥ 50, total debt is absent, and qualified equity consideration was stated
 - Manual `net_debt` values are unchanged from before the run

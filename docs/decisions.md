@@ -328,8 +328,9 @@ Decision:
 - Where it is calculated:
   - `pct_acquired` < 50 → `transaction_value` = `equity_value`. No debt is added.
   - `pct_acquired` ≥ 50 → `transaction_value` = `equity_value` + total debt.
-  - `pct_acquired` ≥ 50 with debt unknown and nothing stated → null. Do not assume
-    debt = 0.
+  - `pct_acquired` ≥ 50 with qualified equity consideration and debt unknown →
+    `transaction_value` = `equity_value`, basis `EQUITY_VALUE_ONLY`. This preserves
+    the known consideration for the stake acquired and does not assume debt = 0.
 - Cash is never netted. `transaction_value` − cash = `implied_enterprise_value`.
 - **The test is `pct_acquired ≥ 50`.** A control-crossing test using pre- and
   post-transaction ownership was considered and rejected — see below.
@@ -342,7 +343,9 @@ Context:
   treatment consolidates nothing. `transaction_value` = `equity_value` there is a statement
   about the transaction, not a claim that the company is debt-free.
 - At or above control the acquirer consolidates the target's balance sheet and effectively
-  takes on its debt, so adding total debt records something that happened.
+  takes on its debt, so adding total debt records something that happened when total debt is
+  available. When debt is unknown, `EQUITY_VALUE_ONLY` records the known equity consideration
+  component without treating missing debt as zero.
 - **The simple threshold is wrong in one case and right in four.** A step-up from a
   minority position into control — 30% to 60%, `pct_acquired` = 30 — reads as below
   control and adds no debt, when it should. Buying from an existing minority position
@@ -362,10 +365,12 @@ Consequences:
 - **This redefines an existing field.** The prior rule added total debt unconditionally, so
   previously computed rows for partial stakes will change value. A backfill decision is
   required.
-- `transaction_value` equals `equity_value` for minority deals. Redundant but honest, and
-  it keeps `transaction_size` populated without a special case.
+- `transaction_value` equals `equity_value` for minority deals, and for control deals where
+  the only known transaction component is qualified equity consideration. The basis stamp
+  distinguishes below-control no-debt treatment from control debt-unknown treatment.
 - The reconciliation identity `transaction_value - cash = implied_enterprise_value` holds
-  for control deals only.
+  for control deals only when `transaction_value_basis` is `STATED` or
+  `EQUITY_PLUS_TOTAL_DEBT`, not when it is `EQUITY_VALUE_ONLY`.
 - Requires no extraction primitive beyond `pct_acquired`, which already exists. Neither
   pre-transaction ownership nor a derived control-flag family is needed for the value
   model. Those may still be built for comps segmentation and filtering, on their own
@@ -1120,3 +1125,31 @@ Consequences:
   Spin/Split mechanics, `transaction_terms_disclosure_status`, neutral metric renames, and
   advisor-person cardinality changes remain recommendations, not accepted implementation
   decisions.
+
+## 2026-08-14 - Recent Annual Actuals May Feed Trailing EV Multiples
+
+Status: accepted and implemented for existing EV/Revenue and EV/EBITDA paths only.
+
+Decision:
+
+- Preserve source financial periods exactly. An `ANNUAL` revenue or EBITDA metric remains
+  `ANNUAL`; it is not relabeled to `LTM`.
+- The multiple engine may use a recent historical `ANNUAL` actual as a trailing denominator and
+  populate the existing `_ltm` analytical slot when date-aligned.
+- Eligibility requires a known `announced_date`, a known annual `period_end`, `period_end` not
+  after announcement, and `period_end` no more than 455 days before announcement.
+- The 455-day window is provisional pending broader corpus review; it is a conservative
+  operational threshold, not a permanent taxonomy rule.
+- Year-only annual period ends such as `2025` are treated as December 31 of that year for
+  eligibility testing only. The stored source period remains `2025`; no fiscal date is persisted
+  or silently rewritten.
+- Explicit `LTM`/`TTM` remains directly eligible and preferred. `NTM` remains separate.
+- Funding gating, currency mismatch behavior, and EV numerator rules are unchanged.
+
+Consequences:
+
+- A transaction announced in March 2026 with FY2025 annual revenue may calculate EV/Revenue in the
+  LTM analytical slot while preserving the denominator as an annual source fact.
+- Stale annual facts and future annual period ends do not auto-calculate.
+- P/E and P/B remain out of scope because this pipeline does not implement net-income/book-value
+  denominator capture or equity-multiple calculation.

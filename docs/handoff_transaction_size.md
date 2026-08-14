@@ -151,11 +151,12 @@ Never 1,000,000,000. A valuation does not enter an as-transacted field.
 | Field | Expected |
 |---|---|
 | `transaction_size` | 200 |
-| `transaction_size_basis` | `EQUITY_CONSIDERATION` |
+| `transaction_size_basis` | `TRANSACTION_VALUE` |
 
-TV is null here (§2.1.1 — do not assume debt = 0), so the waterfall falls to the second rung.
-This is the case that shows why the basis stamp is mandatory: 200 and 250 above are the same
-kind of number only if you know which rung produced them.
+TV is 200 here with `transaction_value_basis=EQUITY_VALUE_ONLY` (§2.1.1 — do not assume
+debt = 0), so the waterfall consumes transaction value normally. This is the case that
+shows why the TV basis stamp is mandatory: 200 and 250 above are the same kind of number
+only if you know which rung produced them.
 
 ### Multi-investor round, no stated round size
 

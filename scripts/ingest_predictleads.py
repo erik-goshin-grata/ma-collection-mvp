@@ -9,7 +9,7 @@ shape the PR Newswire / csv_url adapters produce — so the downstream LLM pipel
 
 No network fetch: we reuse PredictLeads' scraped text (cost lesson: never re-scrape).
 
-The PredictLeads recipient/investor/category/financing_type/amount are stashed into
+The PredictLeads recipient/investor/category/financing_type are stashed into
 source_raw.notes under "predictleads_reference" as lightweight ground truth for a
 downstream extraction review.
 
@@ -60,7 +60,6 @@ def _notes(row: dict) -> str:
             "event_id": (row.get("id") or "").strip(),
             "category": (row.get("category") or "").strip(),
             "financing_type": (row.get("financing_type") or "").strip(),
-            "amount": (row.get("amount") or "").strip(),
             "recipient": recipient,
             "investor": investor,
         },

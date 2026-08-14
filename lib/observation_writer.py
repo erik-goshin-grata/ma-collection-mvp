@@ -130,6 +130,7 @@ _OBSERVATION_INSERT_ORDER = (
     "filing_date",
     "extraction_prompt_version",
     "observation_source_stage",
+    "observation_fact_key",
 )
 
 _MONTHS = (
@@ -192,6 +193,7 @@ def insert_observation(
     filing_date: str | None = None,
     extraction_prompt_version: str | None = None,
     observation_source_stage: str | None = None,
+    observation_fact_key: str | None = None,
     bool_as_int_text: bool = False,
     columns: set[str] | None = None,
 ) -> int:
@@ -223,6 +225,7 @@ def insert_observation(
         "filing_date": filing_date,
         "extraction_prompt_version": extraction_prompt_version,
         "observation_source_stage": observation_source_stage,
+        "observation_fact_key": observation_fact_key,
     }
     cols = [col for col in _OBSERVATION_INSERT_ORDER if col in available]
     placeholders = ", ".join("?" for _ in cols)
@@ -283,6 +286,85 @@ def _write_field_group(
             extraction_prompt_version=prompt_version,
             observation_source_stage=observation_source_stage,
             bool_as_int_text=True,
+            columns=columns,
+        )
+    return inserted
+
+
+def _value_observation_items(raw: Any) -> list[dict[str, Any]]:
+    if not raw:
+        return []
+    try:
+        items = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _write_value_observations(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    prompt_version: str | None,
+    observation_source_stage: str,
+    columns: set[str],
+) -> int:
+    inserted = 0
+    source_type = _row_value(row, "source_type")
+    for index, item in enumerate(_value_observation_items(_row_value(row, "value_observations"))):
+        fact_key = f"value_observations[{index}]"
+        field_map = {
+            "value_amount": item.get("amount"),
+            "value_currency": item.get("currency"),
+            "value_type": item.get("type"),
+            "value_qualifier": item.get("qualifier") or item.get("basis"),
+        }
+        for field_name, value in field_map.items():
+            if value is None:
+                continue
+            inserted += insert_observation(
+                conn,
+                transaction_id=_row_value(row, "transaction_cluster_id"),
+                field_name=field_name,
+                field_value=value,
+                staging_extraction_id=_row_value(row, "extraction_id"),
+                source_raw_id=_row_value(row, "source_raw_id"),
+                source_type=source_type,
+                source_tier=_row_value(row, "source_tier"),
+                model_confidence=_row_value(row, "model_confidence"),
+                source_published_date=_row_value(row, "published_date"),
+                filing_type=_source_filing_type(source_type),
+                extraction_prompt_version=prompt_version,
+                observation_source_stage=observation_source_stage,
+                observation_fact_key=fact_key,
+                bool_as_int_text=True,
+                columns=columns,
+            )
+        audit_payload = {
+            "amount": item.get("amount"),
+            "currency": item.get("currency"),
+            "type": item.get("type"),
+            "basis": item.get("basis"),
+            "qualifier": item.get("qualifier"),
+            "evidence": item.get("evidence"),
+        }
+        inserted += insert_observation(
+            conn,
+            transaction_id=_row_value(row, "transaction_cluster_id"),
+            field_name="value_observation",
+            field_value=json.dumps(audit_payload, ensure_ascii=False, sort_keys=True),
+            staging_extraction_id=_row_value(row, "extraction_id"),
+            source_raw_id=_row_value(row, "source_raw_id"),
+            source_type=source_type,
+            source_tier=_row_value(row, "source_tier"),
+            model_confidence=_row_value(row, "model_confidence"),
+            source_published_date=_row_value(row, "published_date"),
+            filing_type=_source_filing_type(source_type),
+            extraction_prompt_version=prompt_version,
+            observation_source_stage=observation_source_stage,
+            observation_fact_key=fact_key,
             columns=columns,
         )
     return inserted
@@ -451,6 +533,13 @@ def write_staging_observations_for_extraction(
             conn,
             row,
             fields=HC_FIELDS,
+            prompt_version=_row_value(row, "hc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "HC_EXTRACT"),
+            columns=columns,
+        )
+        inserted += _write_value_observations(
+            conn,
+            row,
             prompt_version=_row_value(row, "hc_prompt_version"),
             observation_source_stage=_stage_name(observation_source_stage, "HC_EXTRACT"),
             columns=columns,

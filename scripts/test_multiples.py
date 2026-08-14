@@ -4,7 +4,8 @@ scripts/test_multiples.py — Synthetic unit tests for _compute_multiples().
 Run from project root:
     python scripts/test_multiples.py
 
-Exercises all 9 cases from the Drop 3.12 patch spec.
+Exercises the Drop 3.12 cases plus the date-aligned ANNUAL-as-trailing fallback.
+The 455-day annual eligibility window is provisional pending broader corpus review.
 """
 
 import sys
@@ -168,7 +169,7 @@ check("Case 8 — TTM treated as LTM → CALCULATED, ev_to_revenue_ltm populated
       r, "CALCULATED",
       {"ev_to_revenue_ltm": 5.0, "ev_to_revenue_ntm": None})
 
-# ─── Case 9: FY period_type → NOT_CALCULABLE (no LTM/NTM slot) ───────────────
+# ─── Case 9: FY period_type → NOT_CALCULABLE (legacy FY is not relabeled) ────
 r = _compute_multiples(
     implied_enterprise_value=500_000_000,
     value_currency="USD",
@@ -182,6 +183,145 @@ r = _compute_multiples(
 check("Case 9 — FY period_type → NOT_CALCULABLE (no LTM/NTM mapping)",
       r, "NOT_CALCULABLE",
       {"ev_to_revenue_ltm": None, "ev_to_ebitda_ltm": None})
+
+# ─── Case 10: recent ANNUAL actual → LTM analytical slot fallback ────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=100_000_000,
+    target_revenue_period_type="ANNUAL",
+    target_revenue_period_end="2025",
+    target_ebitda=50_000_000,
+    target_ebitda_period_type="ANNUAL",
+    target_ebitda_period_end="2025",
+    financials_currency="USD",
+    log=log, cluster_id="tc_test10",
+    announced_date="2026-03-15",
+)
+check("Case 10 — recent ANNUAL actual eligible as trailing denominator",
+      r, "CALCULATED",
+      {"ev_to_revenue_ltm": 5.0, "ev_to_ebitda_ltm": 10.0,
+       "ev_to_revenue_ntm": None, "ev_to_ebitda_ntm": None})
+
+# ─── Case 11: stale ANNUAL actual → NOT_CALCULABLE ───────────────────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=100_000_000,
+    target_revenue_period_type="ANNUAL",
+    target_revenue_period_end="2024",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="USD",
+    log=log, cluster_id="tc_test11",
+    announced_date="2026-08-14",
+)
+check("Case 11 — stale ANNUAL actual rejected",
+      r, "NOT_CALCULABLE",
+      {"ev_to_revenue_ltm": None})
+
+# ─── Case 12: future ANNUAL period end → NOT_CALCULABLE ──────────────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=100_000_000,
+    target_revenue_period_type="ANNUAL",
+    target_revenue_period_end="2026-12-31",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="USD",
+    log=log, cluster_id="tc_test12",
+    announced_date="2026-08-14",
+)
+check("Case 12 — future ANNUAL period end rejected",
+      r, "NOT_CALCULABLE",
+      {"ev_to_revenue_ltm": None})
+
+# ─── Case 13: explicit LTM remains directly eligible ─────────────────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=125_000_000,
+    target_revenue_period_type="LTM",
+    target_revenue_period_end="2026-06-30",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="USD",
+    log=log, cluster_id="tc_test13",
+    announced_date="2026-08-14",
+)
+check("Case 13 — explicit LTM remains preferred/direct",
+      r, "CALCULATED",
+      {"ev_to_revenue_ltm": 4.0})
+
+# ─── Case 14: NTM unchanged and separate ─────────────────────────────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=100_000_000,
+    target_revenue_period_type="NTM",
+    target_revenue_period_end="2027-08-14",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="USD",
+    log=log, cluster_id="tc_test14",
+    announced_date="2026-08-14",
+)
+check("Case 14 — NTM unchanged and separate",
+      r, "CALCULATED",
+      {"ev_to_revenue_ntm": 5.0, "ev_to_revenue_ltm": None})
+
+# ─── Case 15: eligible ANNUAL with currency mismatch → NM ────────────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=100_000_000,
+    target_revenue_period_type="ANNUAL",
+    target_revenue_period_end="2025",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="EUR",
+    log=log, cluster_id="tc_test15",
+    announced_date="2026-03-15",
+)
+check("Case 15 — eligible ANNUAL with currency mismatch stays NM",
+      r, "NM",
+      {"ev_to_revenue_ltm": None})
+
+# ─── Case 16: funding gate unchanged ─────────────────────────────────────────
+r = _compute_multiples(
+    implied_enterprise_value=500_000_000,
+    value_currency="USD",
+    target_revenue=100_000_000,
+    target_revenue_period_type="ANNUAL",
+    target_revenue_period_end="2025",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="USD",
+    log=log, cluster_id="tc_test16",
+    v2_event_type="GROWTH_EQUITY",
+    announced_date="2026-03-15",
+)
+check("Case 16 — funding gate unchanged",
+      r, "NOT_CALCULABLE",
+      {"ev_to_revenue_ltm": None})
+
+# ─── Case 17: Samsonite-style annual revenue within 455 days ─────────────────
+r = _compute_multiples(
+    implied_enterprise_value=210_000_000,
+    value_currency="USD",
+    target_revenue=210_000_000,
+    target_revenue_period_type="ANNUAL",
+    target_revenue_period_end="2025",
+    target_ebitda=None,
+    target_ebitda_period_type=None,
+    financials_currency="USD",
+    log=log, cluster_id="tc_samsonite",
+    announced_date="2026-08-12",
+)
+check("Case 17 — Samsonite ANNUAL 2025 revenue eligible for trailing EV/Revenue",
+      r, "CALCULATED",
+      {"ev_to_revenue_ltm": 1.0, "ev_to_revenue_ntm": None})
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 passed = sum(results)

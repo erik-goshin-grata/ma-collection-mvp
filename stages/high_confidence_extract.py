@@ -33,10 +33,21 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.14"
+_VERSION = "0.15"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
-_REQUIRED_KEYS = frozenset({"target", "acquirer", "parent_seller", "dates", "value", "target_financials", "model_confidence", "deal", "financials_disclosure_status"})
+_REQUIRED_KEYS = frozenset({
+    "target",
+    "acquirer",
+    "parent_seller",
+    "dates",
+    "value",
+    "value_observations",
+    "target_financials",
+    "model_confidence",
+    "deal",
+    "financials_disclosure_status",
+})
 _VALID_VALUE_TYPES = frozenset({"EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE", "UNDISCLOSED"})
 _VALID_ACQUIRER_TYPES_V2 = frozenset({
     "strategic_corporate", "private_equity", "pe_portfolio", "venture_capital",
@@ -58,6 +69,7 @@ _VALID_STAKE_TRANSITION_TYPES = frozenset({
     "MAJORITY_INCREASING_STAKE",
     "MINORITY_INCREASING_STAKE",
 })
+_VALUE_OBSERVATION_KEYS = frozenset({"amount", "currency", "type", "basis", "qualifier", "evidence"})
 
 # Normalize legacy uppercase acquirer_type values to V2 lowercase
 _LEGACY_ACQUIRER_TYPE_MAP: dict[str, str] = {
@@ -119,6 +131,18 @@ def _validate(result: dict) -> str | None:
     vtype = (result.get("value") or {}).get("type")
     if vtype is not None and vtype not in _VALID_VALUE_TYPES:
         return f"invalid value.type: {vtype!r}"
+    value_observations = result.get("value_observations")
+    if not isinstance(value_observations, list):
+        return "invalid value_observations: expected list"
+    for i, obs in enumerate(value_observations):
+        if not isinstance(obs, dict):
+            return f"invalid value_observations[{i}]: expected object"
+        unknown = set(obs) - _VALUE_OBSERVATION_KEYS
+        if unknown:
+            return f"invalid value_observations[{i}] keys: {unknown}"
+        otype = obs.get("type")
+        if otype is not None and otype not in _VALID_VALUE_TYPES:
+            return f"invalid value_observations[{i}].type: {otype!r}"
 
     # financials_disclosure_status — required, must be valid
     fds = result.get("financials_disclosure_status")
@@ -149,6 +173,47 @@ def _validate(result: dict) -> str | None:
     # Validation of V2 values happens post-normalization at write time.
 
     return None
+
+
+def _value_observations_json(txn: dict) -> str | None:
+    items = txn.get("value_observations")
+    if not isinstance(items, list):
+        return None
+    clean = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        amount = item.get("amount")
+        vtype = item.get("type")
+        if amount is None and vtype is None:
+            continue
+        clean.append({
+            "amount": amount,
+            "currency": item.get("currency"),
+            "type": vtype,
+            "basis": item.get("basis"),
+            "qualifier": item.get("qualifier"),
+            "evidence": item.get("evidence"),
+        })
+    return json.dumps(clean, ensure_ascii=False)
+
+
+def _primary_value(txn: dict) -> dict:
+    """Return the compatibility value object, sourced from the first typed fact when present."""
+    legacy = txn.get("value") or {}
+    items = txn.get("value_observations")
+    if isinstance(items, list) and items:
+        first = items[0] if isinstance(items[0], dict) else {}
+        if first:
+            return {
+                "amount": first.get("amount"),
+                "currency": first.get("currency"),
+                "type": first.get("type"),
+                "type_confidence": legacy.get("type_confidence"),
+                "qualifier": first.get("qualifier"),
+                "per_share_price": legacy.get("per_share_price"),
+            }
+    return legacy
 
 
 def _fmt(v) -> str:
@@ -278,8 +343,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             a = txn.get("acquirer") or {}
             ps = txn.get("parent_seller") or {}
             d = txn.get("dates") or {}
-            v = txn.get("value") or {}
+            v = _primary_value(txn)
             tf = txn.get("target_financials") or {}
+            value_observations_json = _value_observations_json(txn)
 
             nd = dict(base_nd)
             hc_notes = txn.get("notes")
@@ -311,6 +377,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 d.get("rumor_date"),                 # new
                 v.get("amount"), v.get("currency"), v.get("type"),
                 v.get("type_confidence"), v.get("qualifier"), v.get("per_share_price"),
+                value_observations_json,
                 txn.get("round_size"),   # primary-capital capture (value fields null when set)
                 tf.get("revenue_amount"),
                 tf.get("revenue_period_type"),       # legacy column
@@ -345,6 +412,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         rumor_date = ?,
                         value_amount = ?,  value_currency = ?,  value_type = ?,
                         value_type_confidence = ?,  value_qualifier = ?,  per_share_price = ?,
+                        value_observations = ?,
                         round_size = ?,
                         target_revenue = ?,
                         target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
@@ -394,6 +462,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         rumor_date,
                         value_amount, value_currency, value_type,
                         value_type_confidence, value_qualifier, per_share_price,
+                        value_observations,
                         round_size,
                         target_revenue,
                         target_revenue_period_type, target_revenue_period_type_v2,
@@ -409,7 +478,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

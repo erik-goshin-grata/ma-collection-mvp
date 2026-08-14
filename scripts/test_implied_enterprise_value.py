@@ -164,6 +164,21 @@ def main() -> None:
         _derive_transaction_value({}, 900_000_000.0, 150_000_000.0, 100.0),
         (1_050_000_000.0, "EQUITY_PLUS_TOTAL_DEBT"),
     )
+    equity_only_tv, equity_only_basis = _derive_transaction_value(
+        {}, 178_500_000.0, None, 85.0
+    )
+    _assert_equal(
+        failures,
+        "control_debt_unknown_transaction_value_equity_only",
+        (equity_only_tv, equity_only_basis),
+        (178_500_000.0, "EQUITY_VALUE_ONLY"),
+    )
+    _assert_equal(
+        failures,
+        "equity_only_transaction_value_does_not_imply_ev",
+        _derive_implied_enterprise_value(None, None, 210_000_000.0, None, None, None),
+        (None, None),
+    )
 
     no_ev_multiples = _compute_multiples(
         implied_enterprise_value=None,

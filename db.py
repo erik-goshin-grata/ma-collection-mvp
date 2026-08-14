@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS transaction_field_observation (
     extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     extraction_prompt_version   TEXT,
     observation_source_stage    TEXT,
+    observation_fact_key        TEXT,
     is_current                  INTEGER DEFAULT 1,
     FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
     FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id),
@@ -52,6 +53,7 @@ CREATE TABLE IF NOT EXISTS transaction_field_observation (
 
 _OBSERVATION_INDEX_SQL = """
 DROP INDEX IF EXISTS idx_observation_unique_current;
+DROP INDEX IF EXISTS idx_observation_unique_current_staging;
 
 CREATE INDEX IF NOT EXISTS idx_observation_txn_field
     ON transaction_field_observation(transaction_id, field_name);
@@ -69,7 +71,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current_section
     ON transaction_field_observation (source_section_id, field_name, field_value)
     WHERE is_current = 1 AND source_section_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_observation_unique_current_staging
-    ON transaction_field_observation (staging_extraction_id, field_name, field_value)
+    ON transaction_field_observation (staging_extraction_id, field_name, field_value, COALESCE(observation_fact_key, ''))
     WHERE is_current = 1 AND staging_extraction_id IS NOT NULL;
 """
 
@@ -238,6 +240,7 @@ def _observation_needs_rebuild(conn: sqlite3.Connection) -> bool:
         "filing_type",
         "agreement_dated_as_of",
         "observation_source_stage",
+        "observation_fact_key",
     }
     if required - set(cols):
         return True
@@ -333,6 +336,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # Nullable harness-only ownership transition enum. Populated only when
         # prior/current/resulting ownership evidence is explicit in the source.
         ("stake_transition_type", "TEXT"),
+        # Structured HC value facts. Preserves multiple independently typed deal
+        # values from one source while legacy value_amount/value_type remain the
+        # primary compatibility pair.
+        ("value_observations", "TEXT"),
     ]:
         if col not in se_cols:
             conn.execute(f"ALTER TABLE staging_extraction ADD COLUMN {col} {col_type}")

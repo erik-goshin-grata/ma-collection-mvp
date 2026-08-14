@@ -29,7 +29,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from config import Config
@@ -321,11 +321,16 @@ def _compute_multiples(
     log: Any,
     cluster_id: str,
     v2_event_type: str | None = None,
+    announced_date: str | None = None,
+    target_revenue_period_end: str | None = None,
+    target_ebitda_period_end: str | None = None,
 ) -> dict:
     """Compute EV/Revenue and EV/EBITDA multiples.
 
     Requires a whole-company implied_enterprise_value. TTM is treated as LTM
-    (interchangeable industry usage). Cross-currency pairs are flagged NM without conversion.
+    (interchangeable industry usage). A recent source-reported ANNUAL actual may
+    populate the LTM analytical slot when date-aligned, without relabeling the
+    source financial period. Cross-currency pairs are flagged NM without conversion.
     Plausible ranges: EV/Revenue 0.1x–50x, EV/EBITDA 1x–100x.
     """
     result: dict[str, Any] = {
@@ -349,25 +354,59 @@ def _compute_multiples(
 
     _RANGES = {"revenue": (0.1, 50.0), "ebitda": (1.0, 100.0)}
 
-    def _slot(period_type: str | None, metric: str) -> str | None:
+    def _parse_date(value: str | None, *, year_only_as_latest_day: bool = False) -> date | None:
+        if not value:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if len(text) == 4 and text.isdigit():
+            # Eligibility-only convention: year-only ANNUAL periods are tested
+            # against Dec. 31 of that year, the latest possible full-year end.
+            # The source period_end stored on the transaction remains unchanged.
+            return date(int(text), 12, 31) if year_only_as_latest_day else None
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+
+    announced_dt = _parse_date(announced_date)
+
+    def _annual_actual_is_trailing_eligible(period_end: str | None, metric: str) -> bool:
+        period_end_dt = _parse_date(period_end, year_only_as_latest_day=True)
+        if announced_dt is None or period_end_dt is None:
+            log.debug("cluster=%s %s ANNUAL missing date alignment inputs", cluster_id, metric)
+            return False
+        age_days = (announced_dt - period_end_dt).days
+        if age_days < 0:
+            log.debug("cluster=%s %s ANNUAL period_end=%r after announced_date=%r", cluster_id, metric, period_end, announced_date)
+            return False
+        if age_days > 455:
+            log.debug("cluster=%s %s ANNUAL period_end=%r stale by %d days", cluster_id, metric, period_end, age_days)
+            return False
+        return True
+
+    def _slot(period_type: str | None, period_end: str | None, metric: str) -> str | None:
         p = (period_type or "").upper()
         if p in ("LTM", "TTM"):
             return f"ev_to_{metric}_ltm"
         if p == "NTM":
             return f"ev_to_{metric}_ntm"
+        if p == "ANNUAL" and _annual_actual_is_trailing_eligible(period_end, metric):
+            return f"ev_to_{metric}_ltm"
         log.debug("cluster=%s %s period_type=%r not LTM/NTM — skipping multiple", cluster_id, metric, period_type)
         return None
 
     calculated_in_range = False
     calculated_out_of_range = False
 
-    for metric, raw_value, period_type in (
-        ("revenue", target_revenue, target_revenue_period_type),
-        ("ebitda", target_ebitda, target_ebitda_period_type),
+    for metric, raw_value, period_type, period_end in (
+        ("revenue", target_revenue, target_revenue_period_type, target_revenue_period_end),
+        ("ebitda", target_ebitda, target_ebitda_period_type, target_ebitda_period_end),
     ):
         if not raw_value or raw_value <= 0:
             continue
-        slot = _slot(period_type, metric)
+        slot = _slot(period_type, period_end, metric)
         if slot is None:
             continue
         if currency_mismatch:
@@ -474,15 +513,18 @@ def _derive_transaction_value(
     pct: float | None,
 ) -> tuple[float | None, str | None]:
     """Tier-1 transaction value + basis (§2.1.1). As-reported wins; otherwise
-    equity_value below control, equity_value + gross debt (total_debt) at pct>=50.
+    equity_value below control, equity_value + gross debt (total_debt) at pct>=50
+    when debt is known, otherwise equity consideration only.
     Cash is never netted. `pct` must already be §2.6-resolved by the caller.
 
       STATED                 — source stated a TRANSACTION_VALUE.
       EQUITY_BELOW_CONTROL   — pct < 50; equity_value, no debt.
       EQUITY_PLUS_TOTAL_DEBT — pct >= 50 and total_debt known.
+      EQUITY_VALUE_ONLY      — pct >= 50 and debt unknown; equity consideration only.
 
-    Returns (None, None) at pct>=50 with total_debt unknown (do not assume debt=0),
-    when pct is unknown, or when there is no equity to base on. The gross-debt branch
+    Returns (None, None) when pct is unknown, or when there is no equity to base on.
+    EQUITY_VALUE_ONLY does not assume debt=0; it preserves the known purchase-price
+    component for the stake actually acquired. The gross-debt branch
     is dormant until total_debt is populated (extraction is a later piece).
     """
     value_amount = fv.get("value_amount")
@@ -494,7 +536,7 @@ def _derive_transaction_value(
         return equity_value, "EQUITY_BELOW_CONTROL"
     if total_debt is not None:
         return round(equity_value + total_debt, 2), "EQUITY_PLUS_TOTAL_DEBT"
-    return None, None
+    return equity_value, "EQUITY_VALUE_ONLY"
 
 
 def _derive_equity_value(
@@ -952,6 +994,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
             tfo.field_value_numeric,
             tfo.staging_extraction_id,
             tfo.source_raw_id,
+            tfo.observation_fact_key,
             COALESCE(tfo.source_type, sr.source_type) AS source_type,
             COALESCE(tfo.source_tier, sr.source_tier) AS source_tier,
             COALESCE(tfo.source_published_date, sr.published_date) AS published_date,
@@ -982,9 +1025,10 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
     for row in rows:
         cluster_id = row["transaction_id"]
         bundle = clusters.setdefault(cluster_id, _empty_cluster())
-        source_key = (row["staging_extraction_id"], row["source_raw_id"])
-        if source_key not in seen_sources[cluster_id]:
-            seen_sources[cluster_id].add(source_key)
+        source_identity = (row["staging_extraction_id"], row["source_raw_id"])
+        source_key = (row["staging_extraction_id"], row["source_raw_id"], row["observation_fact_key"])
+        if source_identity not in seen_sources[cluster_id]:
+            seen_sources[cluster_id].add(source_identity)
             bundle["sources"].append({
                 "source_raw_id": row["source_raw_id"],
                 "source_tier": row["source_tier"],
@@ -1172,15 +1216,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("target_revenue_period_type_v2")
                     or field_values.get("target_revenue_period_type")
                 ),
+                target_revenue_period_end=field_values.get("target_revenue_period_end"),
                 target_ebitda=field_values.get("target_ebitda"),
                 target_ebitda_period_type=(
                     field_values.get("target_ebitda_period_type_v2")
                     or field_values.get("target_ebitda_period_type")
                 ),
+                target_ebitda_period_end=field_values.get("target_ebitda_period_end"),
                 financials_currency=field_values.get("financials_currency"),
                 log=log,
                 cluster_id=cluster_id,
                 v2_event_type=field_values.get("v2_event_type") or field_values.get("deal_type"),
+                announced_date=field_values.get("announced_date"),
             )
 
             # Upsert transaction_record

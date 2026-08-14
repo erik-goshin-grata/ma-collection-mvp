@@ -51,7 +51,7 @@ What actually changed hands. Deal-specific. **Never a multiple numerator.**
 | Field | Definition | Scope |
 |---|---|---|
 | `equity_value` | Consideration for the stake acquired, at the stake level. Not grossed up. | M&A |
-| `transaction_value` | As-reported where stated. Otherwise `equity_value` + total debt at `pct_acquired` ≥ 50, `equity_value` below it. Cash never netted. See §2.1.1. | M&A |
+| `transaction_value` | As-reported where stated. Otherwise `equity_value` + total debt at `pct_acquired` ≥ 50 when debt is known; with debt unknown, qualified equity consideration is preserved as `EQUITY_VALUE_ONLY`. Cash never netted. See §2.1.1. | M&A |
 | `transaction_size` | Universal event magnitude across all deal types. See §2.4. | All deals |
 
 #### 2.1.1 Debt follows control
@@ -63,7 +63,7 @@ calculated:
 |---|---|
 | `pct_acquired` < 50 | `equity_value` — no debt added |
 | `pct_acquired` ≥ 50 | `equity_value` + total debt |
-| `pct_acquired` ≥ 50, debt unknown, nothing stated | null |
+| `pct_acquired` ≥ 50, debt unknown, qualified equity consideration stated | `equity_value`, basis `EQUITY_VALUE_ONLY` |
 
 Cash is never netted.
 
@@ -73,7 +73,8 @@ happened. A minority buyer takes on none of it; equity-method treatment consolid
 
 Below control, `transaction_value` = `equity_value` is a statement about the *transaction* —
 no debt transferred — not a claim that the company is debt-free. Above control with debt
-unknown, the field goes null rather than assuming debt = 0.
+unknown, `EQUITY_VALUE_ONLY` similarly preserves the known equity consideration component
+without assuming debt = 0. It must not feed implied EV.
 
 **The threshold is deliberately simple, and wrong in one case.** A step-up from a minority
 position into control — 30% to 60%, so `pct_acquired` = 30 — reads as below control and adds
@@ -214,7 +215,7 @@ Derived in aggregation. **Never extracted** — no extractor decides what belong
 | Deal type | Waterfall | Basis stamp |
 |---|---|---|
 | M&A | `transaction_value` | `TRANSACTION_VALUE` |
-| M&A | → `equity_value`, where equity is stated and debt unknown | `EQUITY_CONSIDERATION` |
+| M&A | → `equity_value`, where transaction value is unavailable but equity is stated | `EQUITY_CONSIDERATION` |
 | Funding | `round_size` | `ROUND_SIZE` |
 | Funding | → sole investor's `investment_amount` | `SOLE_INVESTOR_CHECK` |
 | Any | none of the above | null |

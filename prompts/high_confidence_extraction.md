@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.14 (stake transition)
+**Version:** 0.15 (typed value observations)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -291,6 +291,37 @@ value:
 - per_share_price: Per-share offer price if stated (for public targets). Number
   in same currency as value.amount. Null if not stated.
 
+value_observations:
+Use this array to preserve every independently typed deal-value fact stated in
+the source. This is separate from target financial metrics such as revenue or
+EBITDA.
+
+- The `value_observations` key is required on every transaction element.
+  Return an empty array (`[]`) when the source has no explicitly supported,
+  qualified deal-value fact. Do not infer a value merely to populate the array.
+- Return one item per distinct deal-value fact, even when two facts have the
+  same numeric amount or come from the same sentence/source.
+- Do not collapse facts merely because amount, currency, or source are
+  identical. A "$210 million enterprise value" and "$210 million 2025 net
+  sales" are different facts; the first belongs here and the second belongs in
+  target_financials.revenue_amount.
+- ENTERPRISE_VALUE is an extraction/observation type for a source-stated
+  enterprise value. The canonical output downstream remains
+  implied_enterprise_value; do not create or imply a separate canonical
+  enterprise_value field.
+- Keep the legacy value object populated with the primary/most transaction-
+  specific value for compatibility, usually the equity purchase price or total
+  consideration. Also include that primary fact as the first item in
+  value_observations. Downstream treats the first typed value observation as the
+  compatibility/primary value rather than a second independent source of truth.
+- Include at minimum amount, currency, type, basis or qualifier if stated, and
+  a short evidence phrase.
+- Valid type values are the same as value.type: EQUITY_VALUE,
+  TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED.
+- Use basis="STATED" for source-stated values when no more specific basis is
+  needed. Use qualifier for words like "approximately", "up to", or "subject to
+  adjustment".
+
 financials_disclosure_status:
 Classify whether financial terms are disclosed in this source:
   DISCLOSED — at least one financial value is stated
@@ -429,6 +460,16 @@ code fences, no preamble.
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [
+        {
+          "amount": 500000000,
+          "currency": "USD",
+          "type": "TRANSACTION_VALUE",
+          "basis": "STATED",
+          "qualifier": null,
+          "evidence": "for $500 million in cash"
+        }
+      ],
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -442,7 +483,7 @@ code fences, no preamble.
       },
       "model_confidence": "HIGH",
       "notes": null,
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -522,6 +563,16 @@ Extract all transactions from this source.
         "qualifier": "string | null",
         "per_share_price": "number | null"
       },
+      "value_observations": [
+        {
+          "amount": "number | null",
+          "currency": "string | null",
+          "type": "EQUITY_VALUE | TRANSACTION_VALUE | ENTERPRISE_VALUE | UNDISCLOSED",
+          "basis": "string | null",
+          "qualifier": "string | null",
+          "evidence": "string | null"
+        }
+      ],
       "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "cash | stock | cash_and_stock | election | other | null",
@@ -536,7 +587,7 @@ Extract all transactions from this source.
       },
       "model_confidence": "HIGH | MEDIUM | LOW",
       "notes": "string | null",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -610,6 +661,16 @@ Output:
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [
+        {
+          "amount": 500000000,
+          "currency": "USD",
+          "type": "TRANSACTION_VALUE",
+          "basis": "STATED",
+          "qualifier": null,
+          "evidence": "for $500 million in cash"
+        }
+      ],
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -623,7 +684,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Pending close language present — closed_date left null.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -694,6 +755,16 @@ Output:
         "qualifier": "approximately",
         "per_share_price": 45.00
       },
+      "value_observations": [
+        {
+          "amount": 2100000000,
+          "currency": "USD",
+          "type": "ENTERPRISE_VALUE",
+          "basis": "STATED",
+          "qualifier": "approximately; including assumed net debt",
+          "evidence": "values PublicCo at approximately $2.1 billion enterprise value"
+        }
+      ],
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -707,7 +778,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "EV stated explicitly including $300M assumed net debt. LTM period end date stated as March 31, 2026.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -776,6 +847,7 @@ Output:
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [],
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -789,7 +861,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Same-day completed private acquisition — no pending-close language. closed_date set to announced_date.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -859,6 +931,16 @@ Output:
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [
+        {
+          "amount": 1200000000,
+          "currency": "USD",
+          "type": "TRANSACTION_VALUE",
+          "basis": "STATED",
+          "qualifier": null,
+          "evidence": "to sell its Industrial Coatings Division ... for $1.2 billion in cash"
+        }
+      ],
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -872,7 +954,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "LTM period end stated as twelve months ended December 31, 2025.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -935,6 +1017,7 @@ Output:
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [],
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -945,7 +1028,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Transaction 1 of 2 from law firm tombstone. Closed per source language.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     },
     {
       "target": {
@@ -981,6 +1064,16 @@ Output:
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [
+        {
+          "amount": 250000000,
+          "currency": "USD",
+          "type": "TRANSACTION_VALUE",
+          "basis": "STATED",
+          "qualifier": null,
+          "evidence": "acquisition of Omega Systems for $250 million in cash"
+        }
+      ],
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -991,7 +1084,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Transaction 2 of 2 from law firm tombstone. Closed per source language.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }
@@ -1040,6 +1133,7 @@ Output:
         "qualifier": null,
         "per_share_price": null
       },
+      "value_observations": [],
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1053,7 +1147,89 @@ Output:
       },
       "model_confidence": "MEDIUM",
       "notes": "NTM financials stated as projections for twelve months ending December 31, 2027. Party names not captured from this excerpt — full 8-K body would populate. Value amount not stated directly; multiples stated but aggregate value not extracted per extraction rule.",
-      "prompt_version": "high_confidence_extraction:0.12"
+      "prompt_version": "high_confidence_extraction:0.15"
+    }
+  ]
+}
+```
+
+**Example 7 — Partial acquisition with separate equity value, enterprise value, and revenue:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+SOURCE TIER: T2
+DEAL TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT TYPE: ANNOUNCED
+TARGET STATUS: PRIVATE
+PUBLISHED DATE: 2026-08-13
+TITLE: Samsonite Group S.A. to Acquire BÉIS
+BODY: Samsonite Group S.A. today announced that it has entered into a definitive
+agreement to acquire BÉIS, LLC. The transaction represents a total enterprise
+value of approximately $210 million on a cash-free, debt-free basis. Samsonite
+will acquire 85% of the equity of BÉIS for $178.5 million. BÉIS generated net
+sales of approximately $210 million in 2025.
+```
+
+Output:
+```json
+{
+  "transactions": [
+    {
+      "target": {"name": "BÉIS, LLC", "domain": null, "ticker": null, "description": null},
+      "acquirer": {"name": "Samsonite Group S.A.", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
+      "parent_seller": {"name": null, "ticker": null, "description": null},
+      "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE"},
+      "dates": {
+        "announced_date": "2026-08-13",
+        "announced_date_precision": "exact",
+        "closed_date": null,
+        "closed_date_precision": null,
+        "signing_date": null,
+        "signing_date_precision": null,
+        "rumor_date": null
+      },
+      "value": {
+        "amount": 178500000,
+        "currency": "USD",
+        "type": "EQUITY_VALUE",
+        "type_confidence": "HIGH",
+        "qualifier": null,
+        "per_share_price": null
+      },
+      "value_observations": [
+        {
+          "amount": 178500000,
+          "currency": "USD",
+          "type": "EQUITY_VALUE",
+          "basis": "STATED",
+          "qualifier": null,
+          "evidence": "acquire 85% of the equity of BÉIS for $178.5 million"
+        },
+        {
+          "amount": 210000000,
+          "currency": "USD",
+          "type": "ENTERPRISE_VALUE",
+          "basis": "STATED",
+          "qualifier": "approximately; cash-free, debt-free",
+          "evidence": "total enterprise value of approximately $210 million on a cash-free, debt-free basis"
+        }
+      ],
+      "financials_disclosure_status": "DISCLOSED",
+      "consideration_type": "cash",
+      "target_financials": {
+        "revenue_amount": 210000000,
+        "revenue_period_type": "ANNUAL",
+        "revenue_period_end": "2025",
+        "ebitda_amount": null,
+        "ebitda_period_type": null,
+        "ebitda_period_end": null,
+        "currency": "USD"
+      },
+      "model_confidence": "HIGH",
+      "notes": "The $210M revenue fact remains in target_financials; only the separate $210M enterprise value is included in value_observations.",
+      "prompt_version": "high_confidence_extraction:0.15"
     }
   ]
 }

@@ -251,8 +251,8 @@ creates. Diffs that don't trace to §4.2 are expected, not regressions.
 `total_debt` exists on **no** database — not `pl_funding.db`, `ma_mvp.db`, `ma_valu8.db`, or
 `ma_grata.db`. It is a manual column, never populated. So §4.2's control-path branch
 (`transaction_value = equity_value + total_debt` at `pct_acquired ≥ 50`) **cannot fire against
-any existing data** — every control deal takes the debt-unknown fallback (`transaction_value =
-equity_value`, or null). The **second owed re-aggregation is therefore substantive, not a
+any existing data** — every control deal with qualified equity consideration takes the
+debt-unknown `EQUITY_VALUE_ONLY` fallback. The **second owed re-aggregation is therefore substantive, not a
 formality**: the total-debt branch will run against real data for the *first time* only after
 `total_debt` + `Cash_ST` extraction lands. The first re-aggregation (below) can only exercise the
 stake-level `equity_value` change and the TV=equity fallback.

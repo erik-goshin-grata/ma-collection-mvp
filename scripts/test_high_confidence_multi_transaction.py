@@ -66,6 +66,7 @@ def _txn(target: str, acquirer: str) -> dict:
             "qualifier": None,
             "per_share_price": None,
         },
+        "value_observations": [],
         "target_financials": {
             "revenue_amount": None,
             "revenue_period_type": None,
@@ -193,11 +194,72 @@ def _assert_multi_transaction_db_write(failures: list[str]) -> None:
             conn.close()
 
 
+def _assert_multi_transaction_requires_value_observations_per_item(failures: list[str]) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = os.path.join(tmp, "hc_multi_missing_value_observations.db")
+        init_db(db_path)
+        conn = get_connection(db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO source_raw
+                    (source_type, source_tier, url, title, published_date,
+                     clean_text, content_hash, source_status, fetched_at)
+                VALUES ('WEB_URL', 'T2', 'https://example.com/two-deals-missing-field',
+                        'Buyer announces two acquisitions', '2026-08-12',
+                        'Buyer acquired Alpha and Beta in the same announcement.',
+                        'hc_multi_missing_hash', 'FETCHED', '2026-08-12T00:00:00Z')
+                """
+            )
+            source_raw_id = conn.execute("SELECT source_raw_id FROM source_raw").fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO staging_extraction
+                    (source_raw_id, status, deal_type, v2_event_type,
+                     event_type, event_history_type, target_status,
+                     dt_prompt_version)
+                VALUES (?, 'CLASSIFIED', 'ACQUISITION', 'ACQUISITION',
+                        'ANNOUNCEMENT', 'ANNOUNCEMENT', 'PRIVATE',
+                        'deal_type_classifier:test')
+                """,
+                (source_raw_id,),
+            )
+            conn.commit()
+
+            missing = _txn("Beta Target", "Buyer Inc.")
+            missing.pop("value_observations")
+
+            original_call_prompt = hc.call_prompt
+            original_sleep = hc._SLEEP
+            hc._SLEEP = 0
+            hc.call_prompt = lambda **_kwargs: {
+                "transactions": [
+                    _txn("Alpha Target", "Buyer Inc."),
+                    missing,
+                ]
+            }
+            try:
+                result = hc.run(
+                    conn=conn,
+                    cfg=SimpleNamespace(log_level="ERROR"),
+                    run_id="test_hc_multi_transaction_missing_value_observations",
+                )
+            finally:
+                hc.call_prompt = original_call_prompt
+                hc._SLEEP = original_sleep
+
+            if result.get("hc_extracted") != 0 or result.get("failures") != 1:
+                failures.append(f"missing per-item value_observations did not fail HC run: {result!r}")
+        finally:
+            conn.close()
+
+
 def main() -> None:
     failures: list[str] = []
     _assert_insert_shape(failures)
     _assert_prompt_guardrails(failures)
     _assert_multi_transaction_db_write(failures)
+    _assert_multi_transaction_requires_value_observations_per_item(failures)
     if failures:
         for failure in failures:
             print("FAIL:", failure)

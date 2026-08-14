@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""Regression guard for same-source typed deal-value preservation.
+
+No live model calls. The fixture mirrors Samsonite / BÉIS:
+- 85% acquired for $178.5M equity value
+- separately stated $210M enterprise value
+- separately stated 2025 net sales of $210M
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import stages.aggregate as aggregate
+from db import get_connection, init_db
+from lib.observation_writer import insert_observation, write_staging_observations_for_extraction
+from stages.high_confidence_extract import _primary_value, _validate, _value_observations_json
+
+
+TXN_ID = "tc_samsonite_beis_fixture"
+
+
+def _assert_equal(failures: list[str], name: str, got, expected) -> None:
+    if got != expected:
+        failures.append(f"{name}: expected {expected!r}, got {got!r}")
+
+
+def _insert_fixture(conn: sqlite3.Connection) -> int:
+    body = (
+        "Samsonite Group S.A. will acquire 85% of BÉIS, LLC for $178.5 million. "
+        "The transaction represents a total enterprise value of approximately "
+        "$210 million on a cash-free, debt-free basis. BÉIS generated net sales "
+        "of approximately $210 million in 2025."
+    )
+    cur = conn.execute(
+        """
+        INSERT INTO source_raw (
+            source_type, source_tier, url, title, published_date, clean_text,
+            content_hash, source_status, fetched_at
+        ) VALUES (
+            'WEB_URL', 'T2', 'https://example.test/samsonite-beis',
+            'Samsonite Group S.A. to acquire BÉIS', '2026-08-13', ?,
+            'typed-value-preservation-fixture', 'RELEVANT', '2026-08-14T00:00:00Z'
+        )
+        """,
+        (body,),
+    )
+    source_raw_id = int(cur.lastrowid)
+
+    hc_result = {
+        "target": {"name": "BÉIS, LLC"},
+        "acquirer": {"name": "Samsonite Group S.A.", "type": "strategic_corporate"},
+        "parent_seller": {},
+        "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE"},
+        "dates": {"announced_date": "2026-08-12", "announced_date_precision": "exact"},
+        "value": {
+            "amount": 178_500_000,
+            "currency": "USD",
+            "type": "EQUITY_VALUE",
+            "type_confidence": "HIGH",
+            "qualifier": None,
+            "per_share_price": None,
+        },
+        "value_observations": [
+            {
+                "amount": 178_500_000,
+                "currency": "USD",
+                "type": "EQUITY_VALUE",
+                "basis": "STATED",
+                "qualifier": None,
+                "evidence": "acquire 85% of BÉIS, LLC for $178.5 million",
+            },
+            {
+                "amount": 210_000_000,
+                "currency": "USD",
+                "type": "ENTERPRISE_VALUE",
+                "basis": "STATED",
+                "qualifier": "approximately; cash-free, debt-free",
+                "evidence": "total enterprise value of approximately $210 million",
+            },
+        ],
+        "financials_disclosure_status": "DISCLOSED",
+        "target_financials": {
+            "revenue_amount": 210_000_000,
+            "revenue_period_type": "ANNUAL",
+            "revenue_period_end": "2025",
+            "currency": "USD",
+        },
+        "model_confidence": "HIGH",
+    }
+    err = _validate(hc_result)
+    if err:
+        raise AssertionError(err)
+    mismatched_legacy = dict(hc_result)
+    mismatched_legacy["value"] = {
+        "amount": 999,
+        "currency": "USD",
+        "type": "TRANSACTION_VALUE",
+        "type_confidence": "HIGH",
+        "qualifier": None,
+        "per_share_price": None,
+    }
+    primary = _primary_value(mismatched_legacy)
+    if (primary.get("amount"), primary.get("type")) != (178_500_000, "EQUITY_VALUE"):
+        raise AssertionError("legacy primary value must be sourced from first typed value observation")
+    missing_value_observations = dict(hc_result)
+    missing_value_observations.pop("value_observations")
+    if _validate(missing_value_observations) is None:
+        raise AssertionError("value_observations must be a required output key")
+    empty_value_observations = dict(hc_result)
+    empty_value_observations["value_observations"] = []
+    err = _validate(empty_value_observations)
+    if err:
+        raise AssertionError(f"empty value_observations array should validate: {err}")
+
+    conn.execute(
+        """
+        INSERT INTO staging_extraction (
+            source_raw_id, status, deal_type, v2_event_type, event_history_type,
+            target_status, target_type, target_type_v2,
+            target_name, acquirer_name, acquirer_type, acquirer_type_v2,
+            pct_acquired, stake_transition_type, announced_date, announced_date_precision,
+            value_amount, value_currency, value_type, value_type_confidence,
+            value_observations,
+            target_revenue, target_revenue_period_type, target_revenue_period_type_v2,
+            target_revenue_period_end, financials_currency, financials_disclosure_status,
+            model_confidence, dt_prompt_version, hc_prompt_version, transaction_cluster_id
+        ) VALUES (
+            ?, 'CLUSTERED', 'ACQUISITION', 'ACQUISITION', 'ANNOUNCED',
+            'PRIVATE', 'standalone_company', 'standalone_company',
+            'BÉIS, LLC', 'Samsonite Group S.A.', 'strategic_corporate', 'strategic_corporate',
+            85.0, 'NEW_MAJORITY_STAKE', '2026-08-12', 'exact',
+            178500000, 'USD', 'EQUITY_VALUE', 'HIGH',
+            ?,
+            210000000, 'ANNUAL', 'ANNUAL', '2025', 'USD', 'DISCLOSED',
+            'HIGH', '0.7', '0.15', ?
+        )
+        """,
+        (source_raw_id, _value_observations_json(hc_result), TXN_ID),
+    )
+    extraction_id = int(conn.execute("SELECT extraction_id FROM staging_extraction").fetchone()[0])
+    write_staging_observations_for_extraction(
+        conn,
+        extraction_id,
+        observation_source_stage="HC_EXTRACT",
+        include_stage3=True,
+        include_hc=True,
+    )
+    conn.commit()
+    return extraction_id
+
+
+def _legacy_conflict_stub(field_name, _field_type, _context, observations, *_args, **_kwargs):
+    if field_name == "value_amount":
+        return {
+            "chosen_observation_id": observations[0]["observation_id"],
+            "chosen_value": 178_500_000.0,
+            "aggregation_confidence": "HIGH",
+            "conflict_type": "SEMANTIC",
+            "flagged_for_review": False,
+            "reasoning": "legacy compatibility value remains primary equity value",
+            "notes": None,
+            "prompt_version": "test",
+        }
+    if field_name == "value_type":
+        return {
+            "chosen_observation_id": observations[0]["observation_id"],
+            "chosen_value": "EQUITY_VALUE",
+            "aggregation_confidence": "HIGH",
+            "conflict_type": "SEMANTIC",
+            "flagged_for_review": False,
+            "reasoning": "legacy compatibility value_type remains primary equity value",
+            "notes": None,
+            "prompt_version": "test",
+        }
+    raise AssertionError(f"unexpected aggregation conflict for {field_name}")
+
+
+def main() -> None:
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = str(Path(tmp) / "typed_value_preservation.db")
+        init_db(db_path)
+        conn = get_connection(db_path)
+        extraction_id = _insert_fixture(conn)
+
+        typed_rows = conn.execute(
+            """
+            SELECT observation_fact_key, field_name, field_value, field_value_numeric
+            FROM transaction_field_observation
+            WHERE staging_extraction_id = ?
+              AND observation_fact_key IS NOT NULL
+              AND field_name IN ('value_amount', 'value_currency', 'value_type', 'value_observation')
+            ORDER BY observation_fact_key, field_name
+            """,
+            (extraction_id,),
+        ).fetchall()
+        fact_keys = {row["observation_fact_key"] for row in typed_rows}
+        _assert_equal(failures, "typed fact keys", fact_keys, {"value_observations[0]", "value_observations[1]"})
+        ev_amounts = [
+            row["field_value_numeric"]
+            for row in typed_rows
+            if row["observation_fact_key"] == "value_observations[1]" and row["field_name"] == "value_amount"
+        ]
+        _assert_equal(failures, "enterprise value amount observation", ev_amounts, [210_000_000.0])
+        audit_rows = [row for row in typed_rows if row["field_name"] == "value_observation"]
+        _assert_equal(failures, "auditable typed value payload count", len(audit_rows), 2)
+        json.loads(audit_rows[1]["field_value"])
+
+        insert_observation(
+            conn,
+            transaction_id=None,
+            field_name="value_amount",
+            field_value=210_000_000,
+            staging_extraction_id=extraction_id,
+            source_raw_id=1,
+            observation_fact_key="same_numeric_a",
+        )
+        insert_observation(
+            conn,
+            transaction_id=None,
+            field_name="value_amount",
+            field_value=210_000_000,
+            staging_extraction_id=extraction_id,
+            source_raw_id=1,
+            observation_fact_key="same_numeric_b",
+        )
+        same_numeric_count = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM transaction_field_observation
+            WHERE transaction_id IS NULL
+              AND staging_extraction_id = ?
+              AND field_name = 'value_amount'
+              AND field_value_numeric = 210000000
+            """,
+            (extraction_id,),
+        ).fetchone()[0]
+        _assert_equal(failures, "same numeric amount with different fact keys", same_numeric_count, 2)
+
+        original_call_agg_prompt = aggregate._call_agg_prompt
+        aggregate._call_agg_prompt = _legacy_conflict_stub
+        try:
+            cfg = SimpleNamespace(log_level="ERROR", aggregation_read_source="observation")
+            aggregate.run(conn, cfg, "typed_value_preservation_test")
+        finally:
+            aggregate._call_agg_prompt = original_call_agg_prompt
+
+        row = conn.execute("SELECT * FROM transaction_record WHERE transaction_id = ?", (TXN_ID,)).fetchone()
+        _assert_equal(failures, "legacy value_amount", row["value_amount"], 178_500_000.0)
+        _assert_equal(failures, "legacy value_type", row["value_type"], "EQUITY_VALUE")
+        _assert_equal(failures, "equity_value", row["equity_value"], 178_500_000.0)
+        _assert_equal(failures, "transaction_value", row["transaction_value"], 178_500_000.0)
+        _assert_equal(failures, "transaction_value_basis", row["transaction_value_basis"], "EQUITY_VALUE_ONLY")
+        _assert_equal(failures, "implied_equity_value", row["implied_equity_value"], 210_000_000.0)
+        _assert_equal(failures, "implied_enterprise_value", row["implied_enterprise_value"], 210_000_000.0)
+        _assert_equal(failures, "implied_enterprise_value_basis", row["implied_enterprise_value_basis"], "STATED")
+        _assert_equal(failures, "target_revenue", row["target_revenue"], 210_000_000.0)
+        _assert_equal(failures, "target_revenue_period_type", row["target_revenue_period_type"], "ANNUAL")
+        _assert_equal(failures, "target_revenue_period_end", row["target_revenue_period_end"], "2025")
+        _assert_equal(failures, "stake_transition_type", row["stake_transition_type"], "NEW_MAJORITY_STAKE")
+        _assert_equal(failures, "is_minority", row["is_minority"], 0)
+        conn.close()
+
+    if failures:
+        for failure in failures:
+            print("FAIL", failure)
+        raise SystemExit(1)
+    print("PASS typed value preservation: Samsonite-style same-source facts survive")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.ERROR)
+    main()

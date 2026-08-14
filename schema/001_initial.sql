@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
     value_type                  TEXT,        -- EQUITY_VALUE | TRANSACTION_VALUE | ENTERPRISE_VALUE | UNDISCLOSED
     value_type_confidence       TEXT,        -- HIGH | MEDIUM | LOW
     value_qualifier             TEXT,
+    value_observations          TEXT,        -- JSON array of independently typed deal-value facts
     per_share_price             REAL,
     pct_acquired                REAL,        -- e.g. 51.0 for 51% stake; NULL when implicit 100% or not stated
     stake_transition_type       TEXT,        -- nullable explicit ownership transition enum; current harness only
@@ -233,7 +234,7 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     total_debt                  REAL,        -- total debt, NOT net of cash. Manual interim input (extracted metric later); preserved across re-aggregation; input to transaction_value at pct_acquired>=50 and, with cash_st, calculated net_debt
     cash_st                     REAL,        -- cash + short-term equivalents/investments used with total_debt to calculate net_debt; manual interim input
     transaction_value           REAL,        -- Tier-1 as-transacted value (§2.1.1); as-reported, else equity (+ total debt at pct>=50)
-    transaction_value_basis     TEXT,        -- STATED | EQUITY_BELOW_CONTROL | EQUITY_PLUS_TOTAL_DEBT
+    transaction_value_basis     TEXT,        -- STATED | EQUITY_BELOW_CONTROL | EQUITY_PLUS_TOTAL_DEBT | EQUITY_VALUE_ONLY
     pct_acquired_source         TEXT,        -- §2.6: stated | assumed (100% default for control types when silent)
 
     -- Consideration
@@ -699,6 +700,7 @@ CREATE TABLE IF NOT EXISTS transaction_field_observation (
     extracted_at                TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     extraction_prompt_version   TEXT,
     observation_source_stage    TEXT,                    -- DT_CLASSIFY | HC_EXTRACT | LC_EXTRACT | AGREEMENT_EXTRACT | BACKFILL
+    observation_fact_key        TEXT,                    -- stable within-source fact key for multi-value observations
     is_current                  INTEGER DEFAULT 1,
     FOREIGN KEY (source_document_id) REFERENCES transaction_document(document_id),
     FOREIGN KEY (source_section_id) REFERENCES transaction_document_section(section_id),
