@@ -1,11 +1,11 @@
 # Project State
-**Updated:** 2026-08-13
-**Last commit:** this commit
+**Updated:** 2026-08-14
+**Last commit:** `52c4e94` Add Grata V2 inventory and data dictionary
 **Branch:** `main`
 
 ---
 
-## Current Drop: Transaction Value Model + Minority Cleanup
+## Current Checkpoint: Transaction Value Model + Minority Cleanup
 
 V2 prompt vocabulary and the funding event path are landed and operational (prior
 drop). The active workstream is the **two-tier transaction value model** — Tier 1
@@ -33,11 +33,18 @@ ownership-history labels embedded in `stake_transition_type`. This does not
 change Grata production schema/enums.
 
 Validation checkpoint: `NEW_MAJORITY_STAKE` is implemented. The 2026-08-12
-PredictLeads validation corpus completed with no aggregation execution failures
-and no core `MINORITY_INVESTMENT` outputs. MediaWorks/SEG exposed and validated
-independent preservation of source-supported `TRANSACTION_VALUE` and
-`ENTERPRISE_VALUE` semantics in aggregation. Erebor's `VC_ROUND` classification
-passed source review with a source-quality caveat.
+50-ish story PredictLeads validation corpus completed with no aggregation
+execution failures and no core `MINORITY_INVESTMENT` outputs. MediaWorks/SEG
+exposed and validated independent preservation of source-supported
+`TRANSACTION_VALUE` and `ENTERPRISE_VALUE` semantics in aggregation. Erebor's
+`VC_ROUND` classification passed source review with a source-quality caveat.
+
+Newest Grata reconciliation/design documents:
+- `docs/grata_v2_inventory_and_recommendations.md`
+- `docs/grata_v2_data_dictionary.md`
+
+Treat those as current inventory/recommendation inputs, not as proof that their
+recommendations are implemented in this harness or in Grata production.
 
 ---
 
@@ -186,6 +193,10 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
 5. **Legacy value-field inventory/reorganization** — `enterprise_value` is now a
    compatibility mirror of `implied_enterprise_value`; decide later whether to
    remove, alias, or formally deprecate it after downstream consumers are known.
+6. **Grata V2 recommendation triage** — use
+   `docs/grata_v2_inventory_and_recommendations.md` and
+   `docs/grata_v2_data_dictionary.md` as recommendation inputs. Do not treat
+   unimplemented proposals there as accepted harness behavior.
 
 Owed operational: the **second re-aggregation** below — route through `run.py` so
 `_apply_migrations` adds the columns first.

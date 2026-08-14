@@ -1044,3 +1044,79 @@ Consequences:
   to *classify* rather than *record*, so the same figure routes to `equity_value` in one extraction
   and `transaction_value` in another — the "Named Value Fields Replace the Single Value Slot"
   decision (accepted, unmigrated). **This fix bounds the damage; it does not remove the cause.**
+
+## 2026-08-12 - Minority as Feature, Not Core Classifier Output
+
+Status: accepted and implemented in the validation harness.
+
+Decision:
+
+- `MINORITY_INVESTMENT` is no longer a validated core classifier output.
+- Minority status is represented as a derived transaction feature, `is_minority`.
+- `stake_transition_type` is a nullable explicit-evidence field. `NULL` means insufficient
+  explicit ownership-transition evidence, not `UNKNOWN`.
+- Accepted `stake_transition_type` values include `NEW_MAJORITY_STAKE`.
+- Current-transaction stake evidence takes precedence for minority derivation. Ownership-history
+  transition labels are fallback evidence only when current stake evidence is unavailable.
+
+Context:
+
+- `MINORITY_INVESTMENT` conflated underlying economic event type with a stake characteristic,
+  spanning M&A minority-stake purchases, growth equity and venture rounds.
+- The value model already keys valuation behavior on the underlying economic event and on where
+  the money goes, so minority needed to become an orthogonal feature.
+
+Consequences:
+
+- Deal-type classification routes minority transactions to their underlying core event
+  (`ACQUISITION`, `GROWTH_EQUITY`, `VC_ROUND`, etc.).
+- `is_minority` does not describe post-transaction control state; it describes the current
+  transaction's minority-stake characteristic.
+- Validation guardrails assert that the classifier rejects `MINORITY_INVESTMENT` as a core output,
+  that nullable `stake_transition_type` semantics hold, and that `NEW_MAJORITY_STAKE` does not
+  imply minority absent current minority stake evidence.
+
+## 2026-08-12 - High-Confidence Multi-Transaction Shared-Event Guardrail
+
+Status: accepted and implemented in the validation harness.
+
+Decision:
+
+- High-confidence extraction may emit multiple transactions from one source only when the source
+  describes a shared announcement/event context.
+- Do not split unrelated summary, roundup, market-brief, tombstone-list, or portfolio-list stories
+  merely because they mention multiple companies or deals.
+- The multi-transaction HC insert shape is guarded so a source with multiple extracted
+  transactions does not fail on column/parameter mismatch.
+
+Context:
+
+- PredictLeads-style sources include roundups and multi-company summaries that can mention many
+  events without providing a single shared transaction context.
+- A prior Stage 4b multi-transaction insert bug crashed on sources with two or more funding
+  events.
+
+Consequences:
+
+- Multi-transaction extraction remains available for true shared-event announcements.
+- Roundup/list content routes conservatively instead of manufacturing unrelated canonical
+  transactions from shared article context.
+
+## 2026-08-13 - Grata V2 Inventory Documents Are Recommendation Inputs
+
+Status: accepted as documentation/harness reconciliation framing only.
+
+Decision:
+
+- Treat `docs/grata_v2_inventory_and_recommendations.md` and
+  `docs/grata_v2_data_dictionary.md` as the newest Grata inventory and recommendation inputs.
+- Recommendations in those documents are not implementation decisions unless separately accepted
+  here or implemented/tested in the harness.
+
+Consequences:
+
+- Proposed items such as merger/reverse-merger flags, de-SPAC placement under M&A,
+  `target_type`, generalized security/share mechanics, `consideration_component`,
+  Spin/Split mechanics, `transaction_terms_disclosure_status`, neutral metric renames, and
+  advisor-person cardinality changes remain recommendations, not accepted implementation
+  decisions.

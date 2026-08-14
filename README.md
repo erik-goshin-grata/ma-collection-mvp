@@ -23,6 +23,8 @@ Authoritative current-state docs, in freshness order:
 | Doc | Role |
 | :--- | :--- |
 | `docs/project_state.md` | Living state, including discharged and owed re-aggregations |
+| `docs/grata_v2_inventory_and_recommendations.md` | Newest Grata V2 inventory/recommendation reconciliation; recommendations are not automatically implemented |
+| `docs/grata_v2_data_dictionary.md` | Newest Grata V2 transaction data dictionary draft |
 | `docs/session_handoff_2026_08_12_field_coverage.md` | Latest handoff: field coverage, value-model evidence, Grata memo framing |
 | `docs/decisions.md` | Authoritative decision log — source of truth |
 | `docs/CONTEXT.md` | Code-derived pipeline contract (all stages, enums, bugs) |
@@ -37,7 +39,7 @@ Authoritative current-state docs, in freshness order:
 | Anthropic + OpenAI providers, per-stage model tiering | Implemented |
 | SQLite schema (migrations 001–003) | Implemented |
 | Funding path (VC / growth / venture debt) | Implemented; `funding_lc_extract` stage still pending |
-| Two-tier value model | Design + §4.1/§4.2/§4.7 code landed; first §4.2 re-aggregation discharged on live DBs; second re-aggregation owed after `total_debt` + `Cash_ST` extraction |
+| Two-tier value model | Design + §4.1/§4.2/§4.7 code landed; canonical `implied_enterprise_value` rewire implemented; first §4.2 re-aggregation discharged on live DBs; second re-aggregation owed after broader `total_debt` + `Cash_ST` extraction |
 
 ---
 
@@ -255,7 +257,7 @@ Current queue (see `docs/project_state.md` for the freshest state):
 2. `total_debt` + `Cash_ST` as `target_financials` metrics — activates the dormant total-debt branch; lets `net_debt` derive.
 3. Review export value-model surface — expose current value-model and funding fields without treating `_v2` shadow columns as reviewer-facing Grata enum fields.
 4. `transaction_size` + its export column — the reviewer-facing deliverable now that the first §4.2 re-aggregation is discharged.
-5. EV rewire — parked until currency/period anchoring clears.
+5. Legacy value-field inventory/reorganization — `enterprise_value` is now a compatibility mirror of canonical `implied_enterprise_value`; downstream cleanup remains deferred.
 
 Owed operational work: the **second re-aggregation** after `total_debt` + `Cash_ST` lands — route through `run.py` so migrations apply first. See `docs/project_state.md`.
 

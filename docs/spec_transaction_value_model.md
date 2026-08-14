@@ -501,41 +501,18 @@ Line numbers drift. Locate by content, and re-confirm against the repo before ed
 `[verified: stages/export.py, 2026-08-10]`. Gaps touching those fields are live; gaps in
 derived valuation fields are latent, because nothing downstream consumes them yet.
 
-1. **Prompt has no rule for a primary capital amount. — LIVE. Highest priority.**
-   The `value.type` vocabulary in `prompts/high_confidence_extraction.md` offers four values —
-   `EQUITY_VALUE`, `TRANSACTION_VALUE`, `ENTERPRISE_VALUE`, `UNDISCLOSED` — all of which
-   describe the purchase of a company. None describes capital invested *into* one. A growth or
-   venture raise has no correct option, so the model force-fits, and `EQUITY_VALUE` is the
-   natural wrong choice because the money did buy equity.
+1. **Primary capital amount routing — RESOLVED (§4.1).**
+   The capital-flow precondition is landed: amounts invested into the company route through the
+   funding path primitives (`round.size`, `round.pre_money_valuation`,
+   `round.post_money_valuation`) rather than being forced into the M&A `value.type` vocabulary.
+   The rule remains phrased on where the money goes, not simply on deal type, so an M&A purchase
+   of a minority stake can still map its consideration to `EQUITY_VALUE`.
 
-   **Fix:** route these amounts out before the type vocabulary is reached, via a
-   capital-flow precondition — *did this money go into the company, or to a selling
-   shareholder?* Phrase the rule on capital flow, **not** on deal type: an M&A purchase of a
-   minority stake *should* map its consideration to `EQUITY_VALUE`, so a deal-type-keyed rule
-   would break the correct case along with the broken one. A capital-flow rule also survives
-   the open Decision #9 boundary without revision.
-
-   **Prerequisite:** the amount must have a capture field before anything is nulled.
-   `high_confidence_extraction.md` has none; the funding primitives live in
-   `funding_hc_extraction.md` (`round.size`, `round.pre_money_valuation`,
-   `round.post_money_valuation`). Confirm whether growth deals route to funding stage 4b before
-   adding a field. See `docs/handoff_bug5_funding_clustering.md`.
-
-   Live because `value_amount` and `value_type` export — this is how bug 8 reached
-   `ML_worksheet.csv`.
-
-2. **`equity_value` is path-dependent. — LATENT.**
-   In `stages/aggregate.py`, the control path stores *stake-level* equity while the funding
-   path stores the *100%* figure (post-money). Same column, two meanings.
-   **Fix:** make `equity_value` consistently stake-level on every path; post-money belongs in
-   `post_money_valuation`.
-
-   Latent because `equity_value` is DB-only and feeds only unexported fields.
-
-   **Migration:** re-aggregate rather than stamp. A deterministic re-run over stored
-   primitives, with manual `net_debt` preserved, beats a permanently mixed column that every
-   reader must decode. Apply **jointly with the `transaction_value` redefinition** (§2.1.1),
-   since both alter partial-stake meaning.
+2. **`equity_value` path consistency — RESOLVED (§4.2).**
+   `equity_value` is now stake-level. Funding valuations belong in
+   `post_money_valuation`, not in `equity_value`, and the first §4.2 re-aggregation has been
+   discharged on the two live DBs. The second re-aggregation remains owed after broader
+   `total_debt` + `Cash_ST` extraction lands.
 
 3. **`implied_enterprise_value` rewire is implemented.**
    `_derive_implied_enterprise_value` now consumes source-stated whole-company EV,
@@ -671,10 +648,9 @@ Ordered by live-vs-latent, not by section number.
 
 1. **Land this spec and the decisions log together**, so the repo is never internally
    contradictory.
-2. **§4.1 — prompt rule. Live, urgent.** Stops new mislabels. Depends only on resolving the
-   capture-field prerequisite.
-3. **§4.2 + re-aggregation. Latent, cleanup.** Consistent stake-level `equity_value`, applied
-   jointly with the `transaction_value` redefinition.
+2. **§4.1 — prompt rule.** Implemented.
+3. **§4.2 + re-aggregation.** Code landed; first live-DB re-aggregation discharged. The second
+   re-aggregation remains owed after broader `total_debt` + `Cash_ST` extraction.
 4. **§2.10 items 1 and 2 — currency and period coherence.** These unblock broad
    balance-sheet extraction for `total_debt` and `Cash_ST`.
 5. **§4.3 — EV rewire.** Implemented in the harness; legacy `enterprise_value`
