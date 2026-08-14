@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.15 (typed value observations)
+**Version:** 0.16 (transaction feature flags)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -322,6 +322,25 @@ EBITDA.
   needed. Use qualifier for words like "approximately", "up to", or "subject to
   adjustment".
 
+features:
+Use this object for explicit, qualified transaction feature evidence. Return
+null when the source does not provide explicit evidence for a feature. Do not
+infer these flags merely from buyer type, merger structure, company size,
+ownership percentages, board composition, or management roles.
+
+- is_platform_investment: true only with explicit/qualified evidence that a
+  financial sponsor is establishing or acquiring the company as a platform
+  investment or new platform. Do not infer merely because a PE sponsor is the
+  buyer.
+- is_secondary_buyout: true when the source explicitly says a sponsor-backed
+  company/business is acquired from another financial sponsor, or otherwise
+  explicitly provides that sponsor-to-sponsor ownership context. Do not infer
+  from PE buyer alone.
+- is_merger_of_equals: true only with explicit/qualified source evidence such as
+  "merger of equals", "combination of equals", or clearly equivalent language.
+  Do not infer merely from merger structure, similar company size, ownership
+  percentages, board composition, or management roles.
+
 financials_disclosure_status:
 Classify whether financial terms are disclosed in this source:
   DISCLOSED — at least one financial value is stated
@@ -470,6 +489,7 @@ code fences, no preamble.
           "evidence": "for $500 million in cash"
         }
       ],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -483,7 +503,7 @@ code fences, no preamble.
       },
       "model_confidence": "HIGH",
       "notes": null,
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -573,6 +593,11 @@ Extract all transactions from this source.
           "evidence": "string | null"
         }
       ],
+      "features": {
+        "is_platform_investment": "boolean | null",
+        "is_secondary_buyout": "boolean | null",
+        "is_merger_of_equals": "boolean | null"
+      },
       "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "cash | stock | cash_and_stock | election | other | null",
@@ -587,7 +612,7 @@ Extract all transactions from this source.
       },
       "model_confidence": "HIGH | MEDIUM | LOW",
       "notes": "string | null",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -671,6 +696,7 @@ Output:
           "evidence": "for $500 million in cash"
         }
       ],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -684,7 +710,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Pending close language present — closed_date left null.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -765,6 +791,7 @@ Output:
           "evidence": "values PublicCo at approximately $2.1 billion enterprise value"
         }
       ],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -778,7 +805,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "EV stated explicitly including $300M assumed net debt. LTM period end date stated as March 31, 2026.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -848,6 +875,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -861,7 +889,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Same-day completed private acquisition — no pending-close language. closed_date set to announced_date.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -941,6 +969,7 @@ Output:
           "evidence": "to sell its Industrial Coatings Division ... for $1.2 billion in cash"
         }
       ],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -954,7 +983,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "LTM period end stated as twelve months ended December 31, 2025.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -1018,6 +1047,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1028,7 +1058,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Transaction 1 of 2 from law firm tombstone. Closed per source language.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     },
     {
       "target": {
@@ -1074,6 +1104,7 @@ Output:
           "evidence": "acquisition of Omega Systems for $250 million in cash"
         }
       ],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1084,7 +1115,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "Transaction 2 of 2 from law firm tombstone. Closed per source language.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -1134,6 +1165,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1147,7 +1179,7 @@ Output:
       },
       "model_confidence": "MEDIUM",
       "notes": "NTM financials stated as projections for twelve months ending December 31, 2027. Party names not captured from this excerpt — full 8-K body would populate. Value amount not stated directly; multiples stated but aggregate value not extracted per extraction rule.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -1216,6 +1248,7 @@ Output:
           "evidence": "total enterprise value of approximately $210 million on a cash-free, debt-free basis"
         }
       ],
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1229,7 +1262,7 @@ Output:
       },
       "model_confidence": "HIGH",
       "notes": "The $210M revenue fact remains in target_financials; only the separate $210M enterprise value is included in value_observations.",
-      "prompt_version": "high_confidence_extraction:0.15"
+      "prompt_version": "high_confidence_extraction:0.16"
     }
   ]
 }
@@ -1251,6 +1284,7 @@ Output:
 | Model returns legacy SPIN_SPLIT as acquirer.type | Not applicable; acquirer.type is a party classification |
 | Model returns sponsor_name for non-pe_portfolio acquirer | Parser clears and logs warning |
 | transactions array empty | Parser marks PROMPT_FAILED |
+| Model infers platform investment, secondary buyout, or merger of equals without explicit evidence | Critical — features require qualified source evidence; aggregation handles only the narrow side-qualified sponsor derivation for secondary buyout |
 
 ---
 
@@ -1263,3 +1297,5 @@ Output:
 | 0.11 | 2026-07-22 | Take-private note updated; sponsor_name handling clarified |
 | 0.12 | 2026-07-28 | V2 alignment. acquirer.type values lowercased and expanded (pe_portfolio, growth_equity, hedge_fund, consortium, management, employee_group, other_financial_sponsor added). revenue_period_type and ebitda_period_type values aligned to V2 period_type enum (LTM, NTM, ANNUAL, QUARTERLY, INTERIM_YTD); null explicitly required when period not stated. date_precision fields added for all dates. rumor_date added. financials_disclosure_status added as required field. consideration_type added as interim field (pending consideration_component table). ANNOUNCED/CLOSED replace ANNOUNCEMENT/CLOSE in event_type references. Example 6 added for NTM financials. |
 | 0.14 | 2026-08-12 | Added nullable `deal.stake_transition_type` for explicit ownership-transition cases. |
+| 0.15 | 2026-08-14 | Added required `value_observations` array for independently typed deal-value facts. |
+| 0.16 | 2026-08-14 | Added explicit-evidence `features` object for platform investment, secondary buyout, and merger-of-equals flags. |

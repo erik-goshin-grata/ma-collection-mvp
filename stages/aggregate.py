@@ -96,6 +96,9 @@ _FIELDS = [
     ("per_share_price", "number"),
     ("pct_acquired", "number"),
     ("stake_transition_type", "string"),
+    ("is_platform_investment", "boolean"),
+    ("is_secondary_buyout", "boolean"),
+    ("is_merger_of_equals", "boolean"),
     ("target_revenue", "number"),
     ("target_revenue_period_type", "string"),
     ("target_revenue_period_type_v2", "string"),
@@ -240,6 +243,24 @@ def _derive_is_minority(fields: dict) -> int:
     return 0
 
 
+def _explicit_flag(value: Any) -> int:
+    if value is None:
+        return 0
+    try:
+        return int(float(value) != 0.0)
+    except (TypeError, ValueError):
+        return int(bool(value))
+
+
+def _derive_is_secondary_buyout(fields: dict) -> int:
+    if _explicit_flag(fields.get("is_secondary_buyout")):
+        return 1
+    deal_type = _event_type(fields)
+    if deal_type not in _CONTROL_DEFAULT_TYPES:
+        return 0
+    return int(bool(fields.get("_has_buyer_sponsor_party") and fields.get("_has_seller_sponsor_party")))
+
+
 def _derive_flags(fields: dict) -> dict:
     acquirer_type = fields.get("acquirer_type")
     target_type = fields.get("target_type")
@@ -250,6 +271,9 @@ def _derive_flags(fields: dict) -> dict:
         "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
         "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY", "ASSETS")),
         "is_de_spac": int(deal_type == "REVERSE_MERGER" and acquirer_type == "SPAC"),
+        "is_platform_investment": _explicit_flag(fields.get("is_platform_investment")),
+        "is_secondary_buyout": _derive_is_secondary_buyout(fields),
+        "is_merger_of_equals": _explicit_flag(fields.get("is_merger_of_equals")),
     }
 
 
@@ -882,6 +906,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.announced_date, se.closed_date, se.signing_date,
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
                se.stake_transition_type,
+               se.is_platform_investment, se.is_secondary_buyout, se.is_merger_of_equals,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
                se.financials_currency,
@@ -948,6 +973,35 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                 })
         clusters[cluster_id] = bundle
     return clusters
+
+
+def _load_sponsor_participant_context(conn: sqlite3.Connection) -> dict[str, dict[str, int]]:
+    tables = {
+        row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    if "transaction_participant" not in tables:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT
+            transaction_id,
+            MAX(CASE WHEN side='BUYER' AND participant_role='BUYER_SPONSOR' THEN 1 ELSE 0 END) AS has_buyer_sponsor,
+            MAX(CASE WHEN side='SELLER' AND participant_role='SELLER_SPONSOR' THEN 1 ELSE 0 END) AS has_seller_sponsor
+        FROM transaction_participant
+        WHERE is_current = 1
+          AND participant_role IN ('BUYER_SPONSOR', 'SELLER_SPONSOR')
+        GROUP BY transaction_id
+        """
+    ).fetchall()
+    return {
+        row["transaction_id"]: {
+            "_has_buyer_sponsor_party": int(row["has_buyer_sponsor"] or 0),
+            "_has_seller_sponsor_party": int(row["has_seller_sponsor"] or 0),
+        }
+        for row in rows
+    }
 
 
 def _value_from_observation(row: sqlite3.Row, field_type: str) -> Any:
@@ -1084,6 +1138,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     log.info("Loaded %s  hash=%s read_source=%s", _FULL_VERSION, prompt["file_hash"][:12], read_source)
 
     clusters = _load_aggregation_input(conn, read_source)
+    sponsor_participant_context = _load_sponsor_participant_context(conn)
 
     total_clusters = len(clusters)
     log.info("Stage 9: %d clusters to aggregate", total_clusters)
@@ -1134,6 +1189,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values[_fname] = json.dumps(field_values[_fname])
 
             # Derive additional fields
+            field_values.update(sponsor_participant_context.get(cluster_id, {}))
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
             derived = _derive_flags(field_values)
             txn_status = _derive_transaction_status(
@@ -1255,6 +1311,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     target_fee_amount, target_fee_percentage,
                     acquirer_fee_amount, acquirer_fee_percentage,
                     is_take_private, is_minority, is_add_on, is_divestiture, is_de_spac,
+                    is_platform_investment, is_secondary_buyout, is_merger_of_equals,
                     has_earnout, has_cvr,
                     round_label, round_stage_category, round_size,
                     pre_money_valuation, post_money_valuation, valuation_currency, round_currency,
@@ -1268,7 +1325,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     investment_amount, deal_value_currency,
                     total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1344,6 +1401,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     derived["is_add_on"],
                     derived["is_divestiture"],
                     derived["is_de_spac"],
+                    derived["is_platform_investment"],
+                    derived["is_secondary_buyout"],
+                    derived["is_merger_of_equals"],
                     _derive_has_earnout(field_values.get("consideration_components")),
                     _derive_has_cvr(field_values.get("consideration_components")),
                     # Funding fields

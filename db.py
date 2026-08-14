@@ -336,6 +336,11 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # Nullable harness-only ownership transition enum. Populated only when
         # prior/current/resulting ownership evidence is explicit in the source.
         ("stake_transition_type", "TEXT"),
+        # Explicit source-backed transaction feature flags. Aggregation owns
+        # canonical resolution; HC only supplies evidence-bearing primitives.
+        ("is_platform_investment", "INTEGER"),
+        ("is_secondary_buyout", "INTEGER"),
+        ("is_merger_of_equals", "INTEGER"),
         # Structured HC value facts. Preserves multiple independently typed deal
         # values from one source while legacy value_amount/value_type remain the
         # primary compatibility pair.
@@ -351,6 +356,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("has_cvr",                          "INTEGER DEFAULT 0"),
         # Minority-as-flag foundation — derived in aggregate like is_take_private.
         ("is_minority",                      "INTEGER DEFAULT 0"),
+        ("is_platform_investment",           "INTEGER DEFAULT 0"),
+        ("is_secondary_buyout",              "INTEGER DEFAULT 0"),
+        ("is_merger_of_equals",              "INTEGER DEFAULT 0"),
         # Drop 3.19
         ("linked_filings_count",             "INTEGER DEFAULT 0"),
         # Drop 3.20a

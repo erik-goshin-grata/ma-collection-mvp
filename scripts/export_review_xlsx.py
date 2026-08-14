@@ -35,7 +35,7 @@ COLUMNS = [
     "investors",
     "sellers",
     "parent_seller",
-    "buyer_sponsors",
+    "acquirer_sponsors",
     "seller_sponsors",
     "lenders_financing_providers",
     "target_financial_advisors",
@@ -50,6 +50,11 @@ COLUMNS = [
     "pct_acquired",
     "is_take_private",
     "is_de_spac",
+    "is_add_on",
+    "is_divestiture",
+    "is_platform_investment",
+    "is_secondary_buyout",
+    "is_merger_of_equals",
     "per_share_price",
     "exchange_ratio",
     "consideration_type",
@@ -60,7 +65,9 @@ COLUMNS = [
     "pre_money_valuation",
     "post_money_valuation",
     "lead_investors",
+    "deal_value_currency",
     "equity_value",
+    "equity_value_basis",
     "transaction_value",
     "transaction_value_basis",
     "implied_equity_value",
@@ -69,12 +76,14 @@ COLUMNS = [
     "total_debt",
     "cash_equivalents",
     "net_debt",
+    "financials_currency",
     "revenue",
     "revenue_period",
     "ebitda",
     "ebitda_period",
     "ev_revenue_multiple",
     "ev_ebitda_multiple",
+    "multiple_quality",
     "transaction_summary",
 ]
 
@@ -407,7 +416,7 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
         lead_investors = participant_fields.get("lead_investors") or investor_fields.get("lead_investors") or ""
         sellers = participant_fields.get("sellers") or ""
         parent_seller = r.get("parent_seller_name") or ""
-        buyer_sponsors = participant_fields.get("buyer_sponsors") or r.get("acquirer_sponsor_name") or ""
+        acquirer_sponsors = participant_fields.get("buyer_sponsors") or r.get("acquirer_sponsor_name") or ""
         seller_sponsors = participant_fields.get("seller_sponsors") or ""
         lenders = participant_fields.get("lenders_financing_providers") or investor_fields.get("lenders_financing_providers") or ""
 
@@ -427,7 +436,7 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
             "investors": investors,
             "sellers": sellers,
             "parent_seller": parent_seller,
-            "buyer_sponsors": buyer_sponsors,
+            "acquirer_sponsors": acquirer_sponsors,
             "seller_sponsors": seller_sponsors,
             "lenders_financing_providers": lenders,
             "target_financial_advisors": advisors.get(tid, {}).get("target_financial_advisors", ""),
@@ -442,6 +451,11 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
             "pct_acquired": _fmt_num(r.get("pct_acquired")),
             "is_take_private": _compact_bool(r.get("is_take_private")),
             "is_de_spac": _compact_bool(r.get("is_de_spac")),
+            "is_add_on": _compact_bool(r.get("is_add_on")),
+            "is_divestiture": _compact_bool(r.get("is_divestiture")),
+            "is_platform_investment": _compact_bool(r.get("is_platform_investment")),
+            "is_secondary_buyout": _compact_bool(r.get("is_secondary_buyout")),
+            "is_merger_of_equals": _compact_bool(r.get("is_merger_of_equals")),
             "per_share_price": _fmt_num(r.get("per_share_price")),
             "exchange_ratio": consideration_exchange or observed_exchange.get(tid, ""),
             "consideration_type": r.get("consideration_type"),
@@ -452,7 +466,9 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
             "pre_money_valuation": _fmt_num(r.get("pre_money_valuation")),
             "post_money_valuation": _fmt_num(r.get("post_money_valuation")),
             "lead_investors": lead_investors,
+            "deal_value_currency": r.get("deal_value_currency"),
             "equity_value": _fmt_num(r.get("equity_value")),
+            "equity_value_basis": r.get("equity_value_basis"),
             "transaction_value": _fmt_num(r.get("transaction_value")),
             "transaction_value_basis": r.get("transaction_value_basis"),
             "implied_equity_value": _fmt_num(r.get("implied_equity_value")),
@@ -461,12 +477,14 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
             "total_debt": _fmt_num(r.get("total_debt")),
             "cash_equivalents": _fmt_num(r.get("cash_st") if "cash_st" in tr_cols else None),
             "net_debt": _fmt_num(r.get("net_debt")),
+            "financials_currency": r.get("financials_currency"),
             "revenue": _fmt_num(r.get("target_revenue")),
             "revenue_period": _period(r.get("target_revenue_period_type_v2") or r.get("target_revenue_period_type"), r.get("target_revenue_period_end")),
             "ebitda": _fmt_num(r.get("target_ebitda")),
             "ebitda_period": _period(r.get("target_ebitda_period_type_v2") or r.get("target_ebitda_period_type"), r.get("target_ebitda_period_end")),
             "ev_revenue_multiple": _multiple(r.get("ev_to_revenue_ltm"), r.get("ev_to_revenue_ntm")),
             "ev_ebitda_multiple": _multiple(r.get("ev_to_ebitda_ltm"), r.get("ev_to_ebitda_ntm")),
+            "multiple_quality": r.get("multiple_quality"),
             "transaction_summary": summaries.get(tid, ""),
         }
         out_rows.append({col: built.get(col, "") for col in COLUMNS})

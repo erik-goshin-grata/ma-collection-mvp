@@ -91,6 +91,9 @@ CREATE TABLE IF NOT EXISTS staging_extraction (
     per_share_price             REAL,
     pct_acquired                REAL,        -- e.g. 51.0 for 51% stake; NULL when implicit 100% or not stated
     stake_transition_type       TEXT,        -- nullable explicit ownership transition enum; current harness only
+    is_platform_investment      INTEGER,     -- explicit source evidence only; do not infer from PE buyer
+    is_secondary_buyout         INTEGER,     -- explicit source evidence; aggregation may also derive from side-qualified sponsor parties
+    is_merger_of_equals         INTEGER,     -- explicit source evidence only
     target_revenue              REAL,
     target_revenue_period_type  TEXT,        -- LTM | FY | TTM | CY | QUARTER | NTM | UNKNOWN
     target_revenue_period_end   TEXT,
@@ -263,6 +266,9 @@ CREATE TABLE IF NOT EXISTS transaction_record (
     is_add_on                   INTEGER,     -- acquirer_type=PE_PORTFOLIO
     is_divestiture              INTEGER,     -- target_type in (BUSINESS_UNIT, SUBSIDIARY, ASSETS)
     is_de_spac                  INTEGER DEFAULT 0,  -- 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC
+    is_platform_investment      INTEGER DEFAULT 0,  -- explicit source evidence only; do not infer from PE buyer
+    is_secondary_buyout         INTEGER DEFAULT 0,  -- explicit source evidence or side-qualified buyer+seller sponsor parties
+    is_merger_of_equals         INTEGER DEFAULT 0,  -- explicit source evidence only
     has_earnout                 INTEGER DEFAULT 0,  -- 1 when consideration_components contains a EARNOUT-form entry
     has_cvr                     INTEGER DEFAULT 0,  -- 1 when consideration_components contains a CVR-form entry
     linked_filings_count        INTEGER DEFAULT 0,  -- count of transaction_document rows for this transaction; set by sec_documents stage

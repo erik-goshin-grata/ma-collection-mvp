@@ -67,6 +67,11 @@ def _txn(target: str, acquirer: str) -> dict:
             "per_share_price": None,
         },
         "value_observations": [],
+        "features": {
+            "is_platform_investment": None,
+            "is_secondary_buyout": None,
+            "is_merger_of_equals": None,
+        },
         "target_financials": {
             "revenue_amount": None,
             "revenue_period_type": None,

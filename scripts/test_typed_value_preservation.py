@@ -87,6 +87,11 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
                 "evidence": "total enterprise value of approximately $210 million",
             },
         ],
+        "features": {
+            "is_platform_investment": None,
+            "is_secondary_buyout": None,
+            "is_merger_of_equals": None,
+        },
         "financials_disclosure_status": "DISCLOSED",
         "target_financials": {
             "revenue_amount": 210_000_000,
@@ -120,6 +125,15 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
     err = _validate(empty_value_observations)
     if err:
         raise AssertionError(f"empty value_observations array should validate: {err}")
+    missing_features = dict(hc_result)
+    missing_features.pop("features")
+    if _validate(missing_features) is None:
+        raise AssertionError("features must be a required output key")
+    invalid_feature = dict(hc_result)
+    invalid_feature["features"] = dict(hc_result["features"])
+    invalid_feature["features"]["is_platform_investment"] = "yes"
+    if _validate(invalid_feature) is None:
+        raise AssertionError("features values must be boolean or null")
 
     conn.execute(
         """

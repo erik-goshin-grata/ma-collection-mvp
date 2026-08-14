@@ -40,14 +40,14 @@
 | `is_merger` | Transaction is structured as a merger. | FLAG | Source / researcher | Recommended M&A structure flag. |
 | `is_reverse_merger` | Transaction uses a reverse-merger structure. | FLAG | Source / researcher | May coexist with `is_de_spac`. |
 | `is_de_spac` | Transaction is a de-SPAC business combination. | FLAG | Source / researcher | Existing flag; recommended under M&A rather than separate canonical event type. |
-| `is_merger_of_equals` | Merger-of-equals characteristic. | FLAG | Source / researcher | Existing. |
+| `is_merger_of_equals` | Merger-of-equals characteristic. | FLAG | Source / researcher | Implemented in current harness from explicit/qualified source evidence only. |
 | `is_take_private` | Public target is taken private. | FLAG | Source / derived / researcher | Existing. |
 | `is_lbo` | Leveraged-buyout characteristic. | FLAG | Source / derived / researcher | Existing. |
 | `is_mbo` | Management buyout. | FLAG | Source / researcher | Existing. |
 | `is_mbi` | Management buy-in. | FLAG | Source / researcher | Existing. |
-| `is_platform_investment` | Sponsor/platform characteristic. | FLAG | Source / researcher | Existing. |
+| `is_platform_investment` | Sponsor/platform characteristic. | FLAG | Source / researcher | Implemented in current harness from explicit/qualified platform-investment evidence only. |
 | `is_add_on` | Add-on acquisition. | FLAG | Source / researcher | Existing. |
-| `is_secondary_buyout` | Sponsor-to-sponsor secondary buyout. | FLAG | Source / researcher | Existing. |
+| `is_secondary_buyout` | Sponsor-to-sponsor secondary buyout. | FLAG | Source / researcher | Implemented in current harness from explicit evidence or side-qualified buyer/seller sponsor parties. |
 | `is_de_spac` | De-SPAC characteristic. | FLAG | Source / researcher | Existing / lower priority. |
 | `is_divestiture` | Seller-side divestiture characteristic. | FLAG | Source / researcher | Existing. |
 | `is_stock_for_stock` | Stock-for-stock consideration characteristic. | FLAG | Derived / source | Existing summary flag. |

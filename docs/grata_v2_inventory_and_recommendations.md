@@ -54,7 +54,7 @@ Key corrections/additions:
 | `is_reverse_merger` | FLAG | Missing | ADD | Reverse-merger structure. |
 | `SPAC_DE_SPAC` | ENUM today | Exists | CHANGE | Canonical `event_type = ACQUISITION` plus existing `is_de_spac = true`. De-SPAC and reverse-merger flags may coexist when both are factually supported. |
 | `is_de_spac` | FLAG | Exists | KEEP | De-SPAC structure/feature. |
-| `is_merger_of_equals` | FLAG | Exists | KEEP | Special merger characteristic. |
+| `is_merger_of_equals` | FLAG | Implemented in current harness | KEEP / HARNESS IMPLEMENTED | Special merger characteristic; true only with explicit/qualified merger-of-equals evidence. |
 | `MINORITY_INVESTMENT` | ENUM today | Exists | CHANGE | Remove from core event usage; minority is a transaction feature. |
 | `is_minority` | FLAG | Missing | ADD | Shared transaction feature. Current-stake evidence takes precedence over ownership history. |
 | `JOINT_VENTURE` | ENUM | Exists | KEEP / CLARIFY | Use for genuine JV formation/joint-control event. Purchase/buyout of an existing JV interest remains M&A. |
@@ -114,9 +114,9 @@ Current `PartyType` covers PE, VC, growth equity firm, corporation, individual, 
 | `is_lbo` | FLAG | KEEP | Orthogonal M&A feature. |
 | `is_mbo` | FLAG | KEEP | Keep. |
 | `is_mbi` | FLAG | KEEP | Keep. |
-| `is_platform_investment` | FLAG | KEEP | Keep. |
+| `is_platform_investment` | FLAG | KEEP / HARNESS IMPLEMENTED | Sponsor/platform review flag; true only with explicit/qualified platform-investment evidence. |
 | `is_add_on` | FLAG | KEEP | Keep. |
-| `is_secondary_buyout` | FLAG | KEEP | Keep. |
+| `is_secondary_buyout` | FLAG | KEEP / HARNESS IMPLEMENTED | Sponsor-to-sponsor secondary buyout flag; explicit evidence or side-qualified buyer/seller sponsor-party evidence. |
 | `is_de_spac` | FLAG | KEEP / DEFER | Existing feature. |
 | `is_divestiture` | FLAG | KEEP | Seller-side characteristic. |
 | `is_stock_for_stock` | FLAG | KEEP | Summary stock-consideration feature. |
@@ -132,7 +132,7 @@ Current `PartyType` covers PE, VC, growth equity firm, corporation, individual, 
 | `linked_filings_count` | DATA POINT | KEEP | Operational/source linkage. |
 | `has_earnout` | FLAG | KEEP | Summary flag; detailed term belongs in consideration components. |
 | `has_cvr` | FLAG | KEEP | Summary flag; detailed term belongs in consideration components. |
-| `is_merger_of_equals` | FLAG | KEEP | Keep. |
+| `is_merger_of_equals` | FLAG | KEEP / HARNESS IMPLEMENTED | True only with explicit/qualified merger-of-equals evidence. |
 | `is_oversubscribed` | FLAG | KEEP | Funding feature. |
 | `platform_transaction_id` | ID / relationship | VERIFY / DO NOT RECOMMEND YET | Field exists, but the supplied Grata materials do not define its semantics sufficiently. Clarify with ENG before documenting or building behavior around it. |
 | `has_cbi_data` | FLAG | LEGACY / OPERATIONAL | Source-system metadata, not core business semantics. |

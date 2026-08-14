@@ -33,7 +33,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.15"
+_VERSION = "0.16"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -43,6 +43,7 @@ _REQUIRED_KEYS = frozenset({
     "dates",
     "value",
     "value_observations",
+    "features",
     "target_financials",
     "model_confidence",
     "deal",
@@ -143,6 +144,13 @@ def _validate(result: dict) -> str | None:
         otype = obs.get("type")
         if otype is not None and otype not in _VALID_VALUE_TYPES:
             return f"invalid value_observations[{i}].type: {otype!r}"
+    features = result.get("features")
+    if not isinstance(features, dict):
+        return "invalid features: expected object"
+    for feature_name in ("is_platform_investment", "is_secondary_buyout", "is_merger_of_equals"):
+        value = features.get(feature_name)
+        if value is not None and not isinstance(value, bool):
+            return f"invalid features.{feature_name}: expected boolean or null"
 
     # financials_disclosure_status — required, must be valid
     fds = result.get("financials_disclosure_status")
@@ -344,6 +352,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             ps = txn.get("parent_seller") or {}
             d = txn.get("dates") or {}
             v = _primary_value(txn)
+            features = txn.get("features") or {}
             tf = txn.get("target_financials") or {}
             value_observations_json = _value_observations_json(txn)
 
@@ -370,6 +379,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 ps.get("description"),
                 (txn.get("deal") or {}).get("pct_acquired"),
                 (txn.get("deal") or {}).get("stake_transition_type"),
+                features.get("is_platform_investment"),
+                features.get("is_secondary_buyout"),
+                features.get("is_merger_of_equals"),
                 d.get("announced_date"), d.get("closed_date"), d.get("signing_date"),
                 d.get("announced_date_precision"),   # new
                 d.get("closed_date_precision"),      # new
@@ -407,6 +419,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         parent_seller_name = ?,  parent_seller_ticker = ?,
                         parent_seller_description = ?,
                         pct_acquired = ?,  stake_transition_type = ?,
+                        is_platform_investment = ?,  is_secondary_buyout = ?,  is_merger_of_equals = ?,
                         announced_date = ?,  closed_date = ?,  signing_date = ?,
                         announced_date_precision = ?,  closed_date_precision = ?,  signing_date_precision = ?,
                         rumor_date = ?,
@@ -457,6 +470,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         parent_seller_name, parent_seller_ticker,
                         parent_seller_description,
                         pct_acquired, stake_transition_type,
+                        is_platform_investment, is_secondary_buyout, is_merger_of_equals,
                         announced_date, closed_date, signing_date,
                         announced_date_precision, closed_date_precision, signing_date_precision,
                         rumor_date,
@@ -478,7 +492,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

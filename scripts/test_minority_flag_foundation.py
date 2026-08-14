@@ -223,6 +223,11 @@ def _hc_result(stake_transition_type):
         "dates": {},
         "value": {"type": None},
         "value_observations": [],
+        "features": {
+            "is_platform_investment": None,
+            "is_secondary_buyout": None,
+            "is_merger_of_equals": None,
+        },
         "target_financials": {},
         "financials_disclosure_status": "UNKNOWN",
         "model_confidence": "HIGH",
