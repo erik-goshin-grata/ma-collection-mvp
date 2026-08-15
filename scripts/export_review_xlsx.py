@@ -70,6 +70,8 @@ COLUMNS = [
     "equity_value_basis",
     "transaction_value",
     "transaction_value_basis",
+    "transaction_size",
+    "transaction_size_basis",
     "implied_equity_value",
     "implied_enterprise_value",
     "implied_enterprise_value_basis",
@@ -145,6 +147,17 @@ def _multiple(ltm: object, ntm: object) -> str:
         except (TypeError, ValueError):
             parts.append(f"{label}={value}")
     return " | ".join(parts)
+
+
+def _review_transaction_size(r: dict[str, object], tr_cols: set[str]) -> tuple[object, str]:
+    if "transaction_size" in tr_cols and r.get("transaction_size") is not None:
+        return r.get("transaction_size"), str(r.get("transaction_size_basis") or "")
+    event_type = r.get("v2_event_type") or r.get("deal_type") or r.get("event_type")
+    if event_type in {"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"} and r.get("round_size") is not None:
+        return r.get("round_size"), "ROUND_SIZE"
+    if r.get("transaction_value") is not None:
+        return r.get("transaction_value"), "TRANSACTION_VALUE"
+    return "", ""
 
 
 def _load_sources(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
@@ -419,6 +432,7 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
         acquirer_sponsors = participant_fields.get("buyer_sponsors") or r.get("acquirer_sponsor_name") or ""
         seller_sponsors = participant_fields.get("seller_sponsors") or ""
         lenders = participant_fields.get("lenders_financing_providers") or investor_fields.get("lenders_financing_providers") or ""
+        transaction_size, transaction_size_basis = _review_transaction_size(r, tr_cols)
 
         built = {
             "review_verdict": "",
@@ -471,6 +485,8 @@ def build_rows(conn: sqlite3.Connection) -> list[dict[str, object]]:
             "equity_value_basis": r.get("equity_value_basis"),
             "transaction_value": _fmt_num(r.get("transaction_value")),
             "transaction_value_basis": r.get("transaction_value_basis"),
+            "transaction_size": _fmt_num(transaction_size),
+            "transaction_size_basis": transaction_size_basis,
             "implied_equity_value": _fmt_num(r.get("implied_equity_value")),
             "implied_enterprise_value": _fmt_num(r.get("implied_enterprise_value")),
             "implied_enterprise_value_basis": r.get("implied_enterprise_value_basis"),
