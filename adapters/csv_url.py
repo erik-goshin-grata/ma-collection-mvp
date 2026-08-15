@@ -79,13 +79,15 @@ def _read_csv(path: str, log) -> list[dict]:
             if not url:
                 log.info("CSV row %d has no URL — skipping", i)
                 continue
+            headline = col(row, "headline") or col(row, "title")
+            published_date = col(row, "story date") or col(row, "published_date")
             records.append({
                 "url": url,
                 "source": col(row, "source"),
                 "target": col(row, "target"),
                 "acquirer": col(row, "acquirer"),
-                "headline": col(row, "headline"),
-                "published_date": col(row, "story date"),
+                "headline": headline,
+                "published_date": published_date,
             })
     return records
 
