@@ -1219,8 +1219,20 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             pct_resolved, pct_acquired_source = _resolve_pct_acquired(
                 field_values, derived["is_minority"]
             )
+            # Each canonical value field consumes the best observation of its own
+            # semantic type; none of them may depend on which type happens to win
+            # the single legacy value_amount/value_type pair. Without this, a
+            # cluster stating both an equity figure and a whole-company EV loses
+            # whichever type loses that collapse.
+            typed_equity_value_amount = _pick_value_amount_for_type(
+                bundle["field_observations"], "EQUITY_VALUE"
+            )
+            equity_value_fields = dict(field_values)
+            if typed_equity_value_amount is not None:
+                equity_value_fields["value_amount"] = typed_equity_value_amount
+                equity_value_fields["value_type"] = "EQUITY_VALUE"
             equity_value, equity_value_basis = _derive_equity_value(
-                field_values,
+                equity_value_fields,
                 field_values.get("per_share_price"),
                 sec_shares,
             )
