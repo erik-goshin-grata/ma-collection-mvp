@@ -35,6 +35,7 @@ import requests
 import trafilatura
 
 from config import Config
+from lib.body_quality import body_rejection_reason
 from logger import get_logger
 from utils import content_hash as _content_hash
 
@@ -49,6 +50,25 @@ _BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
+
+# A browser UA with no accompanying headers is itself a crawler signature: real
+# browsers always send an Accept/Accept-Language/Sec-Fetch set on a navigation.
+# These are the standard values Chrome sends for a top-level document request.
+# Purely additive — the UA is unchanged, so any host that accepted the previous
+# request still accepts this one.
+_BROWSER_HEADERS = {
+    "User-Agent": _BROWSER_UA,
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -139,11 +159,17 @@ def fetch_body(
     session: requests.Session,
     delay: float,
     log,
-) -> tuple[str | None, str | None]:
-    """GET a URL body. Returns (raw_html, clean_text).
+) -> tuple[str | None, str | None, str | None]:
+    """GET a URL body. Returns (raw_html, clean_text, rejection_reason).
+
+    `clean_text` is non-null only for a body that passed the shared quality gate;
+    whenever it is null, `rejection_reason` says why (network/status/empty/
+    too_short/block_page). A block/interstitial page served as HTTP 200 is
+    rejected here rather than passed on as article text.
 
     One retry on network error or 5xx. Non-fatal: any failure returns
-    (None, None) or (raw_html, None) so the run continues to the next URL.
+    (None, None, reason) or (raw_html, None, reason) so the run continues to the
+    next URL.
     """
     time.sleep(delay)
     resp: requests.Response | None = None
@@ -156,7 +182,7 @@ def fetch_body(
                 time.sleep(5)
                 continue
             log.error("Network error after retry %s: %s", url, exc)
-            return None, None
+            return None, None, f"network_error:{type(exc).__name__}"
 
         if resp.status_code >= 500 and attempt == 0:
             log.warning("5xx (%s) %s — retry in 10s", resp.status_code, url)
@@ -165,18 +191,19 @@ def fetch_body(
         break
 
     if resp is None:
-        return None, None
+        return None, None, "network_error"
 
     if resp.status_code != 200:
         log.warning("Status %s for %s — skipping", resp.status_code, url)
-        return None, None
+        return None, None, f"http_status:{resp.status_code}"
 
     raw_html = resp.text
     clean = trafilatura.extract(raw_html)
-    if not clean or len(clean) < 100:
-        return raw_html, None
+    reason = body_rejection_reason(clean, raw_html=raw_html)
+    if reason:
+        return raw_html, None, reason
 
-    return raw_html, clean
+    return raw_html, clean, None
 
 
 def extract_page_date(raw_html: str | None) -> str | None:
@@ -229,16 +256,23 @@ def insert_source_raw(
     return cur.lastrowid
 
 
-def _build_notes(rec: dict) -> str:
-    """Build the source_raw.notes JSON, embedding the CSV reference values."""
-    return json.dumps({
+def _build_notes(rec: dict, *, rejection_reason: str | None = None) -> str:
+    """Build the source_raw.notes JSON, embedding the CSV reference values.
+
+    When the body was rejected, the reason is recorded so an unusable row is
+    diagnosable without re-fetching.
+    """
+    notes: dict = {
         "csv_reference": {
             "source": rec.get("source"),
             "target": rec.get("target"),
             "acquirer": rec.get("acquirer"),
             "headline": rec.get("headline"),
         }
-    })
+    }
+    if rejection_reason:
+        notes["body_rejection_reason"] = rejection_reason
+    return json.dumps(notes)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +296,7 @@ def run(
     log.info("CSV ingest: %d URLs to fetch from %s", len(records), csv_path)
 
     session = requests.Session()
-    session.headers.update({"User-Agent": _BROWSER_UA})
+    session.headers.update(_BROWSER_HEADERS)
     delay = cfg.request_delay_seconds
     robots_cache: dict[str, RobotFileParser | None] = {}
 
@@ -271,6 +305,7 @@ def run(
     skipped_duplicates = 0
     robots_blocked = 0
     empty_body = 0
+    blocked_body = 0
     errors: list[str] = []
 
     for rec in records:
@@ -288,7 +323,7 @@ def run(
             continue
 
         try:
-            raw_html, clean = fetch_body(url, session, delay, log)
+            raw_html, clean, reason = fetch_body(url, session, delay, log)
         except Exception as exc:  # non-fatal: keep going
             log.error("Unexpected error fetching %s: %s", url, exc)
             errors.append(f"{url}: {exc}")
@@ -303,13 +338,19 @@ def run(
             errors.append(f"null body: {url}")
             continue
 
-        notes = _build_notes(rec)
+        notes = _build_notes(rec, rejection_reason=reason)
 
         if clean is None:
             # No usable text — insert so the failure is visible, but Stage 2
-            # will not pick it up (it requires non-null clean_text).
-            log.warning("trafilatura returned <100 chars for %s — clean_text=NULL", url)
-            empty_body += 1
+            # will not pick it up (it requires non-null clean_text). A block
+            # page is counted separately from a genuinely empty extraction so
+            # the two failure modes stay distinguishable in the run summary.
+            if reason and reason.startswith("block_page"):
+                blocked_body += 1
+                log.warning("Blocked/interstitial page for %s (%s) — clean_text=NULL", url, reason)
+            else:
+                empty_body += 1
+                log.warning("No usable body for %s (%s) — clean_text=NULL", url, reason)
             insert_source_raw(
                 conn, url=url, title=rec["headline"],
                 published_date=pub_date, raw_html=raw_html,
@@ -336,9 +377,9 @@ def run(
     runtime = time.monotonic() - start
     log.info(
         "CSV ingest done — urls=%d inserted=%d dup=%d robots_blocked=%d "
-        "empty_body=%d errors=%d runtime=%.1fs",
+        "empty_body=%d blocked_body=%d errors=%d runtime=%.1fs",
         len(records), rows_inserted, skipped_duplicates, robots_blocked,
-        empty_body, len(errors), runtime,
+        empty_body, blocked_body, len(errors), runtime,
     )
 
     return {
@@ -348,6 +389,7 @@ def run(
         "skipped_duplicates": skipped_duplicates,
         "robots_blocked": robots_blocked,
         "empty_body": empty_body,
+        "blocked_body": blocked_body,
         "errors": errors,
         "runtime_seconds": round(runtime, 1),
     }
