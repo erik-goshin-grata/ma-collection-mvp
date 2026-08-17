@@ -108,6 +108,14 @@ _FIELDS = [
     ("target_ebitda_period_type_v2", "string"),
     ("target_ebitda_period_end", "date"),
     ("financials_currency", "string"),
+    # Point-in-time balance-sheet items. No period_type companion by design — these
+    # are as-of figures, not periods, so there is no LTM/TTM or annual/quarterly
+    # distinction to record.
+    ("total_debt", "number"),
+    ("total_debt_currency", "string"),
+    ("cash_st", "number"),
+    ("cash_st_currency", "string"),
+    ("balance_sheet_as_of_date", "date"),
     ("financials_disclosure_status", "string"),
     ("consideration_components", "json"),
     ("includes_earnout", "boolean"),
@@ -535,6 +543,9 @@ def _derive_transaction_value(
     equity_value: float | None,
     total_debt: float | None,
     pct: float | None,
+    *,
+    equity_currency: str | None = None,
+    total_debt_currency: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Tier-1 transaction value + basis (§2.1.1). As-reported wins; otherwise
     equity_value below control, equity_value + gross debt (total_debt) at pct>=50
@@ -558,7 +569,11 @@ def _derive_transaction_value(
         return None, None
     if pct < 50:
         return equity_value, "EQUITY_BELOW_CONTROL"
-    if total_debt is not None:
+    # The debt-inclusive basis needs both currencies known and equal. When it is
+    # refused, the known equity consideration is not discarded — it falls to
+    # EQUITY_VALUE_ONLY, which has never implied debt is zero, only that debt could
+    # not be added.
+    if total_debt is not None and _currencies_usable(equity_currency, total_debt_currency):
         return round(equity_value + total_debt, 2), "EQUITY_PLUS_TOTAL_DEBT"
     return equity_value, "EQUITY_VALUE_ONLY"
 
@@ -613,57 +628,105 @@ def _derive_implied_equity(
     return equity_value
 
 
+def _currencies_usable(left: str | None, right: str | None) -> bool:
+    """True only when both currencies are known and equal.
+
+    The single gate for every calculation that mixes consideration with a
+    balance-sheet figure. Unknown on either side does not calculate, and
+    known-but-differing does not calculate; no FX conversion is attempted, because a
+    conversion needs an FX date this pipeline does not carry. Decision
+    "Debt and Cash Arithmetic Requires Known, Equal Currencies" (2026-08-17).
+    """
+    return bool(left and right and left == right)
+
+
+def _derive_net_debt(
+    reported_net_debt: float | None,
+    reported_net_debt_currency: str | None,
+    total_debt: float | None,
+    total_debt_currency: str | None,
+    total_debt_as_of: str | None,
+    cash_st: float | None,
+    cash_st_currency: str | None,
+    cash_st_as_of: str | None,
+) -> tuple[float | None, str | None, str | None, str | None]:
+    """Net debt for the implied tier: reported if present, else the components.
+
+    Returns (net_debt, currency, as_of_date, basis) where basis is one of
+    ``REPORTED``, ``CALCULATED_TOTAL_DEBT_MINUS_CASH_ST``, or None.
+
+    `total_debt` and `Cash_ST` are point-in-time balance-sheet items, so a derived
+    net debt requires them to describe the *same* balance sheet: one shared as-of
+    date and one shared currency, both known. Two figures from different dates are
+    not a balance sheet, and an unknown date is insufficient evidence rather than an
+    implied match. Missing cash is never treated as zero.
+
+    Reported/manual net debt stays preferred (decision "Debt and Cash Inputs"); it
+    is a single figure, so it carries no component-coherence requirement — only its
+    own currency, checked by the caller against the deal currency.
+    """
+    if reported_net_debt is not None:
+        return float(reported_net_debt), reported_net_debt_currency, None, "REPORTED"
+
+    if total_debt is None or cash_st is None:
+        return None, None, None, None
+    if not _currencies_usable(total_debt_currency, cash_st_currency):
+        return None, None, None, None
+    if not (total_debt_as_of and cash_st_as_of and total_debt_as_of == cash_st_as_of):
+        return None, None, None, None
+
+    return (
+        round(float(total_debt) - float(cash_st), 2),
+        total_debt_currency,
+        total_debt_as_of,
+        "CALCULATED_TOTAL_DEBT_MINUS_CASH_ST",
+    )
+
+
 def _derive_implied_enterprise_value(
     value_amount: float | None,
     value_type: str | None,
     implied_equity_value: float | None,
     net_debt: float | None,
-    total_debt: float | None,
-    cash_st: float | None,
     *,
     implied_equity_currency: str | None = None,
-    balance_sheet_currency: str | None = None,
+    net_debt_currency: str | None = None,
+    net_debt_basis: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Canonical 100%-basis enterprise value + basis.
 
     STATED                                — source stated a whole-company EV.
-    IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT — implied_equity_value + source/manual net_debt.
-    IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT — implied_equity_value + total_debt - cash_st.
-    Returns (None, None) when neither path is satisfiable.
+    IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT — implied_equity_value + reported net_debt.
+    IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT — implied_equity_value + derived net_debt.
 
-    §2.10 item 1 — the two calculated bases add consideration in deal currency to a
-    balance-sheet figure in the target's reporting currency. When both currencies are
-    known and differ, the sum is meaningless and is refused rather than produced; no
-    conversion is attempted here, because a conversion needs a defined FX date that
-    this pipeline does not yet carry.
+    `net_debt` arrives already resolved by _derive_net_debt, which owns the
+    component-coherence rules; the basis suffix follows that resolution and is passed
+    by the caller via `net_debt_basis`. Returns (None, None) when no path is
+    satisfiable.
 
-    The guard requires both currencies to be *known*. An unknown balance-sheet
-    currency stays permissive: net_debt/total_debt/cash_st are manual columns today
-    with no currency recorded, so refusing on unknown would null existing
-    derivations on no evidence. Closing that gap is a precondition of debt/cash
-    extraction, not of this guard.
+    §2.10 item 1 — the calculated bases add consideration in deal currency to a
+    balance-sheet figure in the target's reporting currency. Both currencies must be
+    known and equal or the sum is refused: an unknown currency is insufficient
+    evidence, not a licence to assume agreement, and there is no plausible-range
+    backstop on this field to catch a wrong-currency result. No conversion is
+    attempted; that needs an FX date this pipeline does not carry.
 
     A STATED enterprise value is a single source-stated figure rather than a sum, so
     the guard does not apply to it.
     """
     if value_type == "ENTERPRISE_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if implied_equity_value is None:
+    if implied_equity_value is None or net_debt is None:
+        return None, None
+    if not _currencies_usable(implied_equity_currency, net_debt_currency):
         return None, None
 
-    cross_currency = bool(
-        implied_equity_currency
-        and balance_sheet_currency
-        and implied_equity_currency != balance_sheet_currency
+    suffix = (
+        "CALCULATED_NET_DEBT"
+        if net_debt_basis == "CALCULATED_TOTAL_DEBT_MINUS_CASH_ST"
+        else "REPORTED_NET_DEBT"
     )
-    if cross_currency:
-        return None, None
-
-    if net_debt is not None:
-        return round(implied_equity_value + net_debt, 2), "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT"
-    if total_debt is not None and cash_st is not None:
-        return round(implied_equity_value + total_debt - cash_st, 2), "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT"
-    return None, None
+    return round(implied_equity_value + net_debt, 2), f"IMPLIED_EQUITY_PLUS_{suffix}"
 
 
 def _source_key(obs: dict) -> tuple[Any, Any] | Any:
@@ -827,6 +890,75 @@ def _anchor_metric_qualifiers(
 
     distinct = set(anchored_currencies)
     field_values["financials_currency"] = next(iter(distinct)) if len(distinct) == 1 else None
+
+
+def _resolve_balance_sheet_inputs(
+    field_values: dict,
+    field_observations: dict[str, list[dict]],
+    existing: Any,
+) -> dict:
+    """Resolve the balance-sheet inputs with each qualifier anchored to its own source.
+
+    `total_debt` and `Cash_ST` are separate facts that may arrive from different
+    sources, so each takes its currency and its as-of date from the source that
+    supplied *it*. `balance_sheet_as_of_date` is one column serving both, so it is
+    resolved twice — once per anchor — rather than read once and shared, which is
+    exactly the cross-source borrowing this must prevent.
+
+    Extracted values take precedence over the preserved manual columns. Manual entry
+    was the interim mechanism and carries no qualifiers of its own beyond what a
+    researcher fills in; an extracted figure arrives with its currency and as-of date
+    attached, and must be able to update on re-aggregation rather than be pinned by
+    the value it wrote last time.
+
+    The persisted `balance_sheet_as_of_date` describes the figures actually stored:
+    the shared date when both components agree, the single component's date when only
+    one is present, and null when two present components disagree — in which case the
+    derived net debt is refused anyway.
+    """
+    def _extracted_or_manual(field: str):
+        value = field_values.get(field)
+        if value is not None:
+            return value
+        return existing[field] if existing is not None else None
+
+    total_debt = _extracted_or_manual("total_debt")
+    cash_st = _extracted_or_manual("cash_st")
+
+    total_debt_keys = _anchor_source_keys(field_observations, "total_debt", total_debt)
+    cash_st_keys = _anchor_source_keys(field_observations, "cash_st", cash_st)
+
+    total_debt_currency = _companion_from_sources(
+        field_observations, "total_debt_currency", total_debt_keys
+    ) or (existing["total_debt_currency"] if existing is not None else None)
+    cash_st_currency = _companion_from_sources(
+        field_observations, "cash_st_currency", cash_st_keys
+    ) or (existing["cash_st_currency"] if existing is not None else None)
+
+    total_debt_as_of = _companion_from_sources(
+        field_observations, "balance_sheet_as_of_date", total_debt_keys
+    )
+    cash_st_as_of = _companion_from_sources(
+        field_observations, "balance_sheet_as_of_date", cash_st_keys
+    )
+    manual_as_of = existing["balance_sheet_as_of_date"] if existing is not None else None
+    total_debt_as_of = total_debt_as_of or (manual_as_of if total_debt is not None else None)
+    cash_st_as_of = cash_st_as_of or (manual_as_of if cash_st is not None else None)
+
+    if total_debt is not None and cash_st is not None:
+        stored_as_of = total_debt_as_of if total_debt_as_of == cash_st_as_of else None
+    else:
+        stored_as_of = total_debt_as_of if total_debt is not None else cash_st_as_of
+
+    return {
+        "total_debt": total_debt,
+        "total_debt_currency": total_debt_currency,
+        "total_debt_as_of": total_debt_as_of,
+        "cash_st": cash_st,
+        "cash_st_currency": cash_st_currency,
+        "cash_st_as_of": cash_st_as_of,
+        "balance_sheet_as_of_date": stored_as_of,
+    }
 
 
 def _derive_enterprise_value(
@@ -1364,18 +1496,25 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # the interim; keep any stored value. Their currency and as-of anchors
             # are manual alongside them and preserved the same way.
             sec_shares = None
-            net_debt = existing["net_debt"] if existing else None
-            total_debt = existing["total_debt"] if existing else None
-            cash_st = existing["cash_st"] if existing else None
+            net_debt_reported = existing["net_debt"] if existing else None
             net_debt_currency = existing["net_debt_currency"] if existing else None
-            total_debt_currency = existing["total_debt_currency"] if existing else None
-            cash_st_currency = existing["cash_st_currency"] if existing else None
-            balance_sheet_as_of_date = existing["balance_sheet_as_of_date"] if existing else None
-            # The currency of whichever balance-sheet input the derivation will use.
-            balance_sheet_currency = (
-                net_debt_currency
-                if net_debt is not None
-                else (total_debt_currency or cash_st_currency)
+            balance_sheet = _resolve_balance_sheet_inputs(
+                field_values, bundle["field_observations"], existing
+            )
+            total_debt = balance_sheet["total_debt"]
+            total_debt_currency = balance_sheet["total_debt_currency"]
+            cash_st = balance_sheet["cash_st"]
+            cash_st_currency = balance_sheet["cash_st_currency"]
+            balance_sheet_as_of_date = balance_sheet["balance_sheet_as_of_date"]
+            net_debt, net_debt_resolved_currency, _net_debt_as_of, net_debt_basis = _derive_net_debt(
+                net_debt_reported,
+                net_debt_currency,
+                total_debt,
+                total_debt_currency,
+                balance_sheet["total_debt_as_of"],
+                cash_st,
+                cash_st_currency,
+                balance_sheet["cash_st_as_of"],
             )
             pct_resolved, pct_acquired_source = _resolve_pct_acquired(
                 field_values, derived["is_minority"]
@@ -1409,12 +1548,16 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             if typed_transaction_value_amount is not None:
                 transaction_value_fields["value_amount"] = typed_transaction_value_amount
                 transaction_value_fields["value_type"] = "TRANSACTION_VALUE"
-            transaction_value, transaction_value_basis = _derive_transaction_value(
-                transaction_value_fields, equity_value, total_debt, pct_resolved
-            )
             # Currency companion for the derived value fields; null on a genuine
             # currency mismatch (§4.7 — the null is itself the queryable signal).
+            # Resolved before the debt-inclusive derivations, which need it to check
+            # the deal currency against the balance-sheet currency.
             deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
+            transaction_value, transaction_value_basis = _derive_transaction_value(
+                transaction_value_fields, equity_value, total_debt, pct_resolved,
+                equity_currency=deal_value_currency,
+                total_debt_currency=total_debt_currency,
+            )
             implied_enterprise_value_amount = (
                 typed_enterprise_value_amount
                 if typed_enterprise_value_amount is not None
@@ -1430,22 +1573,20 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 implied_enterprise_value_type,
                 implied_equity_value,
                 net_debt,
-                total_debt,
-                cash_st,
                 implied_equity_currency=deal_value_currency,
-                balance_sheet_currency=balance_sheet_currency,
+                net_debt_currency=net_debt_resolved_currency,
+                net_debt_basis=net_debt_basis,
             )
             if (
                 implied_equity_value is not None
+                and net_debt is not None
                 and implied_enterprise_value is None
-                and deal_value_currency
-                and balance_sheet_currency
-                and deal_value_currency != balance_sheet_currency
             ):
                 log.warning(
-                    "cluster=%s implied EV not derived — deal currency %s vs balance-sheet "
-                    "currency %s (§2.10 item 1; no FX date available)",
-                    cluster_id, deal_value_currency, balance_sheet_currency,
+                    "cluster=%s implied EV not derived — deal currency %r vs net-debt "
+                    "currency %r must both be known and equal (§2.10 item 1; no FX date "
+                    "available)",
+                    cluster_id, deal_value_currency, net_debt_resolved_currency,
                 )
             # Legacy compatibility columns mirror the canonical Tier-2 field until
             # downstream readers are moved.
@@ -1510,9 +1651,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     implied_equity_value, implied_enterprise_value, implied_enterprise_value_basis,
                     enterprise_value, enterprise_value_basis,
                     investment_amount, deal_value_currency,
-                    total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source
+                    total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source,
+                    total_debt_currency, cash_st_currency, balance_sheet_as_of_date
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1627,6 +1769,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     transaction_value,
                     transaction_value_basis,
                     pct_acquired_source,
+                    total_debt_currency,
+                    cash_st_currency,
+                    balance_sheet_as_of_date,
                 ),
             )
 

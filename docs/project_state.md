@@ -195,9 +195,17 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    currency anchors (the cross-currency guard is dormant without them), and the
    period-coherence tolerance between `balance_sheet_as_of_date` and the multiple
    denominator's period is deliberately still undecided.
-2. **`total_debt` + `Cash_ST` as `target_financials` metrics** — with period type
-   and `period_end_date`; activates the dormant `transaction_value` total-debt branch and
-   lets `net_debt` derive from `total_debt − Cash_ST`.
+2. ~~**`total_debt` + `Cash_ST` as `target_financials` metrics**~~ — **landed 2026-08-17.**
+   Extracted as point-in-time items with per-source currency and
+   `balance_sheet_as_of_date` (no period type — they are as-of figures). Derived
+   `net_debt` requires one shared currency and one shared as-of date. Debt-inclusive
+   arithmetic (`EQUITY_PLUS_TOTAL_DEBT`, calculated implied EV) requires currencies
+   known and equal; no FX conversion. See decisions.md "total_debt / Cash_ST
+   Extraction and Debt-Inclusive Arithmetic" and
+   `scripts/test_debt_cash_extraction.py`.
+   **The second owed re-aggregation is now unblocked but NOT discharged** — and before
+   running it, measure how many rows hold a manual `net_debt` with no recorded
+   currency, since those now yield no calculated implied EV.
 3. **Review export value-model surface** — expose the current value-model fields
    (`equity_value`, `implied_equity_value`, `transaction_value`, `investment_amount`,
    `deal_value_currency`, and funding round fields) without treating `_v2` shadow

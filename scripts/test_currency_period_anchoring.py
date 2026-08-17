@@ -21,6 +21,10 @@ established "null is itself the queryable signal" posture used by
 Scenarios are built so every contested field resolves deterministically by source
 tier, with no LLM conflict path involved; the stub below turns an unexpected
 conflict into a loud failure rather than a network call.
+
+The cross-currency guard on implied enterprise value was originally asserted here.
+It moved to `scripts/test_debt_cash_extraction.py`, which owns the debt/cash
+arithmetic semantics, so the rule has exactly one home.
 """
 
 from __future__ import annotations
@@ -291,58 +295,12 @@ def _scenario_staging_compatibility(failures: list[str]) -> None:
         conn.close()
 
 
-def _scenario_implied_ev_currency_guard(failures: list[str]) -> None:
-    """§2.10 item 1 — implied equity and net debt must not be summed across currencies.
-
-    implied_enterprise_value = implied_equity_value + net_debt adds consideration in
-    deal currency to a balance-sheet figure in the target's reporting currency. When
-    both currencies are known and differ, the sum is meaningless and must not be
-    produced. Exercised directly against the derivation, since net_debt is a manual
-    column rather than an extracted field.
-    """
-    prefix = "implied-ev-currency"
-
-    value, basis = aggregate._derive_implied_enterprise_value(
-        None, None, 200_000_000.0, 50_000_000.0, None, None,
-        implied_equity_currency="USD", balance_sheet_currency="JPY",
-    )
-    _check(failures, f"{prefix} cross-currency value", value, None)
-    _check(failures, f"{prefix} cross-currency basis", basis, None)
-
-    value, basis = aggregate._derive_implied_enterprise_value(
-        None, None, 200_000_000.0, 50_000_000.0, None, None,
-        implied_equity_currency="USD", balance_sheet_currency="USD",
-    )
-    _check(failures, f"{prefix} same-currency value", value, 250_000_000.0)
-    _check(failures, f"{prefix} same-currency basis", basis, "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT")
-
-    # Unknown balance-sheet currency stays permissive: today's net_debt is a manual
-    # column with no currency recorded, and tightening this before debt/cash
-    # extraction lands would null out existing derivations on no evidence.
-    value, basis = aggregate._derive_implied_enterprise_value(
-        None, None, 200_000_000.0, 50_000_000.0, None, None,
-        implied_equity_currency="USD", balance_sheet_currency=None,
-    )
-    _check(failures, f"{prefix} unknown-currency value", value, 250_000_000.0)
-    _check(failures, f"{prefix} unknown-currency basis", basis, "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT")
-
-    # A stated whole-company EV is a single source-stated figure, not a sum, so the
-    # guard must not touch it.
-    value, basis = aggregate._derive_implied_enterprise_value(
-        750_000_000.0, "ENTERPRISE_VALUE", None, None, None, None,
-        implied_equity_currency="USD", balance_sheet_currency="JPY",
-    )
-    _check(failures, f"{prefix} stated EV value", value, 750_000_000.0)
-    _check(failures, f"{prefix} stated EV basis", basis, "STATED")
-
-
 def main() -> None:
     failures: list[str] = []
     _scenario_period_anchor(failures)
     _scenario_currency_anchor(failures)
     _scenario_qualifiers_travel_together(failures)
     _scenario_staging_compatibility(failures)
-    _scenario_implied_ev_currency_guard(failures)
 
     if failures:
         for failure in failures:

@@ -250,12 +250,35 @@ EQUITY_VALUE and must be recorded as one, not diverted to round_size.
 If the source does not permit the distinction, set value.type_confidence = LOW and
 note the ambiguity.
 
-Debt/cash guard: this prompt does not extract total_debt, net_debt, or cash_st.
-If a source states those figures, mention them in notes only. The deterministic
-aggregation layer may later calculate net_debt from total_debt - cash_st and
-implied_enterprise_value from implied_equity_value + net_debt. Never assume
-missing debt or cash/ST is zero, and never derive whole-company EV from
-stake-level equity_value plus debt.
+Balance-sheet items: extract total_debt and cash_st when the source states them
+explicitly, as point-in-time figures inside target_financials:
+
+- total_debt: TOTAL debt, NOT net of cash. If the source states only a net debt
+  figure, leave total_debt null and mention the net figure in notes — a net figure
+  entered here would be silently wrong downstream.
+- cash_st: cash and cash equivalents plus short-term / marketable investments, as
+  one combined figure. Do not split it into components.
+- total_debt_currency / cash_st_currency: ISO 4217 code for each figure, taken from
+  how that figure is stated.
+- balance_sheet_as_of_date: the date the balance sheet is stated as of. These are
+  point-in-time figures, so there is no period type — do not label them LTM, TTM,
+  annual, or quarterly.
+
+Do not compute net_debt. Do not compute enterprise value. The deterministic
+aggregation layer calculates net_debt from total_debt - cash_st only when both
+figures share one currency and one balance_sheet_as_of_date, and derives
+implied_enterprise_value from implied_equity_value + net_debt. Never assume missing
+debt or cash/ST is zero, and never derive whole-company EV from stake-level
+equity_value plus debt.
+
+If the source does not state a figure, or states it without a currency or an as-of
+date, leave the corresponding field null. A null is correct; a guess is not.
+
+Currency of monetary figures: when the source explicitly states the same figure in
+both a local currency and USD — for example "3.14 trillion won ($2.2 billion)" —
+prefer the stated USD figure and set the currency to USD. Never convert a currency
+yourself to produce a USD number; only use a USD figure the source itself states.
+This applies to deal values and to balance-sheet figures alike.
 
 round_size: Amount of primary capital raised by / invested into the company, as a
 number (no currency symbol). Populate ONLY for the primary-capital case above; null

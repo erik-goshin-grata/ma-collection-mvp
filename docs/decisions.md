@@ -1248,3 +1248,65 @@ Consequences:
   denominator's period (§2.10 item 2's second half) is not yet enforced. The anchor
   column exists; the tolerance rule is deliberately left undecided rather than
   invented here, and is owed before debt/cash extraction.
+
+## 2026-08-17 - total_debt / Cash_ST Extraction and Debt-Inclusive Arithmetic
+
+Status: accepted. Implements the extraction deferred by "Debt and Cash Inputs" and
+closes spec §2.10 item 1.
+
+Decision:
+
+- `total_debt` and `Cash_ST` are extracted as point-in-time balance-sheet items in
+  `target_financials`, with `total_debt_currency`, `cash_st_currency` and a
+  `balance_sheet_as_of_date`. There is **no period-type field** for them — they are
+  as-of figures, so LTM/TTM/annual/quarterly does not apply. No annual/quarterly flag
+  is introduced absent a concrete downstream consumer.
+- A **derived** `net_debt` requires both components to share one currency and one
+  `balance_sheet_as_of_date`, both known. Reported/manual `net_debt` stays preferred
+  and carries no component-coherence requirement, only its own currency.
+- Arithmetic mixing consideration with debt or cash requires the relevant currencies
+  to be **known and equal**. This covers `implied_enterprise_value`'s calculated
+  bases and `transaction_value`'s `EQUITY_PLUS_TOTAL_DEBT`. Unknown on either side
+  does not calculate; known-and-differing does not calculate. No FX conversion.
+- A source-stated enterprise value is one figure, not a sum, so the guard does not
+  apply to `STATED`.
+- Extraction prefers a **source-stated** USD figure when the source states the same
+  amount in both a local currency and USD. It never performs its own conversion.
+- No announced-date tolerance, and no requirement that the balance-sheet date match
+  the revenue/EBITDA denominator period. Both deliberately unenforced; the as-of date
+  is preserved so corpus behaviour can be evaluated later.
+
+Context:
+
+- This supersedes the permissive-on-unknown-currency behaviour accepted on
+  2026-08-17 in "Financial Qualifiers Anchor to the Source of Their Own Amount".
+  That leniency was justified while `net_debt` was an unpopulated manual column, by
+  analogy to the currency *tagging* idiom. Extraction makes it live, and the analogy
+  does not carry: `handoff_currency_normalization.md` licenses the permissive
+  multiples guard by naming the plausible-range check as its backstop, and
+  `implied_enterprise_value` has no such backstop. A wrong-currency sum there looks
+  entirely plausible and becomes a multiple numerator.
+- `total_debt` and `Cash_ST` may arrive from different sources, so each takes its
+  currency and as-of date from the source that supplied it. `balance_sheet_as_of_date`
+  is one column serving both, so it is resolved once per anchor rather than read once
+  and shared.
+
+Consequences:
+
+- **Extracted values take precedence over the preserved manual columns.** Manual
+  entry was the interim mechanism; an extracted figure arrives with its qualifiers
+  attached and must be able to update on re-aggregation rather than be pinned by the
+  value it wrote last time. A manual-only row is unaffected.
+- `EQUITY_PLUS_TOTAL_DEBT` falls back to `EQUITY_VALUE_ONLY` when the currency guard
+  refuses, rather than nulling `transaction_value`. The known equity consideration is
+  still real, and `EQUITY_VALUE_ONLY` has never implied debt is zero.
+- Rows whose manual `net_debt` has no recorded currency now yield **no** calculated
+  `implied_enterprise_value`. This is the intended tightening. The population size is
+  unmeasured here — no live DB was available — and should be checked before the
+  owed re-aggregation.
+- `_derive_implied_enterprise_value` no longer takes `total_debt`/`cash_st`; net debt
+  is resolved by `_derive_net_debt` first. Tests encoding the previous signature and
+  the previous permissive rule were updated, not worked around.
+- Aggregation remains incremental. No corpus-wide AGGREGATED→CLUSTERED reset was
+  performed; the second owed re-aggregation is now unblocked but not discharged.
+- Review XLSX shape is unchanged.
