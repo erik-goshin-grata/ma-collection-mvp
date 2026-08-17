@@ -164,14 +164,21 @@ Offline provider smoke test:
 python scripts/validate_llm_provider.py
 ```
 
-Stage 9 aggregation read path defaults to the legacy staging read:
+Stage 9 aggregation reads the observation ledger by default:
+
+```bash
+AGGREGATION_READ_SOURCE=observation
+```
+
+This runs Stage 9 from `transaction_field_observation`. It is the only read path
+that carries a per-fact source key, so it is the only one that can keep multiple
+independently typed values from a single source distinct.
+
+The legacy staging read remains available for rollback or debugging:
 
 ```bash
 AGGREGATION_READ_SOURCE=staging
 ```
-
-After Drop 3.31c validation, `AGGREGATION_READ_SOURCE=observation` runs Stage 9
-from `transaction_field_observation` instead.
 
 ### 5. Initialize the database
 ```bash

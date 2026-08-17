@@ -32,7 +32,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
 
-from config import Config
+from config import DEFAULT_AGGREGATION_READ_SOURCE, Config
 from lib.field_priority import TIER_ORDER
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
@@ -1131,7 +1131,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
               flagged_for_review, failed, transactions_created (run.py alias)
     """
     log = get_logger(_PROMPT_NAME, run_id, level=cfg.log_level)
-    read_source = getattr(cfg, "aggregation_read_source", "staging")
+    read_source = getattr(cfg, "aggregation_read_source", DEFAULT_AGGREGATION_READ_SOURCE)
 
     prompt = load_prompt_file(_PROMPT_NAME)
     register_prompt_version(conn, _PROMPT_NAME, _VERSION, prompt["file_hash"])

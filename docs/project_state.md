@@ -107,7 +107,11 @@ Current versions:
 ## Configuration
 
 Key config flags:
-- `AGGREGATION_READ_SOURCE=staging` — default. Switch to `observation` after next validation run.
+- `AGGREGATION_READ_SOURCE=observation` — **default as of 2026-08-17.** Stage 9 reads
+  `transaction_field_observation`. `staging` remains explicitly selectable as the
+  rollback/debug path. The default is defined once in
+  `config.DEFAULT_AGGREGATION_READ_SOURCE` and imported by `stages/aggregate.py`.
+  See decisions.md "Stage 9 Reads the Observation Ledger by Default".
 - `LLM_PROVIDER=anthropic` — default. OpenAI provider available via `LLM_PROVIDER=openai`.
 - `opus_model=claude-opus-4-7`
 - `sonnet_model=claude-sonnet-4-6` — Sonnet tier (classify/HC/funding-HC/summary), wired 2026-08-03
@@ -202,7 +206,12 @@ Owed operational: the **second re-aggregation** below — route through `run.py`
 `_apply_migrations` adds the columns first.
 
 Still open, lower priority: write `stages/funding_lc_extract.py`; `deal_summary` v0.10
-funding framing; apply `AGGREGATION_READ_SOURCE=observation` after a validation run.
+funding framing.
+
+_(The former "apply `AGGREGATION_READ_SOURCE=observation` after a validation run" item
+is discharged — the default switched on 2026-08-17. Note this changed the default only;
+aggregation is still incremental, so existing `AGGREGATED` rows keep their prior
+semantics until a deliberate AGGREGATED→CLUSTERED reset re-derives them.)_
 
 ## Pending re-aggregation — §4.2 (2026-08-10)
 

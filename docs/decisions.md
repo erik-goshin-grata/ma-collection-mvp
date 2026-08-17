@@ -1153,3 +1153,45 @@ Consequences:
 - Stale annual facts and future annual period ends do not auto-calculate.
 - P/E and P/B remain out of scope because this pipeline does not implement net-income/book-value
   denominator capture or equity-multiple calculation.
+
+## 2026-08-17 - Stage 9 Reads the Observation Ledger by Default
+
+Status: accepted.
+
+Decision:
+
+- `AGGREGATION_READ_SOURCE` defaults to `observation`. Stage 9 reads
+  `transaction_field_observation` unless told otherwise.
+- `staging` remains a supported, explicitly selectable value. It is the rollback
+  and debug path and is not deprecated or removed by this change.
+- The default is defined once, as `config.DEFAULT_AGGREGATION_READ_SOURCE`, and
+  imported by `stages/aggregate.py` for its own `getattr` fallback.
+
+Context:
+
+- The observation read is the only path whose source key is per fact
+  (`staging_extraction_id, source_raw_id, observation_fact_key`). The staging read
+  carries one collapsed `value_amount`/`value_type` pair per extraction.
+- Because of that, a source stating two independently typed values — a stake-level
+  equity figure and a whole-company enterprise value — can only keep both under the
+  observation read. Under staging the second fact has nowhere to live and is lost
+  structurally, not by a defect that could be fixed in the staging path.
+- Previously two defaults existed and now disagreed: `load_config` defaulted to
+  `staging`, and `stages/aggregate.py` separately defaulted its `getattr` fallback
+  to `staging`. Leaving the second in place would have let a config-less caller
+  silently take the legacy path.
+
+Consequences:
+
+- Runs that do not set `AGGREGATION_READ_SOURCE` change read path. This is a
+  behaviour change for any caller relying on the old implicit default.
+- Aggregation remains incremental: only `CLUSTERED` rows are derived. Existing
+  `AGGREGATED` rows keep whatever semantics produced them, so this default switch
+  does not retroactively re-derive any database. A deliberate
+  AGGREGATED→CLUSTERED reset is still required to apply it to existing rows.
+- `scripts/test_aggregation_read_default.py` guards the default at both levels:
+  the config value and the shared constant, and the behaviour that only the
+  observation read can produce (both typed facts surviving into their own
+  canonical fields).
+- `scripts/validate_331c_observation_read.py` remains the staging-vs-observation
+  parity check and still requires a live `--source-db`.
