@@ -1395,3 +1395,88 @@ Consequences:
   de-facto boundary. No column changed hands, so no existing value is reinterpreted.
 - Transaction identity and `transaction_source` rows are unaffected — asserted by the
   regression, since REPLACE-then-insert had been re-creating the row each pass.
+
+## 2026-08-17 - FINDING: equity_value Conflates Stake-Level and 100%-Basis Scope
+
+Status: **finding recorded, not yet fixed.** No code or prompt change in this entry.
+Fixes are sequenced as separate commits; `transaction_size` is unblocked and may
+land first.
+
+Finding:
+
+`equity_value` is defined as the consideration for the stake actually acquired
+(§4.2), but two writers can put a whole-company figure in it, and nothing
+downstream can tell the difference.
+
+1. **`STATED` — the HC prompt admits market capitalization.**
+   `prompts/high_confidence_extraction.md` defines `EQUITY_VALUE` as "equity
+   purchase price, a per-share x shares aggregate the source itself states, or
+   **market capitalization**". A market cap is whole-company.
+2. **`PER_SHARE_X_SHARES` is 100%-basis by construction.** It computes
+   `per_share_price x sec_shares`, where `sec_shares` is the target's TOTAL fully
+   diluted count. That is the price of 100% of the equity, not of the stake.
+
+Blast radius (`stages/aggregate.py`, the cluster loop):
+
+    equity_value -> _derive_implied_equity(pct) -> implied_equity_value
+                        -> implied_enterprise_value -> enterprise_value
+                                                    -> ev_to_revenue_ltm
+                                                    -> ev_to_ebitda_ltm
+                 -> _derive_transaction_value(pct) -> transaction_value (+ _basis)
+                        -> (future) transaction_size
+
+**The damage condition is uniform: `pct_resolved < 100`.** `_derive_implied_equity`
+divides by pct, so a figure already at 100% is grossed up a second time; a $2.2B
+market cap at pct 27 yields $8.15B implied equity. At `pct = 100` the conflation is
+inert, because stake-level and whole-company coincide. `pct` null yields None, so
+there is no leak through that door.
+
+Classification:
+
+- **`PER_SHARE_X_SHARES`: dormant code defect.** `sec_shares` is hardcoded `None`,
+  so the branch has never executed. Zero live rows, provably. It activates silently
+  when SEC share count is wired (spec §4 gap 5) unless gated first.
+- **Market cap: confirmed prompt/taxonomy defect; live-data status UNDETERMINED.**
+  The container carrying this analysis has no corpus DB. The permission has existed
+  since `97fe6b1` (2026-08-07) across every HC version that produced the corpus, so
+  exposure is plausible but not established. Determine by running the read-only
+  diagnostic before asserting either way; do not infer.
+
+Context:
+
+- "market capitalization" appears exactly once in the repo — that prompt line. It is
+  in no spec section, no decisions entry, and no dictionary row.
+- It predates the rule it contradicts. §4.2 made `equity_value` stake-level on
+  2026-08-10; the prompt was not revisited.
+- `value_observations` carries no scope discriminator: types are `EQUITY_VALUE` /
+  `TRANSACTION_VALUE` / `ENTERPRISE_VALUE` / `UNDISCLOSED`, and `basis` is `STATED`.
+- `_pick_value_amount_for_type` ranks candidates by source tier and model confidence
+  only. Two same-tier, same-confidence `EQUITY_VALUE` observations from one source —
+  a stake price and a market cap — tie-break positionally, so the picker can select
+  the market cap while the correct figure sits beside it.
+
+Minimum correction (proposed, not implemented):
+
+The invariant is that every writer into `equity_value` must be stake-level by
+construction. There are exactly two writers, so exactly two changes:
+
+- **Taxonomy.** Redefine `EQUITY_VALUE` as stake-level consideration only, and give
+  market capitalization its own observation type, retained as a fact rather than
+  routed into any canonical field. A market cap is a *market* valuation, not a
+  transaction-implied one, so it does not belong in `implied_equity_value` either.
+  This needs **no new scope column** — `value_type` is already the discriminator, it
+  is merely under-specified.
+- **Derivation.** Gate `PER_SHARE_X_SHARES` on `pct_resolved == 100`. Do not reroute
+  it to `implied_equity_value` (that would leave Tier 1 empty for the ordinary public
+  take-private) and do not scale it by pct (we hold total shares, not acquired
+  shares, so any scaling manufactures a figure no source stated).
+
+Consequences:
+
+- The two fixes are not equal in cost or effect. The derivation gate is code-only,
+  deterministic, and zero-risk on a dormant branch. The taxonomy fix needs a prompt
+  version bump and **only takes effect on re-extracted rows**, so it does not
+  retroactively clean the corpus — existing rows stay ambiguous until Path B, which
+  is deferred. Assessing them is a diagnostic-plus-human-review job, not a code fix.
+- `transaction_size` is not blocked by either. Having removed the direct equity rung,
+  it reads `transaction_value` only, so it inherits this defect without amplifying it.
