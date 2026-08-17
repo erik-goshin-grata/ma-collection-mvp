@@ -213,14 +213,24 @@ transaction scope is unknown, so the equity figure may be the whole company. The
 reachable set is exactly the unsafe complement of its intended one. **Recommend Grata
 remove it.**
 
-**Correction 2 — the two reserved rungs need a source field before they are real.**
-`SOLE_INVESTOR_AMOUNT` requires an investor-level amount; the harness reserved rather
-than built it because `transaction_participant` has no such column. This is Grata's D5
-recommendation (`transaction_party.investment_amount`) restated as a hard prerequisite:
-**without that column the rung cannot exist**, and the transaction-level
-`investment_amount` is not a substitute — it would report a round, or a valuation, as
-one investor's check. Same for `SPIN_SPLIT_CONSIDERATION_VALUE`, which additionally
-yields null for every pure pro-rata spin, since nothing changes hands for value there.
+**Correction 2 — strike `SOLE_INVESTOR_AMOUNT` from the `transaction_size_basis`
+vocabulary entirely.** Grata D3 lists it and D4 gives it a rung ("Funding fallback → one
+sole investor's `transaction_party.investment_amount` only when it is the only safe
+disclosed check"). **Remove both.** An investor's check is not the event's magnitude:
+reporting a $50M check as a $100M round's size is wrong regardless of how many investors
+disclosed, so this was never a disclosure-threshold problem that a sole-investor
+restriction could fix. When the round total is undisclosed, the honest `transaction_size`
+is **null**.
+
+This does not diminish D5 — `investment_amount` remains correct as **investor-level
+supplemental detail on `transaction_party`**, expected null for most deals. It simply
+never rolls up. The settled contract: a $100M round with Firm A investing $50M gives
+`round_size = 100M`, `transaction_size = 100M` at basis `ROUND_SIZE`, and Firm A's
+`investment_amount = 50M` — nothing added, nothing substituted, in either direction.
+
+`SPIN_SPLIT_CONSIDERATION_VALUE` remains reserved for the opposite reason: the concept is
+right but no source field exists yet, and it additionally yields null for every pure
+pro-rata spin, since nothing changes hands for value there.
 
 Two rules both models already share, and neither should weaken: the basis is **required
 wherever the size is populated** (Grata J2), and the size **must not be summed across
@@ -540,8 +550,9 @@ collapsed by the single-slot value object.
 6. ~~**`transaction_size_basis` vocabulary.**~~ **Resolved 2026-08-17** — the harness
    adopted the Grata spellings and reserved the Spin/Split rung. Two questions replace it,
    both on Grata's side: does D4 accept striking the unreachable M&A equity fallback, and
-   is `transaction_party.investment_amount` (D5) scheduled? The `SOLE_INVESTOR_AMOUNT`
-   rung cannot exist until it is.
+   does it accept striking the `SOLE_INVESTOR_AMOUNT` rung outright? The second is a
+   semantic removal, not a sequencing one — investor checks never roll up into event
+   magnitude, whatever the disclosure level.
 
 ---
 
@@ -565,5 +576,5 @@ actually sees.
 **The vocabulary was settled before writing code, not after** — it cost three document
 edits instead of a data migration. What replaced it as the open question is on Grata's
 side now: whether D4 accepts striking the unreachable M&A equity fallback, and whether
-`transaction_party.investment_amount` is scheduled, since `SOLE_INVESTOR_AMOUNT` cannot
-exist without it.
+D4 accepts striking the `SOLE_INVESTOR_AMOUNT` rung outright — investor checks never roll
+up into event magnitude, at any disclosure level.

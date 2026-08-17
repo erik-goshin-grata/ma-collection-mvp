@@ -92,11 +92,20 @@ def _check_waterfall(failures: list[str]) -> None:
     )
     _check(failures, "funding does not consume transaction_value", size, 200_000_000.0)
 
-    # No round size -> null. SOLE_INVESTOR_AMOUNT is reserved, not live, and a
-    # multi-investor round is never summed.
+    # No round size -> null. There is no investor-check fallback: a check is
+    # party-level information, not the event's magnitude.
     size, basis = d({"v2_event_type": "VC_ROUND"}, None)
     _check(failures, "funding without round_size size", size, None)
     _check(failures, "funding without round_size basis", basis, None)
+
+    # A known investor check with an undisclosed round total stays null. This is the
+    # settled example: only Firm A's $50M is known, so round_size is unknown and the
+    # event's magnitude is unknown with it.
+    size, basis = d(
+        {"v2_event_type": "VC_ROUND", "investment_amount": 50_000_000}, None
+    )
+    _check(failures, "investor check must not become transaction_size", size, None)
+    _check(failures, "investor check must not stamp a basis", basis, None)
 
     # The post-money trap: a valuation must never become an as-transacted magnitude.
     size, basis = d(
@@ -121,15 +130,17 @@ def _check_waterfall(failures: list[str]) -> None:
     if reserved is None:
         failures.append("TRANSACTION_SIZE_BASES vocabulary is not declared")
     else:
-        for expected in (
-            "TRANSACTION_VALUE", "ROUND_SIZE",
-            "SOLE_INVESTOR_AMOUNT", "SPIN_SPLIT_CONSIDERATION_VALUE",
-        ):
+        for expected in ("TRANSACTION_VALUE", "ROUND_SIZE", "SPIN_SPLIT_CONSIDERATION_VALUE"):
             if expected not in reserved:
                 failures.append(f"TRANSACTION_SIZE_BASES missing {expected!r}")
         for forbidden in ("EQUITY_VALUE", "EQUITY_CONSIDERATION",
                           "ENTERPRISE_VALUE", "IMPLIED_ENTERPRISE_VALUE",
-                          "EQUITY_BELOW_CONTROL"):
+                          "EQUITY_BELOW_CONTROL",
+                          # An investor's check is not the event's magnitude. Rolling
+                          # one up into transaction_size reports a $50M check as a
+                          # $100M round's size, and there is no disclosure level at
+                          # which that becomes true.
+                          "SOLE_INVESTOR_AMOUNT", "SOLE_INVESTOR_CHECK"):
             if forbidden in reserved:
                 failures.append(
                     f"TRANSACTION_SIZE_BASES must not contain {forbidden!r} — "

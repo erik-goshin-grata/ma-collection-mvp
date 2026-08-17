@@ -465,15 +465,27 @@ def _event_type(fv: dict) -> str | None:
 
 
 def _derive_investment_amount(fv: dict) -> float | None:
-    """Amount invested (round size / check) for a non-control investment.
+    """One named investor's check. Supplemental party-level detail, usually null.
 
-    Funding rows carry it in round_size; MINORITY_INVESTMENT (M&A path) in value_amount.
-    Returns None for control deals — they have a purchase price, not an investment.
+    **Not the event's magnitude.** That is `round_size` for a financing event, and it
+    reaches `transaction_size` from there. A $50M check into a $100M round leaves
+    `round_size = 100M` and the check recorded against its investor; nothing is added,
+    rolled up, or substituted in either direction.
+
+    This previously derived `round_size or value_amount` for any non-control event,
+    which broke the definition twice over: it copied a *round total* into a field that
+    means *one investor's check*, and where no round size existed it fell back to a
+    generic `value_amount` that names no investor at all. Both assert a party-level
+    fact no source stated, and on the legacy funding rows the second one is how a
+    misclassified raise acquired a canonical home.
+
+    Per-investor checks are captured at the staging layer in
+    `staging_investor.investment_amount`, keyed to the investor that wrote them. There
+    is no transaction-level source for this field, so it derives to None until one
+    exists — which is the documented expectation, not a gap: it is supplemental detail,
+    null for most deals. Deriving anything else here would be manufacturing.
     """
-    if _event_type(fv) not in _NON_CONTROL_TYPES:
-        return None
-    amt = fv.get("round_size") or fv.get("value_amount")
-    return float(amt) if amt and amt > 0 else None
+    return None
 
 
 def _derive_deal_value_currency(
@@ -611,10 +623,17 @@ def _derive_transaction_value(
 #   EQUITY_BELOW_CONTROL — a `transaction_value_basis` value. It names a derivation
 #     condition rather than a source field, and the control status it records is already
 #     carried by `transaction_value_basis`, `is_minority` and `pct_acquired`.
+#   SOLE_INVESTOR_AMOUNT — removed 2026-08-17. An investor's check is not the event's
+#     magnitude. Reporting a $50M check as a $100M round's size is wrong regardless of
+#     how many investors disclosed, so this was never a disclosure-threshold problem
+#     that a sole-investor restriction could solve. `investment_amount` is supplemental
+#     party-level detail; when the round total is undisclosed the honest magnitude is
+#     null. (It was previously reserved on the stated ground that no per-investor
+#     column existed — that was wrong: `staging_investor.investment_amount` does. The
+#     rung is removed on the semantics, not on availability.)
 TRANSACTION_SIZE_BASES = frozenset({
     "TRANSACTION_VALUE",
     "ROUND_SIZE",
-    "SOLE_INVESTOR_AMOUNT",           # reserved — no per-investor amount column exists
     "SPIN_SPLIT_CONSIDERATION_VALUE",  # reserved — no such source field exists
 })
 
@@ -660,13 +679,11 @@ def _derive_transaction_size(
         round_size = fv.get("round_size")
         if round_size and round_size > 0:
             return float(round_size), "ROUND_SIZE"
-        # SOLE_INVESTOR_AMOUNT would go here. It stays reserved: there is no
-        # per-investor amount column to read, and `transaction_record.investment_amount`
-        # is not a substitute — it is transaction-level and falls back to the legacy
-        # value slot, so using it would report a round (or worse, a valuation) as one
-        # investor's check. A multi-investor round is never summed: per-investor
-        # disclosure runs ~30% for leads and under 5% for others, so a sum understates
-        # the round while presenting as one, which is worse than null because the
+        # No investor-check fallback. A check is one investor's contribution, not the
+        # size of the event, so a known $50M check against an undisclosed total yields
+        # a null magnitude — the round size is genuinely unknown. Summing checks is
+        # doubly wrong: per-investor disclosure runs ~30% for leads and under 5% for
+        # others, so a sum understates the round while presenting as one, and the
         # shortfall is invisible.
         return None, None
 

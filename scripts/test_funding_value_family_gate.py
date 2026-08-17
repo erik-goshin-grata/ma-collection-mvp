@@ -24,9 +24,11 @@ at prompt 0.12. On re-aggregation Stage 9 would faithfully regenerate a canonica
 this stops any future stale or misclassified funding row from manufacturing a purchase
 price out of a raise. The two are separate concerns and the guard is the durable one.
 
-**Nothing is destroyed by refusing.** The amount stays in `staging_extraction`, in the
-observation ledger, and in the canonical `investment_amount` — asserted below, because
-the remediation depends on those amounts remaining visible.
+**Nothing is destroyed by refusing.** The amount stays in `staging_extraction` and in
+the observation ledger — asserted below, because the remediation depends on those
+amounts remaining findable. It is deliberately *not* parked in `investment_amount`:
+that field means one named investor's check, and a generic funding amount sitting
+there asserts a party-level fact no source stated.
 
 **The gate is the funding family only.** `MINORITY_INVESTMENT` is deliberately outside
 it: buying a non-controlling stake from an existing holder is an ordinary acquisition
@@ -217,9 +219,21 @@ def _check_end_to_end(failures: list[str]) -> None:
             _check(failures, "legacy round_size not invented", row["round_size"], None)
             _check(failures, "legacy transaction_size", row["transaction_size"], None)
             _check(failures, "legacy transaction_size_basis", row["transaction_size_basis"], None)
-            # The amount is NOT lost — remediation needs to find it.
-            _check(failures, "legacy investment_amount retains amount",
-                   row["investment_amount"], 60_000_000.0)
+            # investment_amount means ONE investor's check. A generic funding amount
+            # is not that, so it must not land here either — the field is expected to
+            # be null for most deals, and a populated value asserts a party-level fact
+            # no source stated.
+            _check(failures, "legacy investment_amount cleared", row["investment_amount"], None)
+
+        # A correctly extracted round does NOT put its round size in investment_amount
+        # either: the round total is not any single investor's check.
+        clean = conn.execute(
+            "SELECT investment_amount FROM transaction_record WHERE transaction_id = ?",
+            (CLEAN_TXN,),
+        ).fetchone()
+        if clean is not None:
+            _check(failures, "round_size must not populate investment_amount",
+                   clean["investment_amount"], None)
 
         # The raw fact survives in the ledger regardless of what Stage 9 refuses.
         kept = conn.execute(

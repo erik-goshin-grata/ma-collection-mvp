@@ -1661,3 +1661,69 @@ Consequences:
 - This is a canonical-model correction for every consumer — DB, API, analytics, the
   Grata model. It is not a review-sheet concern, and no part of it was shaped to
   preserve the historical XLSX appearance.
+
+## 2026-08-17 - Funding Magnitude: round_size Is the Event, investment_amount Is a Check
+
+Status: accepted. Implemented. Supersedes the sole-investor rung in
+"transaction_size: Family-Keyed Waterfall, Two Rungs Reserved".
+
+Decision:
+
+- `round_size` is the **total amount raised in the financing event**. For Funding,
+  `round_size -> transaction_size` at `transaction_size_basis = ROUND_SIZE`. Funding
+  never falls back to `transaction_value`.
+- `investment_amount` means **one named investor's check**. It is supplemental
+  party-level detail, expected null for most deals. It must not populate
+  `transaction_size`, must not substitute for `round_size`, and must not be summed to
+  manufacture one.
+- **`SOLE_INVESTOR_AMOUNT` is removed** from the `transaction_size` waterfall, the basis
+  vocabulary, and the Grata recommendation.
+- `_derive_investment_amount` no longer derives anything at transaction level. It
+  previously returned `round_size or value_amount` for any non-control event.
+
+The settled contract, as a worked example — $100M round, Firm A invests $50M:
+
+    round_size            = 100M
+    transaction_size      = 100M
+    transaction_size_basis = ROUND_SIZE
+    Firm A investment_amount = 50M     (party-level)
+
+Nothing is added or rolled up. If only Firm A's $50M is known and the round total is
+undisclosed: `investment_amount = 50M`, `round_size = NULL`, `transaction_size = NULL`.
+
+Context:
+
+- **The original sole-investor argument was wrong in kind.** It framed the hazard as
+  disclosure coverage — summing sparse checks understates a round — and concluded that
+  restricting to a single disclosed investor made the rollup safe. It does not. A check
+  is not the event's magnitude *at any disclosure level*: reporting a $50M check as a
+  $100M round's size is wrong even when that check is the only one disclosed, and even
+  when there is only one investor. The disclosure statistics remain true and still rule
+  out summing; they were simply never the reason the rung had to go.
+- `_derive_investment_amount` broke the definition in both directions: it copied a round
+  *total* into a field meaning one investor's *check*, and where no round size existed it
+  fell back to a generic `value_amount` naming no investor at all. On the ten legacy
+  funding rows, that second fallback is how a misclassified raise acquired a canonical
+  home.
+- **Correcting an earlier claim in this log:** the sole-investor rung was first reserved
+  on the stated ground that no per-investor amount column existed. That was wrong —
+  `staging_investor.investment_amount` does exist and Stage 4b populates it. The rung is
+  removed on semantics, not on availability.
+
+Consequences:
+
+- Guarded by `scripts/test_transaction_size.py` (the basis vocabulary must not contain
+  `SOLE_INVESTOR_AMOUNT` or `SOLE_INVESTOR_CHECK`; a known investor check with an
+  undisclosed total yields a null size) and `scripts/test_funding_value_family_gate.py`
+  (neither a round total nor a generic funding amount may land in `investment_amount`).
+- Transaction-level `investment_amount` now derives to NULL for every row. This
+  discharges "legacy `investment_amount` equal to the generic funding amount should be
+  cleared" **without any data mutation** — the column is Stage-9-owned, so
+  re-aggregation clears it.
+- This changes an assertion made earlier in the family-gate work, that the legacy amount
+  was safely preserved in `investment_amount`. Under the settled model that was itself a
+  mis-mapping. The amount remains findable in `staging_extraction.value_amount` and in
+  the observation ledger, which is where the remediation reads it from.
+- The transaction-level column is now inert. Whether to drop it, or repurpose it as a
+  materialized view of a single party-level check, is an open schema question — not
+  decided here.

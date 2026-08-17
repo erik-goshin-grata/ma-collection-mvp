@@ -6,9 +6,9 @@ Reserved". Three things changed between this plan and what shipped, each for a r
 recorded there: the **M&A equity fallback rung was removed** (every safe case already
 produces `transaction_value`; the rung's reachable set was exactly the cases with
 unknown transaction scope), the **basis vocabulary adopted the Grata spellings**
-(`ROUND_SIZE`, `SOLE_INVESTOR_AMOUNT`, `SPIN_SPLIT_CONSIDERATION_VALUE`), and the
-**sole-investor rung is reserved rather than live** because no per-investor amount
-column exists.
+(`ROUND_SIZE`, `SPIN_SPLIT_CONSIDERATION_VALUE`), and the **sole-investor rung was
+removed outright** — an investor's check is never the event's magnitude, at any
+disclosure level.
 **Spec:** `docs/spec_transaction_value_model.md` §2.4, §7
 **Decisions:** `docs/decisions.md` — "Transaction Size as Universal Magnitude"
 
@@ -69,20 +69,32 @@ DB column, and the export surface described below.
 
 Computed in aggregation. **Never extracted** — no extractor decides what belongs in it.
 
-| Deal type | Waterfall | `transaction_size_basis` |
-|---|---|---|
-| M&A | `transaction_value` | `TRANSACTION_VALUE` |
-| M&A | → `equity_value`, where equity is stated and debt unknown | `EQUITY_CONSIDERATION` |
-| Funding | `round_size` | `ROUND_SIZE` |
-| Funding | → sole investor's `investment_amount` | `SOLE_INVESTOR_CHECK` |
-| Any | none of the above | null |
+> **Superseded — this table is the original plan.** Two rows did not ship. The shipped
+> waterfall is family-keyed and is in `docs/decisions.md`.
+
+| Deal type | Waterfall | `transaction_size_basis` | Shipped? |
+|---|---|---|---|
+| M&A | `transaction_value` | `TRANSACTION_VALUE` | yes |
+| ~~M&A~~ | ~~→ `equity_value`, where equity is stated and debt unknown~~ | ~~`EQUITY_CONSIDERATION`~~ | **no — removed** |
+| Funding | `round_size` | `ROUND_SIZE` | yes |
+| ~~Funding~~ | ~~→ sole investor's `investment_amount`~~ | ~~`SOLE_INVESTOR_CHECK`~~ | **no — removed** |
+| Any | none of the above | null | yes |
 
 `transaction_size_basis` is **NOT NULL wherever `transaction_size` is populated.**
 
-**The sole-investor restriction is deliberate.** Per-investor disclosure runs around 30% for
-leads and under 5% for other participants, so summing whatever `investment_amount` rows exist
-understates the round while presenting as a round size — worse than null, because the shortfall
-is invisible. Use the check only where the round has exactly one disclosed investor.
+**On the sole-investor rung — the reasoning below was wrong, and the rung is gone.** It
+framed the problem as *disclosure coverage*: summing sparse `investment_amount` rows
+understates a round, so restrict to the one safe case. But the defect is not statistical.
+An investor's check is **not the event's magnitude at any disclosure level** — reporting a
+$50M check as a $100M round's size is wrong even when that check is the only one disclosed,
+and equally wrong when it is the only investor. `investment_amount` is supplemental
+party-level detail that never rolls up. When the round total is undisclosed, the honest
+`transaction_size` is **null**.
+
+The original argument, retained because the disclosure statistics are still true and still
+rule out summing: per-investor disclosure runs around 30% for leads and under 5% for other
+participants, so summing whatever `investment_amount` rows exist understates the round while
+presenting as a round size — worse than null, because the shortfall is invisible.
 
 **Do not add an `implied_enterprise_value` rung.** It was proposed and parked (spec §2.10 item
 3). Below control it is the grossed-up whole-company figure and would report Pinnacle Gas as
