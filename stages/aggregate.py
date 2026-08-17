@@ -1411,6 +1411,157 @@ def _load_aggregation_input(conn: sqlite3.Connection, read_source: str) -> dict[
 # Stage entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# transaction_record write ownership
+# ---------------------------------------------------------------------------
+#
+# The columns Stage 9 owns. Everything else on transaction_record belongs to a
+# later stage (Stage 10 sec_documents, Stage 11 agreement_extract) or to the row
+# itself (`notes`, `created_at`), and must survive re-aggregation untouched.
+#
+# This list is the single source of truth for the write: the placeholder count and
+# the conflict-update clause are both derived from it, so they cannot drift apart.
+# The params tuple at the call site must stay in this order.
+_STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
+    "transaction_id",
+    "deal_type",
+    "v2_event_type",
+    "event_history_type",
+    "spin_split_type",
+    "spin_split_type_v2",
+    "distribution_mechanism",
+    "recap_type",
+    "target_type",
+    "target_type_v2",
+    "event_type",
+    "transaction_status",
+    "target_status",
+    "target_name",
+    "target_domain",
+    "target_ticker",
+    "acquirer_name",
+    "acquirer_domain",
+    "acquirer_ticker",
+    "acquirer_type",
+    "acquirer_type_v2",
+    "parent_seller_name",
+    "parent_seller_ticker",
+    "target_description",
+    "acquirer_description",
+    "acquirer_sponsor_name",
+    "parent_seller_description",
+    "announced_date",
+    "announced_date_precision",
+    "closed_date",
+    "closed_date_precision",
+    "signing_date",
+    "signing_date_precision",
+    "rumor_date",
+    "value_amount",
+    "value_currency",
+    "value_type",
+    "per_share_price",
+    "pct_acquired",
+    "stake_transition_type",
+    "target_revenue",
+    "target_revenue_period_type",
+    "target_revenue_period_type_v2",
+    "target_revenue_period_end",
+    "target_ebitda",
+    "target_ebitda_period_type",
+    "target_ebitda_period_type_v2",
+    "target_ebitda_period_end",
+    "financials_currency",
+    "financials_disclosure_status",
+    "ev_to_revenue_ltm",
+    "ev_to_revenue_ntm",
+    "ev_to_ebitda_ltm",
+    "ev_to_ebitda_ntm",
+    "multiple_quality",
+    "consideration_type",
+    "consideration_components",
+    "includes_earnout",
+    "hostile",
+    "competing_bid",
+    "regulatory_approvals_required",
+    "has_go_shop",
+    "go_shop_period_days",
+    "target_fee_amount",
+    "target_fee_percentage",
+    "acquirer_fee_amount",
+    "acquirer_fee_percentage",
+    "is_take_private",
+    "is_minority",
+    "is_add_on",
+    "is_divestiture",
+    "is_de_spac",
+    "is_platform_investment",
+    "is_secondary_buyout",
+    "is_merger_of_equals",
+    "has_earnout",
+    "has_cvr",
+    "round_label",
+    "round_stage_category",
+    "round_size",
+    "pre_money_valuation",
+    "post_money_valuation",
+    "valuation_currency",
+    "round_currency",
+    "facility_size",
+    "total_raised_to_date",
+    "is_extension_round",
+    "is_down_round",
+    "is_bridge_round",
+    "use_of_proceeds",
+    "has_board_seat",
+    "board_seat_notes",
+    "is_current",
+    "aggregation_version",
+    "updated_at",
+    "net_debt",
+    "equity_value",
+    "equity_value_basis",
+    "implied_equity_value",
+    "implied_enterprise_value",
+    "implied_enterprise_value_basis",
+    "enterprise_value",
+    "enterprise_value_basis",
+    "investment_amount",
+    "deal_value_currency",
+    "total_debt",
+    "cash_st",
+    "transaction_value",
+    "transaction_value_basis",
+    "pct_acquired_source",
+    "total_debt_currency",
+    "cash_st_currency",
+    "balance_sheet_as_of_date",
+    "balance_sheet_period_type",
+    "net_debt_currency",
+)
+
+# Upsert rather than INSERT OR REPLACE. REPLACE deletes the row and inserts a new
+# one, so every column absent from the list above was silently reset to NULL on each
+# re-aggregation — including Stage 10/11 output.
+#
+# The update assigns `excluded.<col>` directly, NOT COALESCE. That is deliberate: a
+# Stage-9-owned field whose newly aggregated evidence says NULL must actually become
+# NULL. COALESCE would turn each canonical field into a high-water mark that could
+# never be retracted, which is a worse defect than the one being fixed.
+_TRANSACTION_RECORD_UPSERT_SQL = (
+    "INSERT INTO transaction_record (\n    "
+    + ",\n    ".join(_STAGE9_OWNED_COLUMNS)
+    + "\n) VALUES (\n    "
+    + ",".join("?" * len(_STAGE9_OWNED_COLUMNS))
+    + "\n) ON CONFLICT(transaction_id) DO UPDATE SET\n    "
+    + ",\n    ".join(
+        f"{column}=excluded.{column}"
+        for column in _STAGE9_OWNED_COLUMNS
+        if column != "transaction_id"
+    )
+)
+
+
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     """Aggregate clustered extractions into canonical transaction records.
 
@@ -1631,48 +1782,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
             # Upsert transaction_record
             conn.execute(
-                """
-                INSERT OR REPLACE INTO transaction_record (
-                    transaction_id, deal_type, v2_event_type, event_history_type,
-                    spin_split_type, spin_split_type_v2, distribution_mechanism, recap_type,
-                    target_type, target_type_v2, event_type, transaction_status, target_status,
-                    target_name, target_domain, target_ticker,
-                    acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type, acquirer_type_v2,
-                    parent_seller_name, parent_seller_ticker,
-                    target_description, acquirer_description, acquirer_sponsor_name, parent_seller_description,
-                    announced_date, announced_date_precision, closed_date, closed_date_precision,
-                    signing_date, signing_date_precision, rumor_date,
-                    value_amount, value_currency, value_type, per_share_price, pct_acquired,
-                    stake_transition_type,
-                    target_revenue, target_revenue_period_type, target_revenue_period_type_v2, target_revenue_period_end,
-                    target_ebitda, target_ebitda_period_type, target_ebitda_period_type_v2, target_ebitda_period_end,
-                    financials_currency, financials_disclosure_status,
-                    ev_to_revenue_ltm, ev_to_revenue_ntm, ev_to_ebitda_ltm, ev_to_ebitda_ntm, multiple_quality,
-                    consideration_type, consideration_components,
-                    includes_earnout, hostile, competing_bid, regulatory_approvals_required,
-                    has_go_shop, go_shop_period_days,
-                    target_fee_amount, target_fee_percentage,
-                    acquirer_fee_amount, acquirer_fee_percentage,
-                    is_take_private, is_minority, is_add_on, is_divestiture, is_de_spac,
-                    is_platform_investment, is_secondary_buyout, is_merger_of_equals,
-                    has_earnout, has_cvr,
-                    round_label, round_stage_category, round_size,
-                    pre_money_valuation, post_money_valuation, valuation_currency, round_currency,
-                    facility_size, total_raised_to_date,
-                    is_extension_round, is_down_round, is_bridge_round,
-                    use_of_proceeds, has_board_seat, board_seat_notes,
-                    is_current, aggregation_version, updated_at,
-                    net_debt, equity_value, equity_value_basis,
-                    implied_equity_value, implied_enterprise_value, implied_enterprise_value_basis,
-                    enterprise_value, enterprise_value_basis,
-                    investment_amount, deal_value_currency,
-                    total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source,
-                    total_debt_currency, cash_st_currency, balance_sheet_as_of_date,
-                    balance_sheet_period_type, net_debt_currency
-                ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
-                )
-                """,
+                _TRANSACTION_RECORD_UPSERT_SQL,
                 (
                     cluster_id,
                     field_values.get("deal_type") or field_values.get("v2_event_type"),

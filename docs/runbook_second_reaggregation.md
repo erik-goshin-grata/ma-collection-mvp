@@ -107,38 +107,38 @@ rows into Stage 9 that the pipeline deliberately held back.
 
 ---
 
-## 3. Hazard — `INSERT OR REPLACE` nulls 16 columns Stage 9 does not write
+## 3. ~~Hazard — `INSERT OR REPLACE` nulls columns Stage 9 does not write~~ RESOLVED
 
-Stage 9 writes `transaction_record` with `INSERT OR REPLACE`, which deletes the row
-and inserts a new one. Any column absent from its INSERT list is **reset to NULL**,
-not preserved. Of 130 columns, Stage 9 writes 114. These 16 are lost on every
-re-aggregation:
+**Resolved 2026-08-17.** Stage 9 now writes with an upsert
+(`INSERT ... ON CONFLICT(transaction_id) DO UPDATE SET ...`) scoped to the 115
+columns it owns. The 15 columns it does not own — Stage 10/11 output plus `notes`
+and `created_at` — are left untouched on re-aggregation.
+
+**The snapshot-and-restore step this section used to require is no longer needed.**
+Re-running Stage 9 alone no longer discards Stage 10/11 output, so the three handling
+options (snapshot / re-run 10–13 / accept the loss) are all moot. Nothing needs to be
+saved before the reset.
+
+For the record, the columns Stage 9 preserves:
 
 ```
+linked_filings_count              agreement_extraction_status
 acquirer_merger_sub_name          has_observation_changes
-agreement_extraction_status       linked_filings_count
-closing_conditions_summary        merger_structure
-created_at                        notes
-fully_diluted_calc_quality        observation_changes_field_count
+merger_structure                  observation_changes_field_count
 has_mac_clause                    observation_changes_summary
-requires_target_shareholder_vote  target_total_diluted_shares
-target_vote_threshold             (net_debt_currency — fixed in 3107053)
+requires_target_shareholder_vote  notes
+target_vote_threshold             created_at
+closing_conditions_summary
+target_total_diluted_shares
+fully_diluted_calc_quality
 ```
 
-These are **Stage 10/11 outputs** (SEC documents, agreement extraction) plus
-`created_at` and `notes`. Re-running Stage 9 alone silently discards them.
+Guarded by `scripts/test_stage9_field_ownership.py`, which asserts both halves of the
+rule: these survive re-aggregation, *and* a Stage-9-owned field is still cleared to
+NULL when the evidence no longer supports it.
 
-This is pre-existing behaviour, not introduced by this stack, and it is the single
-biggest operational risk in the run. Options, in order of preference:
-
-1. **Snapshot and restore.** Before the reset, copy the 16 columns to a side table
-   keyed by `transaction_id`; after Stage 9, write them back. Bounded and auditable.
-2. **Re-run Stages 10–13 after Stage 9.** Restores agreement/SEC/summary outputs
-   properly, but costs LLM calls for Stages 12/13 and widens the diff.
-3. **Accept the loss.** Only defensible if nothing downstream reads those columns.
-   Check the review export before choosing this.
-
-Pre-run measurement (nothing modified):
+The census below is no longer a decision gate. It remains useful as a
+before/after check that the preservation actually held:
 
 ```sql
 SELECT
@@ -148,8 +148,6 @@ SELECT
   SUM(notes IS NOT NULL)                       AS notes_rows
 FROM transaction_record;
 ```
-
-If those are all zero, option 3 is safe and the run gets much simpler.
 
 ---
 
@@ -238,9 +236,8 @@ SELECT equity_value_basis,      COUNT(*) FROM transaction_record GROUP BY 1;
 python scripts/quantify_net_debt_currency_gap.py --db data/ma_mvp.db
 ```
 
-**F. Stage 10/11 survival** — the §3 census, re-run after. If option 1 or 2 was
-chosen, these must match; if option 3, they will be zero and that must be a
-*decision*, not a discovery.
+**F. Stage 10/11 survival** — the §3 census, re-run after. These must match exactly;
+Stage 9 no longer touches those columns, so any change is a defect, not a tradeoff.
 
 **G. Review XLSX** — regenerate and confirm the **67-column shape is unchanged**.
 The export was deliberately not modified by this stack.
@@ -259,18 +256,15 @@ for t in scripts/test_*.py; do python "$t" >/dev/null 2>&1 || echo "FAIL $t"; do
 1. Run the full deterministic suite; confirm green.
 2. Confirm `AGGREGATION_READ_SOURCE` is unset or `observation`; record which.
 3. Capture validation outputs A–G into `prereagg_*` files.
-4. Decide the §3 option (snapshot / re-run 10–13 / accept loss) from the §3 census.
-5. Back up per §4; verify `integrity_check` and row count on the copy.
-6. If option 1: snapshot the 16 columns to a side table.
-7. Assert `AGGREGATED` count; run the §2 reset; assert `CLUSTERED` count equals it.
-8. Run Stage 9 **only**, via `run.py`, so `_apply_migrations` adds the new columns
+4. Back up per §4; verify `integrity_check` and row count on the copy.
+5. Assert `AGGREGATED` count; run the §2 reset; assert `CLUSTERED` count equals it.
+6. Run Stage 9 **only**, via `run.py`, so `_apply_migrations` adds the new columns
    before the derivation reads them.
-9. Assert every member moved back to `AGGREGATED`; assert `transaction_record`
+7. Assert every member moved back to `AGGREGATED`; assert `transaction_record`
    count is still 92.
-10. If option 1: restore the 16 columns. If option 2: run Stages 10–13.
-11. Capture validation outputs A–G into `postreagg_*` files.
-12. Diff, classify every change, and write the findings into `docs/decisions.md`
-    before anyone reads the corpus as current.
+8. Capture validation outputs A–G into `postreagg_*` files.
+9. Diff, classify every change, and write the findings into `docs/decisions.md`
+   before anyone reads the corpus as current.
 
 **Stop conditions** — halt and restore from backup if any of these occur:
 `transaction_record` count changes; a value-model field census moves by more than a

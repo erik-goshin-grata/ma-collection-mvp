@@ -1352,3 +1352,46 @@ with the corpus having no `net_debt` at all.
 Consequence: the debt-inclusive paths remain unexercised on real data. Zero rows carry
 `net_debt`, zero carry a calculated enterprise value, zero carry
 `EQUITY_PLUS_TOTAL_DEBT`. Path A could not change that — see the Path B runbook.
+
+## 2026-08-17 - Stage 9 Writes Only the Columns It Owns
+
+Status: accepted.
+
+Decision:
+
+- Stage 9 writes `transaction_record` with
+  `INSERT ... ON CONFLICT(transaction_id) DO UPDATE SET ...` scoped to the 115
+  columns it owns, replacing `INSERT OR REPLACE`.
+- The 15 columns it does not own are preserved: Stage 10's `linked_filings_count`;
+  Stage 11's `acquirer_merger_sub_name`, `merger_structure`, `has_mac_clause`,
+  `requires_target_shareholder_vote`, `target_vote_threshold`,
+  `closing_conditions_summary`, `target_total_diluted_shares`,
+  `fully_diluted_calc_quality`, `agreement_extraction_status`,
+  `has_observation_changes`, `observation_changes_field_count`,
+  `observation_changes_summary`; plus `notes` and `created_at`.
+- The conflict clause assigns `excluded.<col>` directly, **not** COALESCE. A
+  Stage-9-owned field whose newly aggregated evidence says NULL must become NULL.
+- The owned-column list is the single source of truth: the placeholder count and the
+  conflict-update clause are both derived from it, so they cannot drift apart.
+
+Context:
+
+- `INSERT OR REPLACE` deletes the row and inserts a new one, so any column absent
+  from the INSERT list was reset to NULL on every re-aggregation — silently, and
+  including columns a later stage owns. Re-running Stage 9 alone destroyed Stage
+  10/11 output.
+- The obvious protection — COALESCE, or writing only non-null values — fixes the
+  preservation half and breaks the clearing half, turning every canonical field into
+  a high-water mark that can never be retracted. That is a worse defect than the
+  original: a value the evidence no longer supports would persist indefinitely.
+  `scripts/test_stage9_field_ownership.py` asserts both halves, and was verified to
+  fail against a COALESCE implementation.
+
+Consequences:
+
+- The re-aggregation runbook's snapshot-and-restore step is withdrawn; nothing needs
+  saving before a reset.
+- Ownership is defined by presence in the INSERT column list, which was already the
+  de-facto boundary. No column changed hands, so no existing value is reinterpreted.
+- Transaction identity and `transaction_source` rows are unaffected — asserted by the
+  regression, since REPLACE-then-insert had been re-creating the row each pass.
