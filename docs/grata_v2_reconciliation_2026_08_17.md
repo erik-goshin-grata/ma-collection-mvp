@@ -188,10 +188,52 @@ numerator over a whole-company denominator is a category error, not a rounding i
 
 ### 5. `transaction_size` + `transaction_size_basis`
 
-**[2] [4] — not implemented.** This is the next code task (see §6). Grata D1 marks it
-ADD/Missing, which is right.
+**[1] [2] — implemented 2026-08-17.** Grata D1 marks it ADD/Missing, which is right;
+the harness now has it. **The vocabulary drift below was resolved in Grata's favour**,
+so the two models now agree — with two substantive corrections *to* the Grata waterfall,
+below.
 
-**Redline: the basis vocabulary is inconsistent across three documents.**
+The shipped contract (`docs/decisions.md`, "transaction_size: Family-Keyed Waterfall,
+Two Rungs Reserved"):
+
+| Family | Rung | Basis |
+|---|---|---|
+| M&A (`ACQUISITION`/`MERGER`/`REVERSE_MERGER`) | `transaction_value` | `TRANSACTION_VALUE` |
+| Funding (`VC_ROUND`/`GROWTH_EQUITY`/`VENTURE_DEBT`) | `round_size` | `ROUND_SIZE` |
+| Spin/Split | *reserved, no live rung* | — |
+| everything else | — | null |
+
+**Correction 1 to Grata D4 — strike the M&A equity fallback.** D4 lists "M&A fallback →
+`equity_value` where equity is stated and debt is unknown". That condition cannot be
+reached: whenever equity is stated and `pct_acquired` is known, `transaction_value` is
+already populated (debt-unknown merely stamps it `EQUITY_VALUE_ONLY`), so the primary
+rung fires and returns the same number. The *only* states with `transaction_value` null
+and `equity_value` known are those where **`pct_acquired` is unknown** — i.e. the
+transaction scope is unknown, so the equity figure may be the whole company. The rung's
+reachable set is exactly the unsafe complement of its intended one. **Recommend Grata
+remove it.**
+
+**Correction 2 — the two reserved rungs need a source field before they are real.**
+`SOLE_INVESTOR_AMOUNT` requires an investor-level amount; the harness reserved rather
+than built it because `transaction_participant` has no such column. This is Grata's D5
+recommendation (`transaction_party.investment_amount`) restated as a hard prerequisite:
+**without that column the rung cannot exist**, and the transaction-level
+`investment_amount` is not a substitute — it would report a round, or a valuation, as
+one investor's check. Same for `SPIN_SPLIT_CONSIDERATION_VALUE`, which additionally
+yields null for every pure pro-rata spin, since nothing changes hands for value there.
+
+Two rules both models already share, and neither should weaken: the basis is **required
+wherever the size is populated** (Grata J2), and the size **must not be summed across
+bases** (D4). One caveat worth adding to Grata's version of the latter: **the basis
+alone does not separate a below-control M&A from a control one** — both stamp
+`TRANSACTION_VALUE` — so a grouping key that wants that distinction needs `is_minority`
+or `pct_acquired` alongside it.
+
+**Redline: the basis vocabulary was inconsistent across three documents — RESOLVED
+2026-08-17 in Grata's favour.** The harness shipped the Grata spellings, so the table
+below is now historical. It is retained because it shows what was reconciled and why the
+Grata names won: every canonical value names the **source field** that supplied the
+magnitude, which `EQUITY_CONSIDERATION` and `SOLE_INVESTOR_CHECK` did not.
 
 | Rung | Grata D3 / D4 / dictionary §7 | `handoff_transaction_size.md` |
 |---|---|---|
@@ -207,11 +249,9 @@ implementer, so Grata's vocabulary should win — and adding the Spin/Split rung
 harness waterfall before it is built, not after. Flagged now precisely because the
 implementation has not started; this is the last cheap moment to settle it.
 
-Both documents already agree on the two rules that matter most, and neither should be
-weakened: `transaction_size_basis` is **required wherever `transaction_size` is
-populated** (Grata J2 states it as a QA contract), and `transaction_size` **must not be
-summed across bases** — a control acquisition and a minority check are different events
-and their sum is not a deal-volume figure.
+The equity rung in that table (`EQUITY_VALUE` / `EQUITY_CONSIDERATION`) was **removed
+entirely** rather than renamed — see Correction 1 above. The naming dispute on it
+dissolved with the rung.
 
 **Still parked, and not unblocked by anything in this pass:** the proposed EV rung (spec
 §2.10 item 3). Below control, `implied_enterprise_value` is the grossed-up whole-company
@@ -447,8 +487,10 @@ collapsed by the single-slot value object.
 
 ### Defer
 
-- **`transaction_size` implementation.** Specified on both sides; not built. Settle the
-  basis vocabulary first (below). — item 5
+- ~~**`transaction_size` implementation.**~~ **Built 2026-08-17** with the Grata
+  vocabulary; see item 5 for the two corrections it implies *to* Grata's D4 waterfall
+  (strike the M&A equity fallback; treat the two reserved rungs as blocked on their
+  source fields). — item 5
 - **The EV `transaction_size` rung** (spec §2.10 item 3). Currency and period coherence
   landed and did **not** unpark it — the below-control gross-up problem is independent and
   unresolved. — item 5
@@ -495,17 +537,19 @@ collapsed by the single-slot value object.
    be silently absent from EV-based analyses rather than visibly incomplete — an
    availability problem disguised as a data problem.
 
-6. **`transaction_size_basis` vocabulary.** Three documents, two disagreements, one missing
-   rung (§3 item 5). Needs one owner and one spelling **before** implementation starts.
-   Recommended resolution: adopt the Grata spellings and add the Spin/Split rung to the
-   harness waterfall.
+6. ~~**`transaction_size_basis` vocabulary.**~~ **Resolved 2026-08-17** — the harness
+   adopted the Grata spellings and reserved the Spin/Split rung. Two questions replace it,
+   both on Grata's side: does D4 accept striking the unreachable M&A equity fallback, and
+   is `transaction_party.investment_amount` (D5) scheduled? The `SOLE_INVESTOR_AMOUNT`
+   rung cannot exist until it is.
 
 ---
 
-## 6. Next code task — reconfirmed
+## 6. Next code task — DONE 2026-08-17
 
-**`transaction_size` + `transaction_size_basis` remains the next code task.**
-`docs/handoff_transaction_size.md`, unchanged in substance.
+**`transaction_size` + `transaction_size_basis` shipped**, with the Grata vocabulary and
+two corrections *to* the Grata waterfall (§3 item 5). The section below is retained as
+the reasoning that made it the right next task.
 
 Its §4.2 dependency is now **satisfied**: Path A discharged the owed re-aggregation on
 2026-08-17, so `transaction_value`, stake-level `equity_value`, and the typed-value picker
@@ -518,5 +562,8 @@ gross-up, which this pass did not touch. `transaction_size` is deterministic, ne
 network, no model calls, and no live DB, and it is the only remaining item a reviewer
 actually sees.
 
-**One thing to settle before writing code, not after:** the basis vocabulary in §5 open
-question 6. It is a rename once now, or a data migration later.
+**The vocabulary was settled before writing code, not after** — it cost three document
+edits instead of a data migration. What replaced it as the open question is on Grata's
+side now: whether D4 accepts striking the unreachable M&A equity fallback, and whether
+`transaction_party.investment_amount` is scheduled, since `SOLE_INVESTOR_AMOUNT` cannot
+exist without it.

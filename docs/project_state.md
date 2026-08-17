@@ -252,14 +252,14 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    (`equity_value`, `implied_equity_value`, `transaction_value`, `investment_amount`,
    `deal_value_currency`, and funding round fields) without treating `_v2` shadow
    columns as reviewer-facing Grata enum fields.
-4. **`transaction_size` + export column** — **the next code task** (reconfirmed
-   2026-08-17). Its §4.2 dependency is fully discharged: the second/owed re-aggregation
-   ran as Path A and was accepted, so the waterfall builds against settled inputs
-   (`docs/handoff_transaction_size.md`). Deterministic — no network, no model calls, no
-   live DB. **Settle the basis vocabulary first**: the Grata docs and the handoff disagree
-   on two rungs and the handoff omits `SPIN_SPLIT_CONSIDERATION_VALUE`
-   (`docs/grata_v2_reconciliation_2026_08_17.md` §5 question 6). A rename now, or a data
-   migration later.
+4. ~~**`transaction_size` + export column**~~ — **landed 2026-08-17.** Family-keyed
+   waterfall: M&A takes `transaction_value`, Funding takes `round_size`, Spin/Split and
+   everything else are null. `SOLE_INVESTOR_AMOUNT` and `SPIN_SPLIT_CONSIDERATION_VALUE`
+   are reserved in the vocabulary but have no live rung, because neither source field
+   exists — `transaction_participant` has no per-investor amount column. No equity rung
+   and no EV rung. The review export's shadow waterfall is retired, so the sheet now
+   shows blank where canonical rules find the magnitude unsupported; the 67-column shape
+   is unchanged. Guarded by `scripts/test_transaction_size.py`.
 5. **Legacy value-field inventory/reorganization** — `enterprise_value` is now a
    compatibility mirror of `implied_enterprise_value`; decide later whether to
    remove, alias, or formally deprecate it after downstream consumers are known.

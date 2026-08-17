@@ -1,6 +1,14 @@
 # Handoff: Build `transaction_size` + surface the value fields
 
-**Status:** Not started. Its §4.2 dependency is **satisfied** (2026-08-17) — see below.
+**Status:** **LANDED 2026-08-17.** Retained as the reasoning of record; the shipped
+contract is in `docs/decisions.md`, "transaction_size: Family-Keyed Waterfall, Two Rungs
+Reserved". Three things changed between this plan and what shipped, each for a reason
+recorded there: the **M&A equity fallback rung was removed** (every safe case already
+produces `transaction_value`; the rung's reachable set was exactly the cases with
+unknown transaction scope), the **basis vocabulary adopted the Grata spellings**
+(`ROUND_SIZE`, `SOLE_INVESTOR_AMOUNT`, `SPIN_SPLIT_CONSIDERATION_VALUE`), and the
+**sole-investor rung is reserved rather than live** because no per-investor amount
+column exists.
 **Spec:** `docs/spec_transaction_value_model.md` §2.4, §7
 **Decisions:** `docs/decisions.md` — "Transaction Size as Universal Magnitude"
 

@@ -401,6 +401,12 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # bug #8 — funding/minority "amount invested" (round size / check), kept
         # distinct from equity_value so a check is never recorded as a valuation.
         ("investment_amount",                "REAL"),
+        # §2.4 — the one magnitude that spans transaction families, so a reviewer can
+        # rank deals without picking whichever figure looks largest. Derived, never
+        # extracted. The basis names which rung supplied it and is populated wherever
+        # transaction_size is; the pair must never be split.
+        ("transaction_size",                 "REAL"),
+        ("transaction_size_basis",           "TEXT"),
         # currency tag-and-defer — the currency the derived value fields
         # (equity_value/implied_equity_value/enterprise_value/investment_amount) are
         # expressed in. NOT converted to USD; downstream must not assume USD.

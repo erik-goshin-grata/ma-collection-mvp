@@ -578,6 +578,100 @@ def _derive_transaction_value(
     return equity_value, "EQUITY_VALUE_ONLY"
 
 
+# §2.4 — the rungs that may supply `transaction_size`. Every value names the SOURCE
+# FIELD the magnitude came from, which is what keeps the enum one-dimensional.
+#
+# Two are reserved rather than live, because the field each would read does not exist:
+# `transaction_participant` has no per-investor amount column, and there is no
+# spin/split consideration value. Reserving them keeps the vocabulary stable so a later
+# commit adds a branch rather than renaming stored data.
+#
+# Deliberately ABSENT, and not to be added without reopening the decision:
+#   EQUITY_VALUE / EQUITY_CONSIDERATION — every case where a stake-level equity figure
+#     can safely stand for the magnitude already produces `transaction_value`. The only
+#     states where transaction_value is null while equity_value is known are those where
+#     pct_acquired is unknown, i.e. the scope is unknown, so the figure could be the
+#     whole company.
+#   ENTERPRISE_VALUE / IMPLIED_ENTERPRISE_VALUE — below control this is the grossed-up
+#     whole-company figure; it would report a 27%-for-$600M deal as $2.22B (spec §2.10
+#     item 3, parked on that gross-up and not unparked by the currency/period work).
+#   EQUITY_BELOW_CONTROL — a `transaction_value_basis` value. It names a derivation
+#     condition rather than a source field, and the control status it records is already
+#     carried by `transaction_value_basis`, `is_minority` and `pct_acquired`.
+TRANSACTION_SIZE_BASES = frozenset({
+    "TRANSACTION_VALUE",
+    "ROUND_SIZE",
+    "SOLE_INVESTOR_AMOUNT",           # reserved — no per-investor amount column exists
+    "SPIN_SPLIT_CONSIDERATION_VALUE",  # reserved — no such source field exists
+})
+
+_MA_EVENT_TYPES = frozenset({"ACQUISITION", "MERGER", "REVERSE_MERGER"})
+_SPIN_SPLIT_EVENT_TYPES = frozenset({"SPIN_OFF", "SPLIT_OFF", "SPIN_SPLIT"})
+
+
+def _derive_transaction_size(
+    fv: dict,
+    transaction_value: float | None,
+) -> tuple[float | None, str | None]:
+    """The common transaction magnitude + the rung that supplied it (§2.4).
+
+    Derived in aggregation, **never extracted** — no extractor decides what belongs in
+    it. Keyed on event family, and the families are **disjoint**: a funding round never
+    falls through to a purchase price, and an M&A deal never falls through to a round
+    size. Ordering only has meaning within a family.
+
+      M&A        -> transaction_value              -> TRANSACTION_VALUE
+      Funding    -> round_size                     -> ROUND_SIZE
+      Spin/Split -> (reserved, no live rung)       -> None
+      otherwise  -> None
+
+    `transaction_size_basis` is returned alongside and is non-null whenever the size is,
+    because 600M via a purchase price and 600M via a round size are the same kind of
+    number only if you know which rung produced them. The caller must write both or
+    neither.
+
+    **The funding family is exactly the classifier's three funding types.** A PIPE or
+    other public-company primary raise is deliberately *not* forced into it
+    (`prompts/deal_type_classifier.md`), so it lands in `UNKNOWN` and receives a null
+    size. That is an accepted coverage decision, not an oversight: widening the family
+    here would silently reclassify deals through the size field.
+
+    No equity rung and no EV rung — see `TRANSACTION_SIZE_BASES` for why each is absent.
+
+    A funding round's `post_money_valuation` is never consulted. A valuation is not an
+    as-transacted magnitude, and the two are one word apart in a review sheet.
+    """
+    event = _event_type(fv)
+
+    if event in _FUNDING_EVENT_TYPES:
+        round_size = fv.get("round_size")
+        if round_size and round_size > 0:
+            return float(round_size), "ROUND_SIZE"
+        # SOLE_INVESTOR_AMOUNT would go here. It stays reserved: there is no
+        # per-investor amount column to read, and `transaction_record.investment_amount`
+        # is not a substitute — it is transaction-level and falls back to the legacy
+        # value slot, so using it would report a round (or worse, a valuation) as one
+        # investor's check. A multi-investor round is never summed: per-investor
+        # disclosure runs ~30% for leads and under 5% for others, so a sum understates
+        # the round while presenting as one, which is worse than null because the
+        # shortfall is invisible.
+        return None, None
+
+    if event in _SPIN_SPLIT_EVENT_TYPES:
+        # SPIN_SPLIT_CONSIDERATION_VALUE would go here once the source field exists.
+        # Note that a pure pro-rata spin has no consideration at all — nothing changes
+        # hands for value — so null will remain correct for much of this family even
+        # then, and a zero would assert a fact the event does not contain.
+        return None, None
+
+    if event in _MA_EVENT_TYPES:
+        if transaction_value is not None and transaction_value > 0:
+            return float(transaction_value), "TRANSACTION_VALUE"
+        return None, None
+
+    return None, None
+
+
 def _derive_equity_value(
     fv: dict,
     per_share_price: float | None,
@@ -1554,6 +1648,8 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "enterprise_value",
     "enterprise_value_basis",
     "investment_amount",
+    "transaction_size",
+    "transaction_size_basis",
     "deal_value_currency",
     "total_debt",
     "cash_st",
@@ -1752,6 +1848,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 equity_currency=deal_value_currency,
                 total_debt_currency=total_debt_currency,
             )
+            transaction_size, transaction_size_basis = _derive_transaction_size(
+                field_values, transaction_value
+            )
             implied_enterprise_value_amount = (
                 typed_enterprise_value_amount
                 if typed_enterprise_value_amount is not None
@@ -1917,6 +2016,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     enterprise_value,
                     enterprise_value_basis,
                     investment_amount,
+                    transaction_size,
+                    transaction_size_basis,
                     deal_value_currency,
                     total_debt,
                     cash_st,

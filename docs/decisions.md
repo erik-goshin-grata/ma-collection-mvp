@@ -1535,3 +1535,79 @@ Consequences:
 - The `PER_SHARE_X_SHARES` gate is inert today (`sec_shares` is hardcoded `None`) but
   had to land **before** SEC share count is wired, which would otherwise have activated
   the defect silently.
+
+## 2026-08-17 - transaction_size: Family-Keyed Waterfall, Two Rungs Reserved
+
+Status: accepted. Implemented.
+
+Decision:
+
+- `transaction_size` is derived in aggregation, **never extracted**. Keyed on event
+  family, and the families are **disjoint** — a funding round never falls through to a
+  purchase price, and an M&A deal never falls through to a round size. Ordering has
+  meaning only within a family.
+
+      M&A (ACQUISITION / MERGER / REVERSE_MERGER) -> transaction_value -> TRANSACTION_VALUE
+      Funding (VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT) -> round_size -> ROUND_SIZE
+      Spin/Split (SPIN_OFF / SPLIT_OFF)          -> reserved, no live rung
+      everything else                            -> null
+
+- `transaction_size_basis` is written whenever `transaction_size` is, and never
+  separately. Both are Stage-9-owned.
+- Two vocabulary values are **reserved but not live**: `SOLE_INVESTOR_AMOUNT` and
+  `SPIN_SPLIT_CONSIDERATION_VALUE`. Reserving them keeps the enum stable so a later
+  commit adds a branch rather than renaming stored data.
+- **No equity rung and no EV rung.** `EQUITY_BELOW_CONTROL` stays exclusively a
+  `transaction_value_basis` value.
+- The review export's shadow waterfall is **removed**, not kept as a backstop. The
+  XLSX shape stays at 67 columns.
+
+Context:
+
+- **Why no equity rung.** Every state where a stake-level equity figure can safely
+  stand for the magnitude already produces `transaction_value`. Tracing
+  `_derive_transaction_value`, the only states with `transaction_value` null and
+  `equity_value` known are those where `pct_acquired` is null — i.e. transaction scope
+  is unknown, so the figure could be the whole company. The genuinely safe case
+  (equity stated, pct merely unstated, control event) is already caught by the pct=100
+  "assumed" default and consumes the transaction-value rung. The rung's reachable set
+  was exactly the unsafe complement.
+- **Why no EV rung.** Below control an enterprise value is the grossed-up
+  whole-company figure and would report a 27%-for-$600M deal as $2.22B. Spec §2.10
+  item 3 stays parked; the currency and period work that landed on items 1-2 does not
+  bear on the gross-up.
+- **Why `EQUITY_BELOW_CONTROL` is not here.** Every value in this enum names the
+  *source field* that supplied the magnitude. `EQUITY_BELOW_CONTROL` names a
+  derivation condition, and the control status it records is already carried by
+  `transaction_value_basis`, `is_minority` and `pct_acquired`. Duplicating it would
+  make the field two-dimensional.
+- **Why `SOLE_INVESTOR_AMOUNT` is reserved rather than built.**
+  `transaction_participant` has no per-investor amount column — the funding prompt asks
+  for one, but there is nowhere to store it. `transaction_record.investment_amount` is
+  not a substitute: it is transaction-level and falls back to the legacy value slot, so
+  reading it would report a round, or a valuation, as one investor's check.
+- **Why a multi-investor round goes null.** Per-investor disclosure runs around 30% for
+  leads and under 5% for others, so summing whatever amounts exist understates the
+  round while presenting as one — worse than null, because the shortfall is invisible.
+- **PIPE coverage is deliberately out.** The funding family is exactly the classifier's
+  three types. A PIPE or public-company primary raise is not forced into them
+  (`prompts/deal_type_classifier.md`, guarded by
+  `scripts/test_minority_core_classification.py`), so it lands in `UNKNOWN` and gets a
+  null size. Widening the family inside the waterfall would silently reclassify deals
+  through the size field. Whether PIPEs deserve funding-size treatment is a separate
+  classifier/product decision.
+
+Consequences:
+
+- Guarded by `scripts/test_transaction_size.py`, verified to fail both when an equity
+  rung is re-added (the EV-only fixture then reports 2.22B) and when the export shadow
+  is restored.
+- **One waterfall, not two.** A canonical null now shows blank in the review sheet
+  where the shadow would have printed a figure. That is intended: the canonical rules
+  say the magnitude is unsupported, and a blank states it honestly. Reviewers will see
+  fewer populated size cells than before, and the ones remaining are attributable.
+- `transaction_size` must not be summed across bases — a control acquisition and a
+  round are different events. Enforce in the query layer. Note the basis alone does not
+  separate a below-control M&A from a control one (both stamp `TRANSACTION_VALUE`), so
+  a grouping key wanting that distinction needs `is_minority` or `pct_acquired` too.
+- Stage 9 now owns 117 columns, up from 115.
