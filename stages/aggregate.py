@@ -620,6 +620,9 @@ def _derive_implied_enterprise_value(
     net_debt: float | None,
     total_debt: float | None,
     cash_st: float | None,
+    *,
+    implied_equity_currency: str | None = None,
+    balance_sheet_currency: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Canonical 100%-basis enterprise value + basis.
 
@@ -627,11 +630,35 @@ def _derive_implied_enterprise_value(
     IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT — implied_equity_value + source/manual net_debt.
     IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT — implied_equity_value + total_debt - cash_st.
     Returns (None, None) when neither path is satisfiable.
+
+    §2.10 item 1 — the two calculated bases add consideration in deal currency to a
+    balance-sheet figure in the target's reporting currency. When both currencies are
+    known and differ, the sum is meaningless and is refused rather than produced; no
+    conversion is attempted here, because a conversion needs a defined FX date that
+    this pipeline does not yet carry.
+
+    The guard requires both currencies to be *known*. An unknown balance-sheet
+    currency stays permissive: net_debt/total_debt/cash_st are manual columns today
+    with no currency recorded, so refusing on unknown would null existing
+    derivations on no evidence. Closing that gap is a precondition of debt/cash
+    extraction, not of this guard.
+
+    A STATED enterprise value is a single source-stated figure rather than a sum, so
+    the guard does not apply to it.
     """
     if value_type == "ENTERPRISE_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
     if implied_equity_value is None:
         return None, None
+
+    cross_currency = bool(
+        implied_equity_currency
+        and balance_sheet_currency
+        and implied_equity_currency != balance_sheet_currency
+    )
+    if cross_currency:
+        return None, None
+
     if net_debt is not None:
         return round(implied_equity_value + net_debt, 2), "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT"
     if total_debt is not None and cash_st is not None:
@@ -683,6 +710,123 @@ def _pick_value_amount_for_type(field_observations: dict[str, list[dict]], targe
         )
         return float(ranked[0]["value"])
     return None
+
+
+# Financial metrics and the qualifiers that are only meaningful alongside them.
+# `financials_currency` is deliberately absent: one column serves both metrics, so
+# it is resolved separately by unanimity over the anchoring sources actually used.
+_METRIC_COMPANION_FIELDS: dict[str, tuple[str, ...]] = {
+    "target_revenue": (
+        "target_revenue_period_type",
+        "target_revenue_period_type_v2",
+        "target_revenue_period_end",
+    ),
+    "target_ebitda": (
+        "target_ebitda_period_type",
+        "target_ebitda_period_type_v2",
+        "target_ebitda_period_end",
+    ),
+}
+
+
+def _values_match(left: Any, right: Any) -> bool:
+    """Compare an observation value against a chosen canonical value."""
+    if left is None or right is None:
+        return False
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _anchor_source_keys(
+    field_observations: dict[str, list[dict]], anchor_field: str, anchor_value: Any
+) -> set:
+    """Source keys of the observations that supplied the chosen value for a field."""
+    return {
+        _source_key(obs)
+        for obs in field_observations.get(anchor_field, [])
+        if _values_match(obs.get("value"), anchor_value)
+    }
+
+
+def _companion_from_sources(
+    field_observations: dict[str, list[dict]], companion_field: str, source_keys: set
+) -> Any:
+    """Resolve a qualifier using only the sources that supplied the anchor amount.
+
+    Returns None when none of those sources stated it. That null is deliberate: a
+    qualifier borrowed from a different source silently re-labels an amount its own
+    source never described that way, which is worse than an acknowledged unknown.
+    """
+    if not source_keys:
+        return None
+    observations = [
+        obs
+        for obs in field_observations.get(companion_field, [])
+        if _source_key(obs) in source_keys and obs.get("value") is not None
+    ]
+    if not observations:
+        return None
+
+    field_type = _FIELD_TYPE.get(companion_field, "string")
+    chosen, needs_llm, conflict_obs = _pick_value(companion_field, field_type, observations)
+    if chosen is not None:
+        return chosen
+    if needs_llm and conflict_obs:
+        # Stay on the deterministic path, as _pick_value_amount_for_type does: rank
+        # by tier then confidence rather than opening a second aggregation prompt.
+        ranked = sorted(
+            conflict_obs,
+            key=lambda o: (
+                TIER_ORDER.index(o.get("tier")) if o.get("tier") in TIER_ORDER else len(TIER_ORDER),
+                _CONF_RANK.get(o.get("model_confidence") or "MEDIUM", 1),
+            ),
+        )
+        return ranked[0]["value"]
+    return None
+
+
+def _anchor_metric_qualifiers(
+    field_values: dict, field_observations: dict[str, list[dict]]
+) -> None:
+    """Re-resolve financial qualifiers against the source of their own amount (§2.10).
+
+    Mutates `field_values` in place. Every canonical field is otherwise selected
+    independently, so `target_revenue` can come from one source while
+    `target_revenue_period_end` and `financials_currency` come from another. The
+    period end is not cosmetic — the annual-as-trailing rule keys off it, so a
+    borrowed date can decide whether a multiple is computed at all.
+
+    `financials_currency` is shared by both metrics, so it cannot be anchored to one
+    of them. It resolves by unanimity over the currencies the anchoring sources
+    actually stated, and to null on disagreement — the same rule, and the same
+    "null is the signal" posture, as _derive_deal_value_currency.
+    """
+    anchored_currencies: list[str] = []
+    anchored_any_metric = False
+
+    for amount_field, companions in _METRIC_COMPANION_FIELDS.items():
+        amount = field_values.get(amount_field)
+        if amount is None:
+            continue
+        anchored_any_metric = True
+        source_keys = _anchor_source_keys(field_observations, amount_field, amount)
+        for companion in companions:
+            field_values[companion] = _companion_from_sources(
+                field_observations, companion, source_keys
+            )
+        currency = _companion_from_sources(
+            field_observations, "financials_currency", source_keys
+        )
+        if currency:
+            anchored_currencies.append(currency)
+
+    if not anchored_any_metric:
+        return
+
+    distinct = set(anchored_currencies)
+    field_values["financials_currency"] = next(iter(distinct)) if len(distinct) == 1 else None
 
 
 def _derive_enterprise_value(
@@ -1188,6 +1332,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 if _ftype == "json" and isinstance(field_values.get(_fname), (list, dict)):
                     field_values[_fname] = json.dumps(field_values[_fname])
 
+            # §2.10 items 1-2 — re-anchor each financial qualifier to the source of
+            # its own amount, before anything reads or persists them.
+            _anchor_metric_qualifiers(field_values, bundle["field_observations"])
+
             # Derive additional fields
             field_values.update(sponsor_participant_context.get(cluster_id, {}))
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
@@ -1203,7 +1351,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Check for existing transaction_record to determine version and to
             # preserve the manual net_debt input across re-aggregation.
             existing = conn.execute(
-                "SELECT aggregation_version, net_debt, total_debt, cash_st FROM transaction_record WHERE transaction_id=?",
+                "SELECT aggregation_version, net_debt, total_debt, cash_st, "
+                "net_debt_currency, total_debt_currency, cash_st_currency, "
+                "balance_sheet_as_of_date FROM transaction_record WHERE transaction_id=?",
                 (cluster_id,),
             ).fetchone()
             agg_version = (existing["aggregation_version"] + 1) if existing else 1
@@ -1211,11 +1361,22 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Derive valuations (the deterministic job — LLM captured primitives only).
             # sec_shares comes from SEC enrichment once it runs; None on PR-only data.
             # net_debt, total_debt, and cash_st are manual collection inputs in
-            # the interim; keep any stored value.
+            # the interim; keep any stored value. Their currency and as-of anchors
+            # are manual alongside them and preserved the same way.
             sec_shares = None
             net_debt = existing["net_debt"] if existing else None
             total_debt = existing["total_debt"] if existing else None
             cash_st = existing["cash_st"] if existing else None
+            net_debt_currency = existing["net_debt_currency"] if existing else None
+            total_debt_currency = existing["total_debt_currency"] if existing else None
+            cash_st_currency = existing["cash_st_currency"] if existing else None
+            balance_sheet_as_of_date = existing["balance_sheet_as_of_date"] if existing else None
+            # The currency of whichever balance-sheet input the derivation will use.
+            balance_sheet_currency = (
+                net_debt_currency
+                if net_debt is not None
+                else (total_debt_currency or cash_st_currency)
+            )
             pct_resolved, pct_acquired_source = _resolve_pct_acquired(
                 field_values, derived["is_minority"]
             )
@@ -1271,7 +1432,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 net_debt,
                 total_debt,
                 cash_st,
+                implied_equity_currency=deal_value_currency,
+                balance_sheet_currency=balance_sheet_currency,
             )
+            if (
+                implied_equity_value is not None
+                and implied_enterprise_value is None
+                and deal_value_currency
+                and balance_sheet_currency
+                and deal_value_currency != balance_sheet_currency
+            ):
+                log.warning(
+                    "cluster=%s implied EV not derived — deal currency %s vs balance-sheet "
+                    "currency %s (§2.10 item 1; no FX date available)",
+                    cluster_id, deal_value_currency, balance_sheet_currency,
+                )
             # Legacy compatibility columns mirror the canonical Tier-2 field until
             # downstream readers are moved.
             enterprise_value = implied_enterprise_value

@@ -183,8 +183,18 @@ Key config flags:
 
 Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
 
-1. **Currency + period anchoring** (§2.10 items 1–2) — still required before broad
-   `total_debt`/`Cash_ST` extraction as `target_financials` metrics.
+1. ~~**Currency + period anchoring** (§2.10 items 1–2)~~ — **landed 2026-08-17.**
+   Financial qualifiers now anchor to the source of their own amount; an unstated
+   qualifier is null rather than borrowed. `implied_enterprise_value` refuses a
+   calculated basis across two known, differing currencies. Anchor columns
+   `net_debt_currency` / `total_debt_currency` / `cash_st_currency` /
+   `balance_sheet_as_of_date` added to `transaction_record`. See decisions.md
+   "Financial Qualifiers Anchor to the Source of Their Own Amount" and
+   `scripts/test_currency_period_anchoring.py`.
+   **Still owed before debt/cash extraction:** the extraction must populate the
+   currency anchors (the cross-currency guard is dormant without them), and the
+   period-coherence tolerance between `balance_sheet_as_of_date` and the multiple
+   denominator's period is deliberately still undecided.
 2. **`total_debt` + `Cash_ST` as `target_financials` metrics** — with period type
    and `period_end_date`; activates the dormant `transaction_value` total-debt branch and
    lets `net_debt` derive from `total_debt − Cash_ST`.

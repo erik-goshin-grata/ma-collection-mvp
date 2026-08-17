@@ -399,6 +399,18 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # or total_debt - cash_st feeds implied_enterprise_value. pct_acquired_source stamps §2.6.
         ("total_debt",                       "REAL"),
         ("cash_st",                          "REAL"),
+        # §2.10 items 1-2 — currency and period anchors for the balance-sheet
+        # inputs. implied_enterprise_value adds consideration in deal currency to
+        # net debt in the target's reporting currency; without a recorded currency
+        # that sum cannot be checked. Manual interim inputs like the amounts they
+        # qualify, preserved across re-aggregation, and unpopulated until
+        # total_debt/Cash_ST extraction lands. balance_sheet_as_of_date is the
+        # period anchor those figures are stated as of, for coherence against the
+        # announced date and the multiple denominator's own period.
+        ("net_debt_currency",                "TEXT"),
+        ("total_debt_currency",              "TEXT"),
+        ("cash_st_currency",                 "TEXT"),
+        ("balance_sheet_as_of_date",         "TEXT"),
         ("transaction_value",                "REAL"),
         ("transaction_value_basis",          "TEXT"),
         ("pct_acquired_source",              "TEXT"),

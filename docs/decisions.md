@@ -1195,3 +1195,56 @@ Consequences:
   canonical fields).
 - `scripts/validate_331c_observation_read.py` remains the staging-vs-observation
   parity check and still requires a live `--source-db`.
+
+## 2026-08-17 - Financial Qualifiers Anchor to the Source of Their Own Amount
+
+Status: accepted. Implements spec §2.10 items 1 and 2.
+
+Decision:
+
+- A financial qualifier — period type, period end, currency — is resolved from the
+  source that supplied the amount it qualifies, not independently across the cluster.
+- When the anchoring source stated no qualifier, the qualifier is null. It is never
+  borrowed from another source.
+- `financials_currency` is shared by revenue and EBITDA, so it cannot anchor to one
+  of them. It resolves by unanimity over the currencies the anchoring sources
+  actually stated, and to null on disagreement — the same rule as
+  `deal_value_currency`.
+- `implied_enterprise_value` is not derived from a calculated basis when the deal
+  currency and the balance-sheet currency are both known and differ. No conversion
+  is attempted; a conversion needs an FX date this pipeline does not carry.
+- The cross-currency guard requires both currencies to be known. An unknown
+  balance-sheet currency stays permissive.
+
+Context:
+
+- Aggregation resolves every canonical field independently. `target_revenue` could
+  be selected from one source while `target_revenue_period_end` and
+  `financials_currency` were selected from another, re-labelling an amount with a
+  qualifier its own source never stated.
+- This is not cosmetic. The annual-as-trailing rule keys off `period_end`, so a
+  borrowed date decides whether a multiple is computed at all. The regression
+  fixture shows a 5.0x EV/Revenue struck against a period the amount's source never
+  stated; after anchoring, the period is null and no multiple is produced.
+- It is the same defect class as the typed-value collapse fixed on 2026-08-17: a
+  per-fact qualifier resolved independently of the fact it qualifies.
+
+Consequences:
+
+- Some rows will lose a period end, a financials currency, or a multiple that was
+  previously populated from a borrowed qualifier. Those values were not supported by
+  the source of their own amount; the null is the correct answer, and it is
+  queryable.
+- Four nullable columns are added to `transaction_record`: `net_debt_currency`,
+  `total_debt_currency`, `cash_st_currency`, `balance_sheet_as_of_date`. They are
+  manual interim inputs alongside the amounts they qualify, preserved across
+  re-aggregation, and unpopulated until debt/cash extraction lands.
+- The cross-currency guard is dormant until those currency columns are populated.
+  That is deliberate: it is the precondition debt/cash extraction must satisfy, and
+  it exists now so the extraction has a defined place to write.
+- Aggregation remains incremental. Existing `AGGREGATED` rows keep their unanchored
+  qualifiers until a deliberate AGGREGATED→CLUSTERED reset re-derives them.
+- Period *coherence* between the balance-sheet as-of date and the multiple
+  denominator's period (§2.10 item 2's second half) is not yet enforced. The anchor
+  column exists; the tolerance rule is deliberately left undecided rather than
+  invented here, and is owed before debt/cash extraction.
