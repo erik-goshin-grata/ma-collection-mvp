@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.17 (balance-sheet capture: total_debt / cash_st, POINT_IN_TIME, stated-USD preference)
+**Version:** 0.18 (equity scope: EQUITY_VALUE is stake-level only; MARKET_CAPITALIZATION split out)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -299,14 +299,25 @@ value:
   amount is null — never return a currency for a value that was not stated (an
   undisclosed deal has null amount AND null currency).
 - type: What the stated value represents — use V2 MetricType vocabulary:
-    EQUITY_VALUE — equity purchase price, a per-share × shares aggregate the
-      source itself states, or market capitalization (do not compute the
-      product yourself — see rule 1)
+    EQUITY_VALUE — the equity purchase price for the stake actually acquired,
+      or a per-share × shares aggregate the source itself states (do not
+      compute the product yourself — see rule 1). This is consideration that
+      changed hands, NOT a valuation of the whole company. A market
+      capitalization is not an EQUITY_VALUE — see MARKET_CAPITALIZATION below.
     TRANSACTION_VALUE — total consideration including assumed debt; often
       labelled "transaction value" or "total consideration"
     ENTERPRISE_VALUE — source-stated whole-company EV; often labelled
       "enterprise value" or "including net debt." Do not compute EV from
       equity value, debt, or cash in this extraction prompt.
+    MARKET_CAPITALIZATION — the target's or acquirer's public market value of
+      equity, as stated by the source. This is a whole-company figure and a
+      property of the company, not of the transaction: nothing was bought at
+      this price. Capture it when the source states it, so the fact is kept,
+      but never use it as the deal's equity purchase price or consideration.
+      A minority stake bought for $600 million in a company with a $2.2
+      billion market cap is a $600 million transaction — the $2.2 billion is
+      context, and recording it as the equity value overstates the deal by
+      nearly 4x.
     UNDISCLOSED — source explicitly states terms are not disclosed
   Null if no value is stated and source does not say undisclosed.
 - type_confidence: HIGH / MEDIUM / LOW — how confident you are in the type
@@ -342,7 +353,12 @@ EBITDA.
 - Include at minimum amount, currency, type, basis or qualifier if stated, and
   a short evidence phrase.
 - Valid type values are the same as value.type: EQUITY_VALUE,
-  TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED.
+  TRANSACTION_VALUE, ENTERPRISE_VALUE, MARKET_CAPITALIZATION, UNDISCLOSED.
+- A MARKET_CAPITALIZATION observation is never the primary value. The primary
+  fact is the most transaction-specific one — the equity purchase price or the
+  total consideration. A market cap describes the company, not the deal, so it
+  belongs later in the array and never in the legacy value object unless the
+  source states no transaction value at all.
 - Use basis="STATED" for source-stated values when no more specific basis is
   needed. Use qualifier for words like "approximately", "up to", or "subject to
   adjustment".

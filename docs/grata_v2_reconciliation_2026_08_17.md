@@ -140,6 +140,36 @@ counterpart** in dictionary §7, which lists `transaction_value_basis` and
 currently dormant in the harness (the SEC share count is not wired), so this is **[4]**
 for validation but **[2]** for schema.
 
+**Amended 2026-08-17 — `equity_value` scope is now enforced, and Grata needs the same
+two rules.** The harness found that two writers could put a whole-company figure into
+stake-level `equity_value`, and that nothing downstream could tell. Both are now closed,
+and both generalise beyond this harness:
+
+- **A market capitalization is not an equity value.** It is a property of the company,
+  not of the transaction — nothing was bought at that price. It is now its own type,
+  `MARKET_CAPITALIZATION`, retained as a fact but never routed into consideration. It
+  does **not** belong in `implied_equity_value` either: that field is the valuation the
+  *deal* implies, and conflating it with what the market says would make the Tier 2
+  figure mean two different things.
+  → **Grata: add `MARKET_CAPITALIZATION` to `MetricType`, classified `COMPANY_FINANCIAL`
+  rather than `DEAL_VALUE`** (D0 / dictionary §8). That classification *is* the fix:
+  it is a company property, so it inherits period semantics rather than value-basis
+  semantics, and it can never be a canonical deal value.
+- **`PER_SHARE_X_SHARES` is 100%-basis by construction** — per-share price times the
+  target's *total* diluted count prices the whole company. It is admitted only at
+  `pct_acquired == 100`, and is **never scaled** by pct below that, because the pipeline
+  holds total shares and never acquired shares.
+  → **Grata: a calculated equity value must record which scope its inputs had.** Any
+  `share_count x price` derivation needs the same gate, or the basis stamp asserts a
+  scope the number does not have.
+
+The general principle, and the one worth carrying into the dictionary: **a field with a
+declared scope must have every writer be that scope by construction.** `equity_value`
+feeds a gross-up that divides by pct, so a whole-company input is grossed a second time
+— 2.2B at pct 27 becomes 8.15B of implied equity. `value_type` was already the natural
+scope discriminator; it was merely under-specified, which is why the fix needed no new
+column.
+
 ### 4. Tier 2 value basis and provenance — `implied_equity_value`, `implied_enterprise_value`
 
 **[1] [3] [4]** The harness vocabulary matches Grata D3 and dictionary §7 exactly:
@@ -373,6 +403,12 @@ collapsed by the single-slot value object.
    `EQUITY_VALUE_PLUS_TOTAL_DEBT` spelling at the same time. — item 3
 4. **`equity_value_basis`** (`STATED` / `PER_SHARE_X_SHARES`) — dictionary §7 has bases
    for transaction value and implied equity but none for equity value. — item 3
+4b. **`MARKET_CAPITALIZATION` as a `MetricType`, classified `COMPANY_FINANCIAL`.** A
+   market cap is a property of the company, not the transaction; classifying it outside
+   `DEAL_VALUE` is what structurally prevents it becoming a canonical deal value. Pair
+   it with the scope rule: every writer into a scope-declared field must be that scope
+   by construction, and a `share_count x price` derivation is 100%-basis unless gated
+   to full acquisition. — item 3 (amended)
 5. **Per-fact provenance on `financial_metric`**: source attribution plus a fact key, so
    corroboration is distinguishable from multiplicity. — items 1, 14
 6. **The qualifier-anchoring rule as a derivation constraint**: a metric row never

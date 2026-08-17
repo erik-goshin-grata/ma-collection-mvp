@@ -582,21 +582,48 @@ def _derive_equity_value(
     fv: dict,
     per_share_price: float | None,
     sec_shares: float | None,
+    pct: float | None = None,
 ) -> tuple[float | None, str | None]:
     """Stake-level equity value + basis — the consideration for the stake actually
     acquired, never grossed up, uniform across control and non-control (§4.2).
 
       STATED             — source stated an equity figure (value_type=EQUITY_VALUE).
-      PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count.
+      PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count,
+                           permitted only at pct == 100 (see below).
 
     Post-money is NOT equity value: it belongs in post_money_valuation (and the
     implied tier via _derive_implied_equity), never here. A primary-capital raise has
     null value fields, so it yields None here and lives in investment_amount (bug #8).
+
+    **Every writer here must be stake-level by construction**, because the field feeds
+    `_derive_implied_equity`, which divides by pct. A whole-company amount arriving
+    here is grossed up a second time: a 2.2B figure at pct 27 becomes 8.15B of implied
+    equity, and any multiple struck off that is manufactured. Decision "FINDING:
+    equity_value Conflates Stake-Level and 100%-Basis Scope" (2026-08-17).
+
+    Two guards enforce that, one here and one upstream:
+
+    - `MARKET_CAPITALIZATION` is its own value type as of HC prompt 0.18, so a market
+      cap no longer arrives typed `EQUITY_VALUE`. The `== "EQUITY_VALUE"` test below
+      is what excludes it; the fact itself is still retained in the observation ledger.
+    - `per_share_price x sec_shares` is 100%-basis unconditionally — `sec_shares` is
+      the target's *total* fully diluted count, so the product prices the whole company.
+      It is admitted only when `pct == 100`, the one case where whole-company and
+      stake-level coincide.
+
+    Below 100 the product is **not scaled** into a stake figure. We hold total shares,
+    never acquired shares, so `per_share x total_shares x pct` would manufacture an
+    amount no source stated. Unknown pct is refused for the same reason: unknown scope
+    is not a licence to claim the whole company. None is the correct answer.
     """
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "EQUITY_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if per_share_price and per_share_price > 0 and sec_shares and sec_shares > 0:
+    if (
+        per_share_price and per_share_price > 0
+        and sec_shares and sec_shares > 0
+        and pct is not None and pct == 100
+    ):
         return round(per_share_price * sec_shares, 2), "PER_SHARE_X_SHARES"
     return None, None
 
@@ -1701,6 +1728,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 equity_value_fields,
                 field_values.get("per_share_price"),
                 sec_shares,
+                pct_resolved,
             )
             implied_equity_value = _derive_implied_equity(equity_value, pct_resolved)
             investment_amount = _derive_investment_amount(field_values)

@@ -14,7 +14,8 @@ The "hc" key is only added when the model returns non-null notes.
 
 Schema validation enforced:
   - Required top-level keys must be present
-  - value.type must be in: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED
+  - value.type must be in: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE,
+    MARKET_CAPITALIZATION, UNDISCLOSED
 
 Spec references: prompts/high_confidence_extraction.md,
                  specs/pipeline.md §2 (Stage 4)
@@ -49,7 +50,13 @@ _REQUIRED_KEYS = frozenset({
     "deal",
     "financials_disclosure_status",
 })
-_VALID_VALUE_TYPES = frozenset({"EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE", "UNDISCLOSED"})
+# MARKET_CAPITALIZATION (prompt 0.18) is a whole-company observation, deliberately
+# outside the stake-level consideration vocabulary. It must be listed here or a 0.18
+# extraction emitting it is rejected wholesale rather than merely ignored.
+_VALID_VALUE_TYPES = frozenset({
+    "EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE",
+    "MARKET_CAPITALIZATION", "UNDISCLOSED",
+})
 _VALID_ACQUIRER_TYPES_V2 = frozenset({
     "strategic_corporate", "private_equity", "pe_portfolio", "venture_capital",
     "growth_equity", "sovereign_wealth_fund", "pension_fund", "hedge_fund",

@@ -129,24 +129,28 @@ Key config flags:
 
 ## Known Gaps / Deferred Work
 
-**Equity scope conflation (found 2026-08-17, not fixed):**
-`equity_value` is defined as stake-level, but two writers can put a whole-company
-figure in it — the HC prompt admits *market capitalization* as an `EQUITY_VALUE`, and
-`PER_SHARE_X_SHARES` multiplies by the target's *total* diluted share count. Damage
-condition for both is `pct_acquired < 100`, where `_derive_implied_equity` grosses up
-a figure already at 100%. Reaches seven canonical fields.
-- `PER_SHARE_X_SHARES` — **dormant**, `sec_shares` is hardcoded `None`; zero live
-  rows. **Gate it on `pct == 100` before wiring SEC share count**, or wiring
-  activates the defect silently.
-- Market cap — **taxonomy defect confirmed; live-data status undetermined.** Needs
-  the read-only diagnostic run against `ma_mvp.db`; do not assert either way from
-  inference. The prompt has permitted it since 2026-08-07, across every HC version
-  that produced the corpus.
-- Fix is two changes and needs no new column (`value_type` is already the
-  discriminator). The taxonomy half only takes effect on re-extracted rows, so it
-  does not retroactively clean the corpus. See decisions.md, "FINDING: equity_value
-  Conflates Stake-Level and 100%-Basis Scope".
-- **Does not block `transaction_size`**, which reads `transaction_value` only.
+**Equity scope conflation — FIXED 2026-08-17 (forward-looking):**
+`equity_value` is stake-level only. `EQUITY_VALUE` no longer admits market
+capitalization, which became its own `MARKET_CAPITALIZATION` type (HC prompt 0.18) —
+retained as a fact, never canonical consideration. `PER_SHARE_X_SHARES` is gated to
+`pct_acquired == 100` and is never scaled below it. Guarded by
+`scripts/test_equity_value_scope.py`; see decisions.md, "equity_value Is Stake-Level
+Only; Market Cap Is Its Own Type".
+- **Live diagnostic was clean:** 92 records, 7 with `equity_value`, 1 exposed at
+  `pct < 100`, 0 `PER_SHARE_X_SHARES`, 0 confirmed market-cap candidates. Text
+  matching is heuristic, so that is *no evidence found*, **not proof of absence**.
+- **What is still open:** the taxonomy half applies only to rows extracted at 0.18+.
+  It does not retroactively clean the corpus, and no re-extraction is scheduled —
+  Path B remains deferred. Existing rows keep whatever scope semantics produced them.
+
+**PIPE coverage in `transaction_size` (open — classifier/product decision):**
+The Funding family is `{VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT}`, unchanged. A PIPE or
+public-company primary raise is deliberately *not* forced into it
+(`prompts/deal_type_classifier.md`, guarded by
+`scripts/test_minority_core_classification.py`), so it falls to `UNKNOWN` and receives
+`transaction_size = null`. This was accepted rather than widened silently through the
+waterfall. Whether PIPEs should get a funding-size treatment is a separate
+classifier/product decision, not a `transaction_size` one.
 
 **Funding path (partial):**
 - `stages/funding_lc_extract.py` — not written; prompt exists

@@ -1398,9 +1398,9 @@ Consequences:
 
 ## 2026-08-17 - FINDING: equity_value Conflates Stake-Level and 100%-Basis Scope
 
-Status: **finding recorded, not yet fixed.** No code or prompt change in this entry.
-Fixes are sequenced as separate commits; `transaction_size` is unblocked and may
-land first.
+Status: **accepted and FIXED 2026-08-17** (see the resolution entry below). Recorded
+here in full because the finding, its blast radius, and the live-data verdict remain
+the reasoning behind the fix.
 
 Finding:
 
@@ -1480,3 +1480,58 @@ Consequences:
   is deferred. Assessing them is a diagnostic-plus-human-review job, not a code fix.
 - `transaction_size` is not blocked by either. Having removed the direct equity rung,
   it reads `transaction_value` only, so it inherits this defect without amplifying it.
+
+## 2026-08-17 - equity_value Is Stake-Level Only; Market Cap Is Its Own Type
+
+Status: accepted. Implemented; forward-looking. **No re-extraction** — Path B stays
+deferred, so existing rows are unchanged by this commit.
+
+Decision:
+
+- `EQUITY_VALUE` means the equity purchase price for the **stake actually acquired**,
+  or a per-share x shares aggregate the source itself states. It is consideration that
+  changed hands, not a valuation of the whole company.
+- **Market capitalization is no longer an `EQUITY_VALUE`.** It gets its own type,
+  `MARKET_CAPITALIZATION` (HC prompt 0.18), which is captured so the fact survives in
+  the observation ledger but never flows into canonical consideration — not into
+  `equity_value`, and not into `implied_equity_value` either.
+- `PER_SHARE_X_SHARES` may populate stake-level `equity_value` **only when
+  `pct_acquired == 100`**. Unknown pct is refused along with pct below 100.
+- **It is not scaled.** `per_share x total_shares x pct` is not derived below 100,
+  because the pipeline holds total shares and never acquired shares, so any scaling
+  manufactures a stake amount no source stated. None is the correct output.
+- `MARKET_CAPITALIZATION` is added to `_VALID_VALUE_TYPES`, without which a 0.18
+  extraction emitting it would be rejected wholesale rather than merely ignored.
+- A market cap is never the primary/legacy value fact. The primary is the most
+  transaction-specific one.
+
+Context:
+
+- The live diagnostic on `data/ma_mvp.db` found **no evidence of contamination**: 92
+  records, 7 with `equity_value`, 1 at `pct < 100` and therefore exposed, 0 rows at
+  `PER_SHARE_X_SHARES`, 0 confirmed market-cap candidates. Text matching is heuristic,
+  so this is *no evidence found*, **not proof of absence** — and the fix is therefore
+  framed as forward-looking rather than as a cleanup.
+- The one exposed row is where a contaminated extraction would land, which is why the
+  guard is worth having even on a clean corpus.
+- `_derive_implied_equity` divides by pct, so a whole-company amount reaching
+  `equity_value` is grossed up a second time: 2.2B at pct 27 yields 8.15B of implied
+  equity, and any multiple struck off it is manufactured.
+- `value_type` was already the natural scope discriminator; it was merely
+  under-specified. Splitting the type therefore needs **no new column**.
+
+Consequences:
+
+- Guarded by `scripts/test_equity_value_scope.py`, which was verified to fail against
+  both halves independently — the ungated per-share branch, and a prompt that still
+  admits market cap.
+- Its end-to-end fixture deliberately resolves the collapsed legacy value slot **to the
+  market cap**. `equity_value` must still be the stake consideration, because each
+  canonical field consumes its own semantic type rather than whichever fact wins the
+  legacy collapse. A stub picking the equity fact would let a scope-blind
+  implementation pass.
+- The taxonomy half only takes effect on rows extracted at 0.18 or later. It does not
+  retroactively clean the corpus, and no re-extraction is scheduled to make it do so.
+- The `PER_SHARE_X_SHARES` gate is inert today (`sec_shares` is hardcoded `None`) but
+  had to land **before** SEC share count is wired, which would otherwise have activated
+  the defect silently.
