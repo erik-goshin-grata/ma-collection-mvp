@@ -58,22 +58,42 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.quantify_net_debt_currency_gap import col_or_null, table_columns  # noqa: E402
 
-# Approved 2026-08-17 from the remediation table. Amount in whole units; it must match
-# the row's current transaction_value exactly or the row is skipped as changed-under-us.
-APPROVED: dict[str, float] = {
-    "Ent": 100_000_000,
-    "Hydra Host": 100_000_000,
-    "Respond.io": 62_500_000,
-    "Arcade.dev": 60_000_000,
-    "Interchecks": 50_000_000,
-    "Radical Numerics": 50_000_000,
-    "Gray Swan": 40_000_000,
-    "Rejoni": 25_000_000,
-    "Kimba": 6_500_000,
+# Approved batches, in the order they were authorized. Amounts are in whole units and
+# must match the row's staged amount exactly, or the row is skipped as changed-under-us.
+#
+# Batches are kept separate rather than merged into one list so the record of what was
+# approved, when, and on what evidence survives. Re-running an applied batch is a no-op:
+# its rows now carry a round_size and no longer match the selection.
+BATCHES: dict[str, dict[str, float]] = {
+    # Applied 2026-08-17. Stage 9 re-run confirmed: 9 rows at basis ROUND_SIZE.
+    "batch1_legacy_hc012": {
+        "Ent": 100_000_000,
+        "Hydra Host": 100_000_000,
+        "Respond.io": 62_500_000,
+        "Arcade.dev": 60_000_000,
+        "Interchecks": 50_000_000,
+        "Radical Numerics": 50_000_000,
+        "Gray Swan": 40_000_000,
+        "Rejoni": 25_000_000,
+        "Kimba": 6_500_000,
+    },
+    # Approved from the coverage review. Both carry exact primary-capital amounts bound
+    # to the target's own financing event.
+    "batch2_coverage_review": {
+        "Aston Power": 20_000_000,
+        "AttoTude": 52_000_000,
+    },
 }
-# Carried through the plan, never written. Requires the source sentence establishing the
-# amount before it can be approved.
-UNRESOLVED = {"Cellares": "50M amount has no identified supporting source sentence"}
+DEFAULT_BATCH = "batch2_coverage_review"
+
+# Carried through the plan, never written. Each needs a source sentence binding the
+# amount to the financing event before it can be approved.
+UNRESOLVED = {
+    "Cellares": "the $50M is not tied to the financing event by any source sentence",
+    "Chronograph": "source says 'over $140 million' — a lower bound. The model has no "
+                   "qualifier field for round_size at any layer, so writing 140M would "
+                   "assert an exactness the source withheld. Representation gap.",
+}
 
 IN_SCOPE_EVENTS = ("VC_ROUND", "GROWTH_EQUITY")
 
@@ -85,8 +105,10 @@ def _match(target: str | None, key: str) -> bool:
     return t == k or t.startswith(k + " ") or t.startswith(k + ",") or k in t
 
 
-def select_rows(conn: sqlite3.Connection):
-    """Select and classify the in-scope rows. Pure read — mutates nothing.
+def select_rows(conn: sqlite3.Connection, batch: str = DEFAULT_BATCH):
+    """Select and classify the in-scope rows for one approved batch.
+
+    Pure read — mutates nothing.
 
     Returns (planned, unresolved, skipped), each a list of tuples:
       planned    -> (row, approved_key, amount)
@@ -165,10 +187,11 @@ def select_rows(conn: sqlite3.Connection):
         IN_SCOPE_EVENTS,
     ).fetchall()
 
+    approved = BATCHES[batch]
     planned, skipped, unresolved = [], [], []
     for r in rows:
         name = r["target_name"] or ""
-        approved_key = next((k for k in APPROVED if _match(name, k)), None)
+        approved_key = next((k for k in approved if _match(name, k)), None)
         unresolved_key = next((k for k in UNRESOLVED if _match(name, k)), None)
         if unresolved_key:
             unresolved.append((r, UNRESOLVED[unresolved_key]))
@@ -176,7 +199,7 @@ def select_rows(conn: sqlite3.Connection):
         if not approved_key:
             skipped.append((r, "not on the approved list"))
             continue
-        expected = APPROVED[approved_key]
+        expected = approved[approved_key]
         if abs(float(r["staged_amount"]) - expected) > 0.5:
             skipped.append((r, f"amount changed: approved {expected:,.0f}, "
                                f"found {r['staged_amount']:,.0f}"))
@@ -188,6 +211,9 @@ def select_rows(conn: sqlite3.Connection):
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True)
+    ap.add_argument("--batch", default=DEFAULT_BATCH,
+                    choices=sorted(BATCHES),
+                    help=f"approved batch to plan (default {DEFAULT_BATCH})")
     ap.add_argument("--sql", action="store_true", help="print the statements, do not run")
     ap.add_argument("--apply", action="store_true", help="EXECUTE the writes")
     ap.add_argument("--approved-by", default=None, help="required with --apply")
@@ -202,9 +228,9 @@ def main() -> None:
 
     tr_cols = table_columns(conn, "transaction_record")
     se_cols = table_columns(conn, "staging_extraction")
-    planned, unresolved, skipped = select_rows(conn)
+    planned, unresolved, skipped = select_rows(conn, args.batch)
 
-    print(f"\n{'=' * 74}\nFUNDING round_size REMEDIATION — "
+    print(f"\n{'=' * 74}\nFUNDING round_size REMEDIATION [{args.batch}] — "
           f"{'APPLY' if args.apply else 'DRY RUN (nothing written)'}\n{'=' * 74}")
     print(f"  in-scope rows found : "
           f"{len(planned) + len(unresolved) + len(skipped)}")

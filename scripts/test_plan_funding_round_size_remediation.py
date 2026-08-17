@@ -118,13 +118,13 @@ def _build(path: str, *, migrated: bool) -> None:
     conn.close()
 
 
-def _plan(path: str):
-    """Run the planner's selection + classification. Read-only."""
+def _plan(path: str, batch: str = "batch1_legacy_hc012"):
+    """Run the planner's selection + classification for one batch. Read-only."""
     import scripts.plan_funding_round_size_remediation as planner
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     try:
-        return planner.select_rows(conn)
+        return planner.select_rows(conn, batch)
     finally:
         conn.close()
 
@@ -196,6 +196,32 @@ def main() -> None:
             sorted(a for _r, _k, a in m_planned),
             sorted(a for _r, _k, a in planned),
         )
+
+        # --- 4. Batches are isolated ---------------------------------------
+        # A batch plans only its own approvals. Rows approved in another batch are
+        # skipped, not silently swept in — that is what keeps a bounded remediation
+        # bounded when a later batch is added to the same file.
+        import scripts.plan_funding_round_size_remediation as planner
+        _check(failures, "batch2 exists", "batch2_coverage_review" in planner.BATCHES, True)
+        _check(failures, "batch2 is exactly Aston Power + AttoTude",
+               sorted(planner.BATCHES["batch2_coverage_review"]),
+               ["Aston Power", "AttoTude"])
+        _check(failures, "batch1 unchanged at nine rows",
+               len(planner.BATCHES["batch1_legacy_hc012"]), 9)
+        # The fixture holds only batch1 targets, so batch2 must plan nothing from it.
+        b2_planned, _b2_unres, b2_skipped = _plan(legacy, "batch2_coverage_review")
+        _check(failures, "batch2 plans nothing from a batch1 fixture", len(b2_planned), 0)
+        if not b2_skipped:
+            failures.append("batch2 should report batch1 rows as skipped, not invisible")
+        # Chronograph is carried as unresolved and can never be planned.
+        _check(failures, "Chronograph is unresolved, not approved",
+               any("Chronograph" in k for k in planner.UNRESOLVED), True)
+        for batch_name, approvals in planner.BATCHES.items():
+            for name in approvals:
+                if name in planner.UNRESOLVED:
+                    failures.append(
+                        f"{name!r} is both approved in {batch_name} and unresolved"
+                    )
 
     if failures:
         for failure in failures:

@@ -1727,3 +1727,148 @@ Consequences:
 - The transaction-level column is now inert. Whether to drop it, or repurpose it as a
   materialized view of a single party-level check, is an open schema question — not
   decided here.
+
+## 2026-08-17 - Legacy Funding round_size Remediation: Nine Rows Applied
+
+Status: **applied and validated on the live corpus.** Stage 9 re-run on
+`read_source=observation` completed successfully.
+
+Outcome:
+
+| Measure | Value |
+|---|---|
+| `transaction_record` rows | 92 |
+| `transaction_size_basis = ROUND_SIZE` | 9 |
+| `transaction_size_basis = TRANSACTION_VALUE` | 13 |
+| `transaction_size_basis` null | 70 |
+
+**Model-integrity assertion PASSED:** of the 13 rows at
+`transaction_size_basis = TRANSACTION_VALUE`, **zero** are in the funding family.
+No funding row takes the M&A rung. Asserted by `scripts/review_funding_coverage.py`,
+whose check is itself verified against a planted violation so it cannot pass
+vacuously.
+
+The nine remediated rows — Ent, Hydra Host, Respond.io, Arcade.dev, Interchecks,
+Radical Numerics, Gray Swan, Rejoni, Kimba — now carry
+`round_size == transaction_size` at basis `ROUND_SIZE`, with the stale funding
+`transaction_value` and the generic `investment_amount` cleared.
+
+Context:
+
+- The remediation wrote **only** `staging_extraction.round_size` plus an appended
+  `MANUAL_REMEDIATION` observation. Every canonical field above was *derived* by Stage 9,
+  not written by hand, so the DB is in a state Stage 9 can reproduce.
+- The stale values cleared themselves: `transaction_value` and `equity_value` by the
+  funding family gate, `investment_amount` by the corrected derivation. No destructive
+  edit was needed for any of them.
+- History is intact. The original `value_amount` / `value_type` and their
+  `TRANSACTION_VALUE` observations were left in place as the record of what prompt 0.12
+  actually extracted.
+- **Cellares was not remediated** — its $50M has no identified supporting source
+  sentence, and it is carried into the coverage review rather than guessed.
+
+## 2026-08-17 - FINDING: No Qualifier Representation for Non-Exact Amounts
+
+Status: **finding recorded, not fixed.** Blocks canonicalizing any bounded or
+approximate funding amount.
+
+Finding:
+
+A source stating *"a minority growth equity investment of **over** $140 million"*
+(Chronograph) gives a **lower bound**, not a figure. The model has nowhere to record
+that distinction:
+
+- the funding prompt's `round` object has **no qualifier field** — `size` is a bare
+  number;
+- `staging_extraction` has **no `round_size_qualifier`**;
+- `transaction_record` has **no `*_qualifier` column at all**.
+
+`staging_extraction.value_qualifier` exists and reaches the observation ledger
+(`lib/observation_writer.py`), but it is **not aggregated onto `transaction_record`** —
+so even on the M&A side, "approximately $500 million" arrives at the canonical layer as
+a bare 500,000,000. The gap is wider than funding.
+
+Consequence, and the reason this is recorded rather than worked around: writing
+`round_size = 140000000` for Chronograph would assert an exactness the source withheld,
+and **nothing downstream could distinguish it from a stated $140M**. Null plus a flagged
+representation gap is the honest state until the model can carry the bound.
+
+Classes affected: `over` / `more than` / `in excess of` / `at least` (lower bounds),
+`approximately` / `about` / `nearly` (point estimates), `up to` (upper bounds), and
+explicit ranges. They are not interchangeable and a single `qualifier` string flattens
+them, which is a design question rather than a defect to patch quickly.
+
+Options, none adopted:
+
+- `round_size_qualifier TEXT` mirroring the existing `value_qualifier` — minimal and
+  consistent, but a free-text string is not queryable and does not order.
+- `round_size_min` / `round_size_max` bounds — queryable and orders correctly; a stated
+  exact figure sets both. Larger change.
+- Status quo — the amount survives only in the source text and the notes, and is absent
+  from every analytical surface.
+
+If the qualifier route is taken, fix `value_qualifier`'s missing propagation to
+`transaction_record` in the same pass; otherwise the two sides stay inconsistent.
+
+## 2026-08-17 - Funding Coverage Review: Binding, Not Proximity
+
+Status: accepted. Classifier rewritten; second remediation batch approved, not applied.
+
+Decision:
+
+- A money figure may only be read as `round_size` when it is **bound** to the target's
+  own financing event by an explicit construction — "raised `<AMT>`", "`<AMT>` in Series
+  B funding", "financing round of `<AMT>`", "investment of `<AMT>`". Co-occurrence in a
+  sentence is not evidence.
+- Each amount is judged on **its own span** — the text between the previous money figure
+  and the next — so a qualifier attached to one number cannot disqualify another.
+- Scope markers attached to an amount disqualify it outright, whatever financing
+  language sits nearby: investor/firm scope (AUM, fund size, portfolio, since
+  inception), cumulative/historical (to date, total raised, bringing total), and
+  valuation (post-money, pre-money, market cap, valued at).
+- **Second remediation batch approved: Aston Power $20M and AttoTude $52M only.** Not
+  applied.
+
+Context — the four confirmed false positives that forced this:
+
+| Row | Figure | What it actually measured |
+|---|---|---|
+| AIRS Medical | $65B | the investor firm's capital raised to date |
+| Elektrik | $9B | Lead Edge Capital's firm size / AUM |
+| Flutterwave | $3.2B | a post-money valuation |
+| Fortus | £400M / £1.1B | the investment firm's historical portfolio figures |
+
+Every one is a number belonging to a **different entity or a different concept** than
+the financing event. The first classifier asked only "does this sentence contain
+financing language and a number?" and took the first number — which is how a firm's AUM
+became a round size. Numeric proximity is not a signal.
+
+The per-amount span rule is what makes this precise rather than merely stricter: in
+*"raised $250 million at a $3.2 billion post-money valuation"*, a whole-sentence
+rejection would discard the raise along with the valuation. Both behaviours are pinned
+by regression, and reverting either one reproduces the exact live false positives.
+
+Confirmed classifications from the live review:
+
+- `ROUND_SIZE`: Aston Power $20M, AttoTude $52M — exact, bound to the event.
+- Correct nulls: Computomic, Emmecell, Elektrik — no amount disclosed. **Null is the
+  right canonical state, not a gap.**
+- `NOT_ROUND_*`: AIRS Medical, Flutterwave, Fortus, and the Elektrik $9B figure.
+- **Chronograph — unresolved by representation, not by evidence.** The source supports a
+  funding magnitude of "over $140 million". That is a lower bound, and the model cannot
+  carry it (see "FINDING: No Qualifier Representation for Non-Exact Amounts"). Canonical
+  `round_size` stays NULL. It is listed in the planner's `UNRESOLVED` map so it can
+  never be planned by accident.
+- **Cellares — unresolved by evidence.** No source sentence ties the $50M to the
+  financing event. Also in `UNRESOLVED`.
+
+Consequences:
+
+- `VENTURE_DEBT` remains out of scope throughout; `round_size` vs `facility_size` is a
+  separate decision.
+- Approvals are stored as **named batches** rather than one merged list, so the record of
+  what was approved when survives, and a batch cannot silently absorb rows approved
+  elsewhere. A regression asserts batch isolation and that no name appears in both an
+  approved batch and `UNRESOLVED`.
+- A heuristic classifier remains a triage aid. Every proposed row still requires a human
+  read against its source before remediation.

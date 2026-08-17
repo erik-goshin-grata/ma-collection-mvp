@@ -143,7 +143,22 @@ Only; Market Cap Is Its Own Type".
   It does not retroactively clean the corpus, and no re-extraction is scheduled —
   Path B remains deferred. Existing rows keep whatever scope semantics produced them.
 
-**Legacy funding value-mapping remediation (OPEN — 10 rows, data not code):**
+**Legacy funding value-mapping remediation — batch 1 APPLIED, batch 2 approved:**
+Nine rows remediated and validated 2026-08-17 (Stage 9 re-run on
+`read_source=observation`): 92 records, 9 at `ROUND_SIZE`, 13 at `TRANSACTION_VALUE`,
+70 null. **Model-integrity assertion passed — 0 funding-family rows carry
+`transaction_size_basis = TRANSACTION_VALUE`.**
+- **Batch 2 approved, not applied:** Aston Power $20M, AttoTude $52M.
+- **Unresolved:** Cellares (no source sentence ties the $50M to the financing event) and
+  Chronograph ("over $140 million" — a lower bound the model cannot represent).
+- **Coverage review found four false positives** from numeric proximity — investor AUM,
+  cumulative firm capital, and a post-money valuation read as round sizes. The
+  classifier now requires the amount to be *bound* to the target's financing event and
+  judges each figure on its own span. See decisions.md, "Funding Coverage Review:
+  Binding, Not Proximity".
+- `VENTURE_DEBT` remains out of scope.
+
+**(superseded) Original 10-row finding:**
 Ten `VC_ROUND`/`GROWTH_EQUITY` rows carry a raise in `transaction_value` with
 `round_size` NULL. **All ten are at HC prompt 0.12; none at 0.13+**, so this is legacy
 data, not a defect in the current funding extraction path — Stage 4a processed funding
