@@ -1854,13 +1854,39 @@ Confirmed classifications from the live review:
 - Correct nulls: Computomic, Emmecell, Elektrik — no amount disclosed. **Null is the
   right canonical state, not a gap.**
 - `NOT_ROUND_*`: AIRS Medical, Flutterwave, Fortus, and the Elektrik $9B figure.
+- **Cellares — RESOLVED 2026-08-17 from the source, at $327M.** *"Prime Radiant Fund
+  ... has made a $50 million growth equity investment in the company's Series D
+  financing, bringing the total Series D to $327 million."* The $50M is Prime Radiant's
+  **check**; the event's magnitude is the **$327M Series D**. `round_size = 327,000,000`,
+  `transaction_size = 327,000,000`, basis `ROUND_SIZE`.
+
+  This is the strongest validation yet of the separation: **an investor's check and the
+  round size are different facts that can coexist in one sentence**, and only the round
+  is the event's magnitude. Both figures are real, both are bound to the financing, and
+  the $50M must never become `round_size`.
+
+  Two consequences followed:
+
+  1. **The planner needed to support divergent amounts.** Its changed-under-us guard
+     compares an approval against the row's *staged* figure. Cellares is the first case
+     where the staged figure ($50M) is not the canonical one ($327M), so an approval may
+     now carry both — the amount we expect to find, and the amount we mean to write.
+     Loosening the guard instead would have silently discarded the protection.
+  2. **The $50M is preserved as provenance, not promoted.** It stays in
+     `staging_extraction.value_amount` and in the observation ledger. It is deliberately
+     **not** written to transaction-level `investment_amount`, which is inert by design.
+     The supported per-investor path is `staging_investor.investment_amount`, keyed to
+     the investor that wrote the check — but this row is HC 0.12 legacy, so Stage 4b
+     never ran and no `staging_investor` row exists. Creating one is a separate decision
+     and is **not** part of this remediation.
+
 - **Chronograph — unresolved by representation, not by evidence.** The source supports a
   funding magnitude of "over $140 million". That is a lower bound, and the model cannot
   carry it (see "FINDING: No Qualifier Representation for Non-Exact Amounts"). Canonical
   `round_size` stays NULL. It is listed in the planner's `UNRESOLVED` map so it can
   never be planned by accident.
-- **Cellares — unresolved by evidence.** No source sentence ties the $50M to the
-  financing event. Also in `UNRESOLVED`.
+(Cellares was previously listed here as unresolved by evidence; it is now resolved
+above and removed from `UNRESOLVED`.)
 
 Consequences:
 
@@ -1872,3 +1898,42 @@ Consequences:
   approved batch and `UNRESOLVED`.
 - A heuristic classifier remains a triage aid. Every proposed row still requires a human
   read against its source before remediation.
+
+## 2026-08-17 - FINDING: Word-Boundary Escapes Silently Disabled Eight Patterns
+
+Status: **found and fixed** in the same pass. Recorded because the failure mode is
+invisible and the tests still passed.
+
+Finding:
+
+Eight regex patterns in `scripts/review_funding_coverage.py` ended in a literal
+**backspace character** (`0x08`) rather than the word-boundary escape `\b`. A `\b`
+written inside a **non-raw** string is a backspace, so each affected pattern required a
+control character that no source text contains — and could never match.
+
+Three of them were in `_BINDING`, which decides whether an amount is tied to the
+financing event at all.
+
+Why it stayed hidden:
+
+- **The classifier produced the right answer for the wrong reason.** Cellares resolved
+  to the $327M round only because the disabled pattern left the $50M check unbound, so
+  the round was the sole candidate. The round-over-check ranking that was *supposed* to
+  produce that outcome was never exercised. Reverting the ranking changed nothing —
+  which is exactly what a passing-but-vacuous guard looks like.
+- **Stale bytecode masked the diagnosis.** `__pycache__` served a previously-reverted
+  module during verification, so two revert experiments reported results that did not
+  correspond to the file on disk. Any revert-to-confirm check on an imported module has
+  to clear the cache between runs, or it is measuring the wrong code.
+
+Consequences:
+
+- All eight repaired. With binding restored, both Cellares figures are genuinely bound
+  and the ranking is load-bearing — verified by reverting it and watching the test fail.
+- `scripts/test_review_funding_coverage.py` now asserts that **no compiled pattern
+  contains a control character**, across every pattern group. Verified by reintroducing
+  one backspace and confirming the guard names it.
+- General lesson worth keeping: a guard that cannot be made to fail is not evidence.
+  Every behavioural claim in this branch has been checked by reverting the mechanism;
+  this is the case that shows why, and why the check itself must be run against the code
+  actually on disk.

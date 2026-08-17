@@ -77,11 +77,29 @@ BATCHES: dict[str, dict[str, float]] = {
         "Rejoni": 25_000_000,
         "Kimba": 6_500_000,
     },
-    # Approved from the coverage review. Both carry exact primary-capital amounts bound
-    # to the target's own financing event.
+    # Approved from the coverage review. Each carries an exact primary-capital amount
+    # bound to the target's own financing event.
+    #
+    # An entry is either a bare number — the staged amount and the canonical round_size
+    # are the same, which is the ordinary legacy case where a raise was merely filed
+    # under the wrong field — or a dict when the two DIVERGE, which happens when the
+    # staged figure was the wrong fact entirely. Keeping both is what preserves the
+    # changed-under-us guard: it still checks the row against the amount we expect to
+    # find, while writing the amount we actually mean.
     "batch2_coverage_review": {
         "Aston Power": 20_000_000,
         "AttoTude": 52_000_000,
+        "Cellares": {
+            "staged": 50_000_000,
+            "round_size": 327_000_000,
+            "note": (
+                "The staged $50M is Prime Radiant Fund's CHECK, not the round. Source: "
+                "'Prime Radiant Fund ... has made a $50 million growth equity investment "
+                "in the company's Series D financing, bringing the total Series D to "
+                "$327 million.' The event's magnitude is the $327M Series D; the $50M is "
+                "one investor's contribution inside it. A check never becomes round_size."
+            ),
+        },
     },
 }
 DEFAULT_BATCH = "batch2_coverage_review"
@@ -89,13 +107,40 @@ DEFAULT_BATCH = "batch2_coverage_review"
 # Carried through the plan, never written. Each needs a source sentence binding the
 # amount to the financing event before it can be approved.
 UNRESOLVED = {
-    "Cellares": "the $50M is not tied to the financing event by any source sentence",
+    # Unresolved by REPRESENTATION, not by evidence. The source clearly supports a
+    # funding magnitude; the model cannot carry a lower bound without asserting an
+    # exactness the source withheld.
     "Chronograph": "source says 'over $140 million' — a lower bound. The model has no "
                    "qualifier field for round_size at any layer, so writing 140M would "
                    "assert an exactness the source withheld. Representation gap.",
 }
 
 IN_SCOPE_EVENTS = ("VC_ROUND", "GROWTH_EQUITY")
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        if len(cur) + len(w) + 1 > width:
+            lines.append(cur)
+            cur = w
+        else:
+            cur = f"{cur} {w}".strip()
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def resolve_approval(entry) -> tuple[float, float, str | None]:
+    """-> (staged_amount_expected, canonical_round_size, note)
+
+    A bare number means the staged figure and the canonical round_size are the same.
+    A dict means they diverge because the staged figure was the wrong fact, and carries
+    the note explaining what the source actually said.
+    """
+    if isinstance(entry, dict):
+        return float(entry["staged"]), float(entry["round_size"]), entry.get("note")
+    return float(entry), float(entry), None
 
 
 def _match(target: str | None, key: str) -> bool:
@@ -199,12 +244,16 @@ def select_rows(conn: sqlite3.Connection, batch: str = DEFAULT_BATCH):
         if not approved_key:
             skipped.append((r, "not on the approved list"))
             continue
-        expected = approved[approved_key]
-        if abs(float(r["staged_amount"]) - expected) > 0.5:
-            skipped.append((r, f"amount changed: approved {expected:,.0f}, "
-                               f"found {r['staged_amount']:,.0f}"))
+        staged_expected, canonical, _note = resolve_approval(approved[approved_key])
+        # The guard checks the row still holds the figure the approval was made against.
+        # It deliberately compares the STAGED amount, not the canonical one — otherwise
+        # a divergent correction (Cellares) could never be planned, and a row that
+        # changed underneath us could never be caught.
+        if abs(float(r["staged_amount"]) - staged_expected) > 0.5:
+            skipped.append((r, f"staged amount changed: approval expected "
+                               f"{staged_expected:,.0f}, found {r['staged_amount']:,.0f}"))
             continue
-        planned.append((r, approved_key, expected))
+        planned.append((r, approved_key, canonical))
     return planned, unresolved, skipped
 
 
@@ -247,8 +296,16 @@ def main() -> None:
         print("  is empty. Routing the re-aggregation through run.py adds them via")
         print("  _apply_migrations before Stage 9 derives. Planning does not migrate.")
     print()
+    approved_map = BATCHES[args.batch]
     for r, key, amount in planned:
+        staged_expected, _canon, note = resolve_approval(approved_map[key])
         print(f"  {key} ({r['transaction_id']}) — {r['v2_event_type']}")
+        if abs(staged_expected - amount) > 0.5:
+            print(f"      *** staged {staged_expected:,.0f} is NOT the round size ***")
+            print(f"      canonical round_size is {amount:,.0f}")
+            if note:
+                for line in _wrap(note, 68):
+                    print(f"        {line}")
         print(f"      {'field':<24} {'before':>18}   {'after':>18}")
         print(f"      {'-' * 24} {'-' * 18}   {'-' * 18}")
         for field, before, after in (
@@ -323,11 +380,16 @@ def main() -> None:
             notes = json.loads(se["notes"] or "{}")
         except (json.JSONDecodeError, TypeError):
             notes = {"raw": se["notes"]}
+        staged_expected, _canon, note = resolve_approval(approved_map[key])
+        detail = (
+            f"staged {staged_expected:,.0f} was NOT the round size — {note}"
+            if abs(staged_expected - amount) > 0.5 and note
+            else f"canonicalized from a legacy transaction_value extracted under HC 0.12"
+        )
         notes["remediation"] = (
-            f"{now}: round_size {amount:,.0f} canonicalized from a legacy "
-            f"transaction_value extracted under HC 0.12; approved by "
-            f"{args.approved_by or '<pending>'}. Original value_amount/value_type "
-            f"left intact as the extraction record."
+            f"{now}: round_size set to {amount:,.0f}. {detail} Approved by "
+            f"{args.approved_by or '<pending>'}. Original value_amount/value_type left "
+            f"intact as the extraction record."
         )
         currency_clause = (
             ", round_currency = COALESCE(round_currency, value_currency)"

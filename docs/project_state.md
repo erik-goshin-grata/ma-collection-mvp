@@ -148,9 +148,14 @@ Nine rows remediated and validated 2026-08-17 (Stage 9 re-run on
 `read_source=observation`): 92 records, 9 at `ROUND_SIZE`, 13 at `TRANSACTION_VALUE`,
 70 null. **Model-integrity assertion passed — 0 funding-family rows carry
 `transaction_size_basis = TRANSACTION_VALUE`.**
-- **Batch 2 approved, not applied:** Aston Power $20M, AttoTude $52M.
-- **Unresolved:** Cellares (no source sentence ties the $50M to the financing event) and
-  Chronograph ("over $140 million" — a lower bound the model cannot represent).
+- **Batch 2 approved, not applied:** Aston Power $20M, AttoTude $52M, **Cellares
+  $327M**. Cellares is the divergent case — its staged $50M is Prime Radiant's *check*
+  inside a $327M Series D, so the approval carries both the staged figure (to keep the
+  changed-under-us guard meaningful) and the canonical round size. The $50M survives as
+  provenance in `staging_extraction.value_amount` and the ledger; it is **not** written
+  to transaction-level `investment_amount`.
+- **Unresolved:** Chronograph only ("over $140 million" — a lower bound the model cannot
+  represent).
 - **Coverage review found four false positives** from numeric proximity — investor AUM,
   cumulative firm capital, and a post-money valuation read as round sizes. The
   classifier now requires the amount to be *bound* to the target's financing event and

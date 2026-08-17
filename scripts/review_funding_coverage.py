@@ -98,28 +98,63 @@ _BINDING = [
         r"clos\w*\s+(?:on\s+|of\s+)?(?:its\s+)?(?:a\s+)?<AMT>",
         r"<AMT>\s+(?:in|of)\s+(?:new\s+)?(?:series\s+[a-k]|seed|pre-seed|funding|"
         r"financing|growth|capital|venture|equity|primary)",
-        r"<AMT>\s+series\s+[a-k]",
+        r"<AMT>\s+series\s+[a-k]\b",
         r"<AMT>\s+(?:seed|pre-seed)\s+(?:round|funding|financing)",
         r"(?:series\s+[a-k]|seed|pre-seed|financing|funding)\s*(?:round)?\s*"
         r"(?:of|totall?ing|worth|at)\s+<AMT>",
         r"(?:investment|financing|raise|round|infusion)\s+(?:of|totall?ing)\s+<AMT>",
-        r"invest\w*\s+<AMT>\s+(?:in|into)",
-        r"<AMT>\s+(?:growth\s+)?(?:equity\s+)?investment",
-        r"announc\w*\s+<AMT>\s+(?:in|of)",
+        r"invest\w*\s+<AMT>\s+(?:in|into)\b",
+        r"<AMT>\s+(?:growth\s+)?(?:equity\s+)?investment\b",
+        r"announc\w*\s+<AMT>\s+(?:in|of)\b",
+        # The round's own total: "bringing the total Series D to $327 million".
+        r"total\s+(?:series\s+[a-k]|seed|pre-seed|round|financing)\s+to\s+<AMT>",
+    )
+]
+
+# Constructions identifying the amount as the ROUND's magnitude. When one sentence
+# carries both a round total and an investor's check — "$50 million investment in the
+# Series D, bringing the total Series D to $327 million" — the round wins. Both figures
+# are real and both are bound to the financing; they are different facts, and only the
+# round is the event's magnitude.
+_ROUND_TOTAL = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r"total\s+(?:series\s+[a-k]|seed|pre-seed|round|financing)\s+to\s+<AMT>",
+        r"rais\w*\s+(?:a\s+|an\s+|its\s+)?(?:new\s+)?<AMT>",
+        r"(?:series\s+[a-k]|seed|pre-seed|financing|funding)\s*(?:round)?\s*"
+        r"(?:of|totall?ing|worth|at)\s+<AMT>",
+        r"clos\w*\s+(?:on\s+|of\s+)?(?:its\s+)?(?:a\s+)?<AMT>",
+        r"<AMT>\s+(?:in|of)\s+(?:new\s+)?(?:series\s+[a-k]|seed|pre-seed|funding|financing)",
+        r"<AMT>\s+series\s+[a-k]",
+    )
+]
+
+# Constructions identifying the amount as ONE INVESTOR's contribution.
+_CHECK_SHAPED = [
+    re.compile(p, re.IGNORECASE) for p in (
+        r"(?:has\s+)?made\s+(?:a\s+)?<AMT>",
+        r"invest\w*\s+<AMT>\s+(?:in|into)",
+        r"<AMT>\s+(?:growth\s+)?(?:equity\s+)?investment\s+in",
+        r"committed\s+<AMT>",
     )
 ]
 
 # Attached to the amount, these disqualify it regardless of financing language nearby.
 _SCOPE_MARKERS = [
     # The investor or the firm, not the target's event.
-    (re.compile(r"(assets?\s+under\s+management|AUM|manages?|managing\s+(?:over|more)|"
+    (re.compile(r"(assets?\s+under\s+management|\bAUM\b|manages?\b|managing\s+(?:over|more)|"
                 r"firm\s+with|fund\s+(?:with|of|size)|portfolio\s+(?:of|companies)|"
                 r"across\s+its|since\s+inception|has\s+invested|deployed|"
                 r"under\s+management)", re.IGNORECASE), "investor/firm scope"),
     # Cumulative or historical, not this event.
-    (re.compile(r"(to\s+date|total\w*\s+rais\w*|bringing\s+(?:its\s+|the\s+)?total|"
+    # "bringing the total to $X" is cumulative ONLY when the total is lifetime-scoped.
+    # "bringing the total Series D to $327 million" is the size of THIS round, and
+    # the round label is what distinguishes them — so it is excluded by lookahead
+    # here and matched as a binding construction instead.
+    (re.compile(r"(to\s+date|total\w*\s+rais\w*|"
+                r"bringing\s+(?:its\s+|the\s+)?total(?!\s+(?:series\s+[a-k]|seed|"
+                r"pre-seed|round|financing))|"
                 r"cumulativ\w*|lifetime|since\s+\d{4}|previously\s+rais\w*|"
-                r"prior\s+round|to\s+date)", re.IGNORECASE), "cumulative/historical"),
+                r"prior\s+round|to\s+date\b)", re.IGNORECASE), "cumulative/historical"),
     # A valuation is never an as-transacted magnitude.
     (re.compile(r"(valuation|valu(?:ing|ed)\s+(?:the\s+\w+\s+)?at|post-?money|pre-?money|"
                 r"market\s+cap\w*|enterprise\s+value)", re.IGNORECASE), "valuation"),
@@ -178,6 +213,8 @@ def _evaluate(sentence: str) -> list[dict]:
         out.append({
             "match": m, "span": span, "amount": _amount(m),
             "disqualified": disqualified, "bound": bound,
+            "is_round_total": any(rx.search(span) for rx in _ROUND_TOTAL),
+            "is_check": any(rx.search(span) for rx in _CHECK_SHAPED),
             "qualifier": (m.group("qual") or "").strip() or None,
         })
     return out
@@ -237,7 +274,12 @@ def classify(title: str, body: str) -> dict:
         return {"classification": label[0], "amount": cand["amount"], "exact": None,
                 "qualifier": None, "evidence": [sentence], "action": label[1]}
 
-    sentence, cand = candidates[0]
+    # A round total outranks an investor's check — the Cellares shape: a $50M
+    # check inside a $327M Series D. Both are bound to the financing; only the
+    # round is the event's magnitude.
+    round_totals = [(s, c) for s, c in candidates
+                    if c["is_round_total"] and not c["is_check"]]
+    sentence, cand = (round_totals or candidates)[0]
     if _INVESTOR_CHECK.search(cand["span"]) and not re.search(
         r"(round|rais\w*|financing)", sentence, re.IGNORECASE
     ):

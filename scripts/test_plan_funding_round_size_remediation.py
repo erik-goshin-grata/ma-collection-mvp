@@ -64,12 +64,18 @@ _LEGACY_SR = (
     "clean_text TEXT",
 )
 
-# (target, event, amount) — two approved rows and the unresolved one.
+# (target, event, staged amount) — two batch-1 approvals and the one row that remains
+# unresolved. Chronograph is unresolved by REPRESENTATION: its source clearly supports a
+# funding magnitude ("over $140 million"), but the model cannot carry a lower bound.
 _ROWS = [
     ("Arcade.dev", "VC_ROUND", 60_000_000.0),
     ("Rejoni", "GROWTH_EQUITY", 25_000_000.0),
-    ("Cellares", "GROWTH_EQUITY", 50_000_000.0),
+    ("Chronograph", "GROWTH_EQUITY", 140_000_000.0),
 ]
+
+# Cellares is the divergent case: the staged figure is one investor's check, and the
+# canonical round_size is the round it sat inside.
+_DIVERGENT_ROWS = [("Cellares", "GROWTH_EQUITY", 50_000_000.0)]
 
 
 def _check(failures: list[str], name: str, got, expected) -> None:
@@ -77,7 +83,7 @@ def _check(failures: list[str], name: str, got, expected) -> None:
         failures.append(f"{name}: expected {expected!r}, got {got!r}")
 
 
-def _build(path: str, *, migrated: bool) -> None:
+def _build(path: str, *, migrated: bool, rows=None) -> None:
     """Hand-built schema. `migrated=True` adds only the transaction_size pair."""
     conn = sqlite3.connect(path)
     tr = list(_LEGACY_TR)
@@ -93,7 +99,7 @@ def _build(path: str, *, migrated: bool) -> None:
         "  staging_extraction_id INTEGER, source_raw_id INTEGER, source_type TEXT,"
         "  observation_source_stage TEXT, extracted_at TEXT)"
     )
-    for target, event, amount in _ROWS:
+    for target, event, amount in (rows if rows is not None else _ROWS):
         txn = f"tc_{target.lower().replace('.', '_')}"
         cur = conn.execute(
             "INSERT INTO source_raw (source_type, title, clean_text) VALUES (?,?,?)",
@@ -203,19 +209,59 @@ def main() -> None:
         # bounded when a later batch is added to the same file.
         import scripts.plan_funding_round_size_remediation as planner
         _check(failures, "batch2 exists", "batch2_coverage_review" in planner.BATCHES, True)
-        _check(failures, "batch2 is exactly Aston Power + AttoTude",
+        _check(failures, "batch2 is exactly Aston Power + AttoTude + Cellares",
                sorted(planner.BATCHES["batch2_coverage_review"]),
-               ["Aston Power", "AttoTude"])
+               ["Aston Power", "AttoTude", "Cellares"])
         _check(failures, "batch1 unchanged at nine rows",
                len(planner.BATCHES["batch1_legacy_hc012"]), 9)
-        # The fixture holds only batch1 targets, so batch2 must plan nothing from it.
-        b2_planned, _b2_unres, b2_skipped = _plan(legacy, "batch2_coverage_review")
+        # The fixture holds only batch1 targets plus the unresolved one, so batch2 must
+        # plan nothing from it and must report the batch1 rows as skipped, not invisible.
+        b2_planned, b2_unres, b2_skipped = _plan(legacy, "batch2_coverage_review")
         _check(failures, "batch2 plans nothing from a batch1 fixture", len(b2_planned), 0)
-        if not b2_skipped:
-            failures.append("batch2 should report batch1 rows as skipped, not invisible")
-        # Chronograph is carried as unresolved and can never be planned.
+        _check(failures, "batch2 skips the batch1 rows", len(b2_skipped), 2)
+        _check(failures, "batch2 still carries the unresolved row", len(b2_unres), 1)
+        # Chronograph is carried as unresolved and can never be planned by any batch.
         _check(failures, "Chronograph is unresolved, not approved",
                any("Chronograph" in k for k in planner.UNRESOLVED), True)
+        _check(failures, "Cellares is no longer unresolved",
+               any("Cellares" in k for k in planner.UNRESOLVED), False)
+
+        # --- 5. Divergent approval: staged amount is NOT the canonical one ---
+        # Cellares' staged $50M is Prime Radiant's check; the round is $327M. The
+        # changed-under-us guard must still compare against the STAGED figure, or a
+        # divergent correction could never be planned at all — while the amount actually
+        # written is the canonical round size.
+        divergent = str(Path(tmp) / "divergent.db")
+        _build(divergent, migrated=True, rows=_DIVERGENT_ROWS)
+        d_planned, _d_unres, d_skipped = _plan(divergent, "batch2_coverage_review")
+        _check(failures, "divergent row is planned", len(d_planned), 1)
+        _check(failures, "divergent row not skipped", len(d_skipped), 0)
+        if d_planned:
+            row, key, amount = d_planned[0]
+            _check(failures, "divergent key", key, "Cellares")
+            _check(failures, "canonical amount is the ROUND, not the check",
+                   amount, 327_000_000.0)
+            _check(failures, "staged amount is still the check",
+                   row["staged_amount"], 50_000_000.0)
+        staged, canonical, note = planner.resolve_approval(
+            planner.BATCHES["batch2_coverage_review"]["Cellares"]
+        )
+        _check(failures, "resolve_approval staged", staged, 50_000_000.0)
+        _check(failures, "resolve_approval canonical", canonical, 327_000_000.0)
+        if not note or "check" not in note.lower():
+            failures.append("divergent approval must carry a note explaining the divergence")
+        # A bare number still means staged == canonical.
+        s2, c2, n2 = planner.resolve_approval(20_000_000)
+        _check(failures, "bare approval staged", s2, 20_000_000.0)
+        _check(failures, "bare approval canonical", c2, 20_000_000.0)
+        _check(failures, "bare approval has no note", n2, None)
+
+        # The guard still fires when the staged figure moved underneath us.
+        moved = str(Path(tmp) / "moved.db")
+        _build(moved, migrated=True, rows=[("Cellares", "GROWTH_EQUITY", 99_000_000.0)])
+        m2_planned, _m2u, m2_skipped = _plan(moved, "batch2_coverage_review")
+        _check(failures, "changed staged amount is skipped", len(m2_planned), 0)
+        _check(failures, "changed staged amount reported", len(m2_skipped), 1)
         for batch_name, approvals in planner.BATCHES.items():
             for name in approvals:
                 if name in planner.UNRESOLVED:

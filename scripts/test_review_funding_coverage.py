@@ -134,12 +134,17 @@ CASES = [
         "The company secured a $50 million credit facility to support working capital.",
         "NOT_ROUND_FACILITY", None,
     ),
-    # --- Cellares: a figure with nothing binding it to the financing ------
+    # --- Cellares, resolved: a check INSIDE a round -----------------------
+    # Both figures are real and both are bound to the financing. The classifier must
+    # surface the ROUND, not the check — this is the case that proves an investor's
+    # contribution and the event's magnitude are separate facts that can coexist in one
+    # sentence. A $50M check inside a $327M round leaves round_size = $327M.
     (
-        "cellares_unbound", "Cellares announces expansion",
-        "Cellares announced a strategic partnership. The company's new facility "
-        "represents a $50 million commitment to domestic manufacturing capacity.",
-        "AMBIGUOUS", None,
+        "cellares_check_inside_round", "Cellares announces Series D investment",
+        "Cellares announced that Prime Radiant Fund has made a $50 million growth "
+        "equity investment in the company's Series D financing, bringing the total "
+        "Series D to $327 million.",
+        "ROUND_SIZE_CANDIDATE", True,
     ),
 ]
 
@@ -179,6 +184,37 @@ def main() -> None:
         _check(failures, f"{label} exact flag", result["exact"], expected_exact)
         if expected_class not in ("NO_AMOUNT_DISCLOSED",) and not result["evidence"]:
             failures.append(f"{label}: classified {expected_class} with no evidence quoted")
+
+    # --- 1a. No pattern contains a control character ----------------------
+    # A `\b` written inside a non-raw string becomes a literal backspace (0x08), which
+    # silently disables the pattern: it then requires a backspace character that no
+    # source text contains. Eight of them were introduced this way and went unnoticed
+    # because the classifier still produced the right answer for the wrong reason.
+    import scripts.review_funding_coverage as rfc
+    groups = {
+        "_BINDING": rfc._BINDING, "_ROUND_TOTAL": rfc._ROUND_TOTAL,
+        "_CHECK_SHAPED": rfc._CHECK_SHAPED,
+        "_SCOPE_MARKERS": [rx for rx, _l in rfc._SCOPE_MARKERS],
+        "misc": [rfc._MONEY, rfc._RANGE, rfc._SECONDARY, rfc._FACILITY, rfc._INVESTOR_CHECK],
+    }
+    for group, patterns in groups.items():
+        for rx in patterns:
+            bad = [c for c in rx.pattern if ord(c) < 32 and c not in "\n\t"]
+            if bad:
+                failures.append(
+                    f"{group}: pattern contains a control character {bad[0]!r} — a "
+                    f"literal escape that silently disables it: {rx.pattern[:60]!r}"
+                )
+
+    # --- 1b. A check inside a round yields the ROUND ----------------------
+    cellares_case = next(c for c in CASES if c[0] == "cellares_check_inside_round")
+    cellares = classify(cellares_case[1], cellares_case[2])
+    if cellares["amount"] == 50_000_000.0:
+        failures.append(
+            "Cellares resolved to Prime Radiant's $50M check rather than the $327M "
+            "round — an investor's contribution is never the event's magnitude"
+        )
+    _check(failures, "Cellares resolves to the round", cellares["amount"], 327_000_000.0)
 
     # --- 2. A non-exact amount is never a round_size candidate ------------
     # The load-bearing assertion. Chronograph must not become an exact 140,000,000.
