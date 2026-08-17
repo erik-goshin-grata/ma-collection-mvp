@@ -203,9 +203,14 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    known and equal; no FX conversion. See decisions.md "total_debt / Cash_ST
    Extraction and Debt-Inclusive Arithmetic" and
    `scripts/test_debt_cash_extraction.py`.
-   **The second owed re-aggregation is now unblocked but NOT discharged** — and before
-   running it, measure how many rows hold a manual `net_debt` with no recorded
-   currency, since those now yield no calculated implied EV.
+   **The second owed re-aggregation (Path A) is DISCHARGED (2026-08-17)** on
+   `data/ma_mvp.db`: 92 → 92 rows, 2 additional `transaction_value` (both
+   `EQUITY_VALUE_ONLY`), 1 additional `ev_to_revenue_ltm`, no losses. The
+   currency-gap sizing gate cleared at zero at-risk rows. See decisions.md
+   "Path A Re-aggregation: Accepted".
+   **Still owed: Path B** — re-extraction is what actually populates debt/cash; the
+   corpus still has zero `net_debt` and zero debt-inclusive bases. See
+   `docs/runbook_path_b_reextraction.md` (plan only, not executed).
 3. **Review export value-model surface** — expose the current value-model fields
    (`equity_value`, `implied_equity_value`, `transaction_value`, `investment_amount`,
    `deal_value_currency`, and funding round fields) without treating `_v2` shadow

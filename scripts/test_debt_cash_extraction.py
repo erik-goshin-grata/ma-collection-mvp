@@ -469,8 +469,41 @@ def _scenario_manual_inputs_survive_reaggregation(failures: list[str]) -> None:
         conn.close()
 
 
+def _scenario_hc_persists_balance_sheet(failures: list[str]) -> None:
+    """Stage 4a must actually write what the prompt asks the model to extract.
+
+    The columns existing, the prompt requesting them, and aggregation reading them
+    are three separate things from the extraction stage *persisting* them. Without
+    this, a re-extraction run pays full model cost and stores nothing — the failure
+    is invisible until someone queries for debt and finds every row null.
+    """
+    p = "hc-persist"
+    source = Path("stages/high_confidence_extract.py").read_text(encoding="utf-8")
+
+    # The stage must read each field off the prompt's target_financials object.
+    for field in ("total_debt", "total_debt_currency", "cash_st",
+                  "cash_st_currency", "balance_sheet_as_of_date"):
+        if f'tf.get("{field}")' not in source:
+            failures.append(f"{p}: stage never reads target_financials.{field}")
+
+    # Both write paths must carry them — an INSERT-only fix silently drops every
+    # re-extraction, which is exactly the path a debt/cash backfill takes.
+    import re as _re
+    insert = _re.search(r"INSERT INTO staging_extraction\s*\((.*?)\)\s*VALUES", source, _re.S)
+    update = _re.search(r"UPDATE staging_extraction\s*SET(.*?)WHERE extraction_id", source, _re.S)
+    for name, match in (("INSERT", insert), ("UPDATE", update)):
+        if match is None:
+            failures.append(f"{p}: could not locate the staging {name} statement")
+            continue
+        for field in ("total_debt", "total_debt_currency", "cash_st",
+                      "cash_st_currency", "balance_sheet_as_of_date"):
+            if field not in match.group(1):
+                failures.append(f"{p}: staging {name} does not persist {field}")
+
+
 def main() -> None:
     failures: list[str] = []
+    _scenario_hc_persists_balance_sheet(failures)
     _scenario_manual_inputs_survive_reaggregation(failures)
     _scenario_net_debt_coherence(failures)
     _scenario_implied_ev_currency(failures)

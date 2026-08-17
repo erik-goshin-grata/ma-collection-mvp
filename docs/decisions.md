@@ -1317,3 +1317,38 @@ Consequences:
 - Aggregation remains incremental. No corpus-wide AGGREGATED→CLUSTERED reset was
   performed; the second owed re-aggregation is now unblocked but not discharged.
 - Review XLSX shape is unchanged.
+
+## 2026-08-17 - Path A Re-aggregation: Accepted
+
+Status: executed and accepted on `data/ma_mvp.db`.
+
+The §4.2-owed re-aggregation, run at `read_source=observation` against the live
+92-transaction corpus. Structural invariants held: 92 → 92 transaction records, 98
+AGGREGATED + 1 PROMPT_FAILED unchanged, 92 clusters, 92/92 upserted, 0 failed, 0 LLM
+conflicts. Stage 10/11 column census was 0/0/0/0 beforehand, so the
+INSERT OR REPLACE hazard documented in the runbook cost nothing on this corpus.
+
+Material changes, all accepted as supported:
+
+- `transaction_value` populated on 2 additional rows, both `EQUITY_VALUE_ONLY`
+  (Anysphere $60.0B, Payoneer $2.75B). `equity_value` already held the same amount on
+  both, so this is the typed-equity fix plus the observation read path recovering a
+  Tier-1 value that the collapsed legacy slot had been suppressing.
+- `ev_to_revenue_ltm` populated on 1 additional row (Dahl: EV €1.518B / revenue €2.0B
+  = 0.76x, ANNUAL period end 2025, EUR/EUR). Supported: same currency on both sides,
+  and the annual actual is inside the trailing-eligibility window.
+- No count change in `equity_value`, `implied_equity_value`, `enterprise_value`,
+  `target_revenue`, `target_revenue_period_end`, or `financials_currency`.
+
+Notably the anchoring change removed nothing. The predicted losses — a borrowed
+`period_end` or `financials_currency` being nulled — did not occur, so no row in this
+corpus was relying on a cross-source qualifier. That is a real result, not an absence
+of evidence: the fixture that motivated the fix reproduces the defect, and the corpus
+simply does not contain that shape today.
+
+The currency-gap quantifier reports zero at-risk rows before and after, consistent
+with the corpus having no `net_debt` at all.
+
+Consequence: the debt-inclusive paths remain unexercised on real data. Zero rows carry
+`net_debt`, zero carry a calculated enterprise value, zero carry
+`EQUITY_PLUS_TOTAL_DEBT`. Path A could not change that — see the Path B runbook.
