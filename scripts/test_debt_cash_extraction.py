@@ -420,8 +420,58 @@ def _scenario_end_to_end_cross_source(failures: list[str]) -> None:
         conn.close()
 
 
+def _scenario_manual_inputs_survive_reaggregation(failures: list[str]) -> None:
+    """Manual balance-sheet inputs must survive a second aggregation pass.
+
+    Stage 9 writes transaction_record with INSERT OR REPLACE, which deletes the row
+    and inserts a fresh one — so any column the INSERT omits is silently nulled, not
+    left alone. A manual input that aggregation *reads* but never *writes back* would
+    therefore work exactly once and vanish on the next pass, which is the failure
+    mode this asserts against.
+    """
+    p = "manual-survives-reagg"
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = str(Path(tmp) / "reagg.db")
+        init_db(db_path)
+        conn = get_connection(db_path)
+        _insert_source(
+            conn, slug="filing", tier="T1",
+            value_amount=200_000_000, value_type="EQUITY_VALUE", value_currency="USD",
+            pct_acquired=100.0,
+        )
+        _aggregate(conn, "reagg_pass_1")
+
+        # Researcher enters a manual net debt with its currency.
+        conn.execute(
+            "UPDATE transaction_record SET net_debt = ?, net_debt_currency = ? "
+            "WHERE transaction_id = ?",
+            (40_000_000.0, "USD", TXN_ID),
+        )
+        conn.commit()
+
+        # Re-derive: reset the cluster members and run aggregation again.
+        conn.execute("UPDATE staging_extraction SET status='CLUSTERED' WHERE status='AGGREGATED'")
+        conn.commit()
+        row = _aggregate(conn, "reagg_pass_2")
+        if row is None:
+            failures.append(f"{p}: no transaction_record produced")
+            conn.close()
+            return
+
+        _check(failures, f"{p} net_debt preserved", row["net_debt"], 40_000_000.0)
+        _check(failures, f"{p} net_debt_currency preserved", row["net_debt_currency"], "USD")
+        # And it is actually usable: implied EV = 200M implied equity + 40M net debt.
+        _check(failures, f"{p} implied_enterprise_value", row["implied_enterprise_value"], 240_000_000.0)
+        _check(
+            failures, f"{p} implied_enterprise_value_basis",
+            row["implied_enterprise_value_basis"], "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT",
+        )
+        conn.close()
+
+
 def main() -> None:
     failures: list[str] = []
+    _scenario_manual_inputs_survive_reaggregation(failures)
     _scenario_net_debt_coherence(failures)
     _scenario_implied_ev_currency(failures)
     _scenario_transaction_value_currency(failures)

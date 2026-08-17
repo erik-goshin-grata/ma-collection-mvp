@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.16 (transaction feature flags)
+**Version:** 0.17 (balance-sheet capture: total_debt / cash_st, POINT_IN_TIME, stated-USD preference)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
