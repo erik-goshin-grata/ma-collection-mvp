@@ -1937,3 +1937,69 @@ Consequences:
   Every behavioural claim in this branch has been checked by reverting the mechanism;
   this is the case that shows why, and why the check itself must be run against the code
   actually on disk.
+
+## 2026-08-17 - Manual Remediations Are First-Class Observations
+
+Status: accepted. Implemented. Two defects in the observation read path, each fixed and
+each independently verified by reverting it.
+
+Decision:
+
+- `MANUAL_REMEDIATION` is admitted by the Stage 9 observation loader. The allowlist
+  remains an allowlist — it admits producers of Stage 9 *inputs* and excludes downstream
+  stages whose observations Stage 9 does not own — but a human correction of an
+  extraction-layer fact is an input.
+- **A remediation supersedes; it does not tie-break.** Where any observation for a field
+  is a remediation, selection is restricted to remediations and the latest wins. Tier and
+  confidence ranking are untouched for the ordinary case.
+
+The defects:
+
+1. **Admission.** The loader filtered on
+   `COALESCE(observation_source_stage, 'BACKFILL') IN (…)` and `MANUAL_REMEDIATION` was
+   not listed. A remediation could be written to the ledger, verified present at both
+   source layers, and then silently ignored by the derivation that exists to consume it.
+
+2. **Precedence.** Admission alone is not enough. A correction and the stale fact it
+   corrects share a source and therefore a **tier**, so `_pick_value` saw a same-tier
+   disagreement between peers. It resolved that by confidence — and a remediation
+   observation carries no `model_confidence`, defaulting to `MEDIUM`, while the
+   extraction it corrects is typically `HIGH`. **The stale value won deterministically.**
+
+Context — why this stayed hidden through nine successful remediations:
+
+Where a remediation's canonical value equals the staged one, the row still derives
+correctly, because a later observation regeneration re-reads
+`staging_extraction.round_size` and emits an `HC_EXTRACT` observation carrying the same
+number, which the allowlist admits. **The remediated fact reached the canonical layer by
+a route that had nothing to do with the remediation.** Given the code, no other admitted
+producer exists, so batch 1 must have derived through that path.
+
+Cellares is the first case where the staged figure ($50M, Prime Radiant's check) and the
+canonical figure ($327M, the Series D) **differ**. The accidental route could then only
+carry the wrong number or none at all, and the filter became visible. This is the third
+"right answer for the wrong reason" in this branch, and the pattern is now explicit:
+*a mechanism that is never exercised is not verified by the outcome being correct.*
+
+Ruled out during the trace, so they are not the cause:
+
+- `round_size` **is** in the eligible field set (`_FIELD_TYPE`, type `number`) and **is**
+  emitted by the observation writer.
+- Value parsing is sound: `_value_from_observation` prefers `field_value_numeric` and
+  falls back to `float(field_value)`, so `'327000000.0'` / `327000000.0` both resolve.
+- The legacy `TRANSACTION_VALUE` observation does not compete with `round_size` — they
+  are different `field_name`s. It is inert for funding rows regardless, by the family
+  gate.
+
+Consequences:
+
+- Guarded by `scripts/test_manual_remediation_observations.py`, whose fixture reproduces
+  the live sequence exactly: observations are written from staging **before** the
+  correction, so no `HC_EXTRACT` observation for `round_size` can exist and nothing but
+  the remediation can supply the value. A second fixture covers a correction competing
+  with a stale observation for the same field.
+- Both halves verified by reverting each independently: without admission the value is
+  NULL; without precedence the stale $80M beats the corrected $95M.
+- **The corpus needs a Stage 9 re-run for Cellares to derive.** No data is wrong today —
+  `round_size` and `transaction_size` are NULL, which understates rather than misstates.
+  Not run here.

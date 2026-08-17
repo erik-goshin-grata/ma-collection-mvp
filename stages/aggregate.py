@@ -943,6 +943,11 @@ def _pick_value_amount_for_type(field_observations: dict[str, list[dict]], targe
 # type of the amount, and the only legal value for it — there is no LTM/TTM/NTM
 # concept for a balance sheet, and filing frequency (annual/quarterly) is filing
 # context rather than the period of the amount.
+# The observation stage that marks a human correction of an extraction-layer
+# fact. It is admitted by the observation read path and supersedes extraction
+# observations for the same field.
+MANUAL_REMEDIATION_STAGE = "MANUAL_REMEDIATION"
+
 BALANCE_SHEET_PERIOD_TYPE = "POINT_IN_TIME"
 
 _METRIC_COMPANION_FIELDS: dict[str, tuple[str, ...]] = {
@@ -1166,6 +1171,23 @@ def _pick_value(
     For booleans, any True (1) wins within each tier before cross-tier resolution.
     For JSON fields, comparison uses canonical serialization.
     """
+    # A human correction supersedes machine extraction for the same field.
+    #
+    # Without this, a remediation and the stale fact it corrects share a source and
+    # therefore a tier, so the tier-based selection below treats them as a disagreement
+    # between peers — resolved by confidence, or by asking the LLM. Both are wrong: the
+    # correction is not one more opinion, it is the answer. Restricting to remediations
+    # when any exist keeps the rest of the selection untouched for the ordinary case.
+    remediated = [
+        obs for obs in observations
+        if obs.get("observation_source_stage") == MANUAL_REMEDIATION_STAGE
+        and obs.get("value") is not None
+    ]
+    if remediated:
+        # Latest correction wins if a field is remediated more than once. Observation
+        # ids are monotonic, so the highest is the most recent.
+        return max(remediated, key=lambda o: o.get("observation_id") or 0)["value"], False, []
+
     # Group non-null observations by tier
     by_tier: dict[str, list[dict]] = defaultdict(list)
     for obs in observations:
@@ -1497,6 +1519,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
             tfo.field_name,
             tfo.field_value,
             tfo.field_value_numeric,
+            tfo.observation_source_stage,
             tfo.staging_extraction_id,
             tfo.source_raw_id,
             tfo.observation_fact_key,
@@ -1519,7 +1542,13 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
               'HC_EXTRACT',
               'FUNDING_HC_EXTRACT',
               'LC_EXTRACT',
-              'BACKFILL'
+              'BACKFILL',
+              -- A human correction of an extraction-layer fact. Omitting it meant a
+              -- remediation could be written to the ledger and then silently ignored
+              -- by the very derivation that exists to consume it. The allowlist is
+              -- still an allowlist: it admits producers of Stage 9 INPUTS and excludes
+              -- downstream stages whose observations Stage 9 does not own.
+              'MANUAL_REMEDIATION'
           )
         ORDER BY tfo.transaction_id, tfo.staging_extraction_id, tfo.observation_id
         """
@@ -1552,6 +1581,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
         bundle["field_observations"][field_name].append({
             "observation_id": row["observation_id"],
             "source_key": source_key,
+            "observation_source_stage": row["observation_source_stage"],
             "source_type": row["source_type"],
             "tier": row["source_tier"],
             "published_date": row["published_date"] or "",

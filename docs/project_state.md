@@ -156,6 +156,12 @@ Nine rows remediated and validated 2026-08-17 (Stage 9 re-run on
   to transaction-level `investment_amount`.
 - **Unresolved:** Chronograph only ("over $140 million" — a lower bound the model cannot
   represent).
+- **Cellares needs a Stage 9 re-run to derive.** Its remediation is correct at both
+  source layers, but the observation read path dropped `MANUAL_REMEDIATION` observations
+  and, once admitted, let a stale extraction observation outrank a human correction on
+  confidence. Both fixed (decisions.md, "Manual Remediations Are First-Class
+  Observations"); the corpus has not been re-run. Current state understates rather than
+  misstates — `round_size`/`transaction_size` are NULL.
 - **Coverage review found four false positives** from numeric proximity — investor AUM,
   cumulative firm capital, and a post-money valuation read as round sizes. The
   classifier now requires the amount to be *bound* to the target's financing event and
