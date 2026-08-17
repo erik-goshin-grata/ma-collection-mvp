@@ -5,8 +5,10 @@ No network and no model calls.
 
 Semantics fixed by decision (2026-08-17):
 
-- `total_debt` and `Cash_ST` are point-in-time balance-sheet items. There is no
-  LTM/TTM concept and no period-type field for them, only an as-of date.
+- `total_debt` and `Cash_ST` are point-in-time balance-sheet items, recorded as
+  `POINT_IN_TIME` plus an exact `balance_sheet_as_of_date`. There is no LTM/TTM/NTM
+  concept for them, and no annual/quarterly field — filing frequency is filing
+  context, not the economic period of the amount.
 - A *derived* `net_debt` requires both components to share one
   `balance_sheet_as_of_date`. Reported/manual `net_debt` is still preferred.
 - Arithmetic that mixes consideration with debt or cash — the calculated implied-EV
@@ -189,6 +191,10 @@ def _scenario_extraction_surface(failures: list[str]) -> None:
         "cash_st", "cash_st_currency",
         "balance_sheet_as_of_date",
     )
+    # Derived deterministically by aggregation rather than extracted, so it lives on
+    # transaction_record only and is deliberately absent from _FIELDS/HC_FIELDS: a
+    # constant the model never writes is a constant the model cannot mislabel.
+    derived_only_fields = ("balance_sheet_period_type",)
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = str(Path(tmp) / "surface.db")
@@ -199,6 +205,12 @@ def _scenario_extraction_surface(failures: list[str]) -> None:
             for field in new_fields:
                 if field not in cols:
                     failures.append(f"{p}: {table} missing column {field}")
+        tr_cols = {row[1] for row in conn.execute("PRAGMA table_info(transaction_record)")}
+        for field in derived_only_fields:
+            if field not in tr_cols:
+                failures.append(f"{p}: transaction_record missing column {field}")
+            if field in aggregate._FIELD_TYPE:
+                failures.append(f"{p}: {field} is derived, it must not be an extracted _FIELDS entry")
         conn.close()
 
     # Aggregation must read them, and the observation writer must cover every field
@@ -220,6 +232,8 @@ def _scenario_extraction_surface(failures: list[str]) -> None:
     # Decision 3 — prefer a source-stated USD figure, never a self-made conversion.
     if "stated USD" not in prompt_text and "stated in USD" not in prompt_text:
         failures.append(f"{p}: HC prompt lacks the source-stated-USD preference")
+    if "POINT_IN_TIME" not in prompt_text:
+        failures.append(f"{p}: HC prompt does not name POINT_IN_TIME as the balance-sheet period type")
 
 
 # ---------------------------------------------------------------------------
@@ -339,6 +353,12 @@ def _scenario_end_to_end_single_source(failures: list[str]) -> None:
         _check(failures, f"{p} cash_st", row["cash_st"], 10_000_000.0)
         _check(failures, f"{p} total_debt_currency", row["total_debt_currency"], "USD")
         _check(failures, f"{p} balance_sheet_as_of_date", row["balance_sheet_as_of_date"], AS_OF)
+        # The economic period type of a balance-sheet amount, recorded explicitly so
+        # it can never be read as, or mistaken for, a trailing/forward period.
+        _check(
+            failures, f"{p} balance_sheet_period_type",
+            row["balance_sheet_period_type"], "POINT_IN_TIME",
+        )
         # net_debt = 60 - 10, both USD, one as-of date.
         _check(failures, f"{p} net_debt", row["net_debt"], 50_000_000.0)
         # transaction_value = equity + total debt at control.
@@ -384,6 +404,13 @@ def _scenario_end_to_end_cross_source(failures: list[str]) -> None:
 
         _check(failures, f"{p} net_debt", row["net_debt"], None)
         _check(failures, f"{p} implied_enterprise_value", row["implied_enterprise_value"], None)
+        # A balance-sheet amount is present, so its period type is still recorded;
+        # only the shared as-of date is null, because the two dates disagree.
+        _check(
+            failures, f"{p} balance_sheet_period_type",
+            row["balance_sheet_period_type"], "POINT_IN_TIME",
+        )
+        _check(failures, f"{p} balance_sheet_as_of_date", row["balance_sheet_as_of_date"], None)
         # total_debt is coherent on its own, so the debt-inclusive TV still holds.
         _check(failures, f"{p} transaction_value", row["transaction_value"], 260_000_000.0)
         _check(

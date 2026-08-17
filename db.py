@@ -423,6 +423,13 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         ("total_debt_currency",              "TEXT"),
         ("cash_st_currency",                 "TEXT"),
         ("balance_sheet_as_of_date",         "TEXT"),
+        # Economic period type of the balance-sheet amounts: always POINT_IN_TIME,
+        # derived by aggregation rather than extracted. Recorded explicitly so a
+        # balance-sheet figure can never be read as a trailing or forward period the
+        # way an income-statement metric can. This is NOT a filing-frequency
+        # (annual/quarterly) marker — that is filing context, not the economic
+        # period of the amount, and is deliberately not modelled here.
+        ("balance_sheet_period_type",        "TEXT"),
         ("transaction_value",                "REAL"),
         ("transaction_value_basis",          "TEXT"),
         ("pct_acquired_source",              "TEXT"),

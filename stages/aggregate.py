@@ -778,6 +778,12 @@ def _pick_value_amount_for_type(field_observations: dict[str, list[dict]], targe
 # Financial metrics and the qualifiers that are only meaningful alongside them.
 # `financials_currency` is deliberately absent: one column serves both metrics, so
 # it is resolved separately by unanimity over the anchoring sources actually used.
+# Balance-sheet amounts are as-of figures, not periods. This is the economic period
+# type of the amount, and the only legal value for it — there is no LTM/TTM/NTM
+# concept for a balance sheet, and filing frequency (annual/quarterly) is filing
+# context rather than the period of the amount.
+BALANCE_SHEET_PERIOD_TYPE = "POINT_IN_TIME"
+
 _METRIC_COMPANION_FIELDS: dict[str, tuple[str, ...]] = {
     "target_revenue": (
         "target_revenue_period_type",
@@ -950,6 +956,13 @@ def _resolve_balance_sheet_inputs(
     else:
         stored_as_of = total_debt_as_of if total_debt is not None else cash_st_as_of
 
+    # Balance-sheet amounts are point-in-time by definition, so the period type is
+    # derived here rather than extracted — a constant the model never writes is a
+    # constant the model cannot mislabel as LTM/TTM/NTM. Null when no balance-sheet
+    # amount is present, so the marker never implies data that is not there.
+    has_balance_sheet_amount = total_debt is not None or cash_st is not None
+    period_type = BALANCE_SHEET_PERIOD_TYPE if has_balance_sheet_amount else None
+
     return {
         "total_debt": total_debt,
         "total_debt_currency": total_debt_currency,
@@ -958,6 +971,7 @@ def _resolve_balance_sheet_inputs(
         "cash_st_currency": cash_st_currency,
         "cash_st_as_of": cash_st_as_of,
         "balance_sheet_as_of_date": stored_as_of,
+        "balance_sheet_period_type": period_type,
     }
 
 
@@ -1506,6 +1520,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             cash_st = balance_sheet["cash_st"]
             cash_st_currency = balance_sheet["cash_st_currency"]
             balance_sheet_as_of_date = balance_sheet["balance_sheet_as_of_date"]
+            balance_sheet_period_type = balance_sheet["balance_sheet_period_type"]
             net_debt, net_debt_resolved_currency, _net_debt_as_of, net_debt_basis = _derive_net_debt(
                 net_debt_reported,
                 net_debt_currency,
@@ -1652,9 +1667,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     enterprise_value, enterprise_value_basis,
                     investment_amount, deal_value_currency,
                     total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source,
-                    total_debt_currency, cash_st_currency, balance_sheet_as_of_date
+                    total_debt_currency, cash_st_currency, balance_sheet_as_of_date,
+                    balance_sheet_period_type
                 ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                 )
                 """,
                 (
@@ -1772,6 +1788,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     total_debt_currency,
                     cash_st_currency,
                     balance_sheet_as_of_date,
+                    balance_sheet_period_type,
                 ),
             )
 

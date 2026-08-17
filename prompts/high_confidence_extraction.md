@@ -260,9 +260,11 @@ explicitly, as point-in-time figures inside target_financials:
   one combined figure. Do not split it into components.
 - total_debt_currency / cash_st_currency: ISO 4217 code for each figure, taken from
   how that figure is stated.
-- balance_sheet_as_of_date: the date the balance sheet is stated as of. These are
-  point-in-time figures, so there is no period type — do not label them LTM, TTM,
-  annual, or quarterly.
+- balance_sheet_as_of_date: the exact date the balance sheet is stated as of.
+  These are POINT_IN_TIME figures. Never label them LTM, TTM, or NTM — a balance
+  sheet covers no period, it is a position on one date. Do not record annual or
+  quarterly either: that describes the filing the figure came from, not the economic
+  period of the amount. Give the exact date, not the filing's period label.
 
 Do not compute net_debt. Do not compute enterprise value. The deterministic
 aggregation layer calculates net_debt from total_debt - cash_st only when both

@@ -1257,10 +1257,17 @@ closes spec §2.10 item 1.
 Decision:
 
 - `total_debt` and `Cash_ST` are extracted as point-in-time balance-sheet items in
-  `target_financials`, with `total_debt_currency`, `cash_st_currency` and a
-  `balance_sheet_as_of_date`. There is **no period-type field** for them — they are
-  as-of figures, so LTM/TTM/annual/quarterly does not apply. No annual/quarterly flag
-  is introduced absent a concrete downstream consumer.
+  `target_financials`, with `total_debt_currency`, `cash_st_currency` and an exact
+  `balance_sheet_as_of_date`.
+- Their economic period type is recorded as **`POINT_IN_TIME`**, in
+  `balance_sheet_period_type`. There is no LTM/TTM/NTM concept for a balance sheet —
+  it is a position on one date, not a period. The value is **derived by aggregation,
+  not extracted**: it is a constant, and a constant the model never writes is a
+  constant the model cannot mislabel. It is null when no balance-sheet amount is
+  present.
+- **No annual/quarterly field** is introduced. Filing frequency describes the filing
+  a figure came from, not the economic period of the amount; it can be added later
+  against a concrete downstream need.
 - A **derived** `net_debt` requires both components to share one currency and one
   `balance_sheet_as_of_date`, both known. Reported/manual `net_debt` stays preferred
   and carries no component-coherence requirement, only its own currency.
