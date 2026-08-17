@@ -1,6 +1,7 @@
 # Runbook — Second Owed Re-aggregation (§4.2)
 
-**Status:** PLAN ONLY. Nothing here has been executed.
+**Status:** EXECUTED AND ACCEPTED (2026-08-17). Retained as the procedure of record
+for future re-aggregations; the outcome of the run it planned is in §8.
 **Prepared:** 2026-08-17
 **Target:** `data/ma_mvp.db` (92 `transaction_record` rows)
 
@@ -36,12 +37,12 @@ That splits the work into two decisions, which should not be run together:
 | Reversible | Yes, from a file copy | Yes, from a file copy |
 | Risk | Low, bounded | Higher — all HC fields move, not just debt/cash |
 
-**Recommendation: run Path A first, review its diff, and decide Path B separately.**
-Path A is what §4.2 actually owes. Path B is a new extraction run wearing a
-re-aggregation label, and bundling them would make an unbounded diff impossible to
-attribute.
+**Path A was run first and accepted; Path B is deferred** until a naturally occurring
+or manually collected debt/cash case exists. Path A is what §4.2 actually owed. Path B
+is a new extraction run wearing a re-aggregation label, and bundling them would have
+made an unbounded diff impossible to attribute.
 
-The rest of this runbook is Path A.
+The rest of this runbook is Path A. Its outcome is recorded in §8.
 
 ---
 
@@ -273,7 +274,7 @@ at-risk rows; the reset touches a status other than `AGGREGATED`.
 
 ---
 
-## 7. Open question for the owner
+## 7. Open question for the owner — ANSWERED
 
 Path B (re-extraction) is what actually populates debt and cash and discharges the
 spirit of §4.2 — the branch has still never run against real data. It is a separate
@@ -281,3 +282,48 @@ decision with real LLM cost, and it should follow Path A's review rather than
 accompany it. `hc_prompt_version` distinguishes rows extracted with balance-sheet
 capability (`0.17`) from those without, so a partial or staged re-extraction remains
 attributable.
+
+**Answered 2026-08-17: Path B is deferred.** It will not be run against the current
+corpus merely to seek a debt/cash case; it waits for a naturally occurring or manually
+collected one. The plan is written up and ready in
+`docs/runbook_path_b_reextraction.md`.
+
+---
+
+## 8. Path A outcome (executed and accepted, 2026-08-17)
+
+**Ran:** the §6 procedure, Stage 9 only, under `AGGREGATION_READ_SOURCE=observation`.
+
+**Structural invariants — all held.**
+
+| Check | Before | After |
+|---|---|---|
+| `transaction_record` rows | 92 | **92** |
+| Cluster members re-derived | — | 98 `AGGREGATED` |
+| Held back (correctly untouched) | — | 1 `PROMPT_FAILED` |
+
+No cluster merged or split; no transaction identity changed.
+
+**Value-model results.**
+
+- The typed-value fix is visible on real rows: Anysphere at $60.0B and Payoneer at
+  $2.75B now carry `equity_value` with `transaction_value_basis = EQUITY_VALUE_ONLY`
+  — previously collapsed. `EQUITY_VALUE_ONLY` records *debt unknown*, not debt = 0.
+- Multiples survived where they were genuinely supported: Dahl holds 0.76x.
+- Anchoring produced **no** losses on this corpus. That is not evidence the guard is
+  inert — it means no live row depended on a borrowed qualifier. The fixture in
+  `scripts/test_currency_period_anchoring.py` still reproduces the defect the guard
+  prevents.
+- Stage 10/11 census: 0 / 0 / 0 / 0 before and after, i.e. nothing to preserve on this
+  corpus and nothing lost. The ownership guarantee is carried by
+  `scripts/test_stage9_field_ownership.py`, not by this run.
+
+**Debt branch — still dormant, as §0 predicted.** 0 rows with `net_debt`, 4
+enterprise values all `STATED`, 0 calculated, 0 `EQUITY_PLUS_TOTAL_DEBT`, 0 at-risk
+rows from the currency-gap quantifier. Path A could not change this; only Path B can.
+
+**Caveat that survives this run.** Aggregation remains incremental. Path A re-derived
+the corpus as it stood on 2026-08-17, but Stage 9 still processes `CLUSTERED` rows as
+they arrive, so rows added later derive under whatever semantics are current then. The
+DB is not guaranteed to represent a single derivation vintage, and a future reader
+should not assume it does.

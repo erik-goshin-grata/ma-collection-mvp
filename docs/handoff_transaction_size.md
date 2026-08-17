@@ -1,6 +1,6 @@
 # Handoff: Build `transaction_size` + surface the value fields
 
-**Status:** Not started. Sequenced **after** §4.2.
+**Status:** Not started. Its §4.2 dependency is **satisfied** (2026-08-17) — see below.
 **Spec:** `docs/spec_transaction_value_model.md` §2.4, §7
 **Decisions:** `docs/decisions.md` — "Transaction Size as Universal Magnitude"
 
@@ -9,13 +9,29 @@ Delivers the review-sheet fix that the value-model work exists to enable. Lower 
 
 ---
 
-## Dependency
+## Dependency — SATISFIED 2026-08-17
 
-**Do not start before §4.2 lands.** The M&A waterfall reads `transaction_value`, whose rule
-changes in §4.2. Building against the current behaviour means rebuilding after.
+The blocker was: *do not start before §4.2 lands*, because the M&A waterfall reads
+`transaction_value`, whose rule changes in §4.2, and building against the pre-§4.2 behaviour
+means rebuilding after.
 
-`handoff_stake_level_equity_value.md` is the prerequisite. Its joint re-aggregation should
-complete first, so `transaction_size` derives from settled inputs.
+**Discharged.** §4.2 code landed, and the owed second re-aggregation was executed and accepted
+as Path A on 2026-08-17 (`docs/runbook_second_reaggregation.md` §8): 92 → 92 transactions, all
+99 staging rows re-derived under the observation read path, stake-level `equity_value` and the
+typed-value picker live on the whole corpus. `transaction_value` now behaves as the waterfall
+assumes, so the waterfall can be built against settled inputs.
+
+`handoff_stake_level_equity_value.md` was the prerequisite; its joint re-aggregation is the
+same Path A run.
+
+**One caveat carries forward.** Aggregation is still incremental — Path A re-derived the corpus
+as it stood, but nothing prevents future rows from being derived under different semantics. A
+`transaction_size` backfill should not assume every row was produced by one derivation vintage.
+
+**Not discharged, and not a blocker for this work:** the balance-sheet half. The corpus carries
+zero `total_debt` / `cash_st` values (Path B deferred), so the debt-inclusive
+`transaction_value` rung has never fired on real data. The waterfall's *behaviour* on that rung
+is specified and fixture-tested; only its live exercise is outstanding.
 
 ---
 
@@ -26,7 +42,15 @@ DB column, and the export surface described below.
 
 **Out of scope:**
 
-- The EV rewire — still parked on currency and period coherence (spec §2.10 items 1–2)
+- **EV as a `transaction_size` rung (spec §2.10 item 3) — still parked.** §2.10 items 1–2
+  landed on 2026-08-17: currency mismatch is now guarded (an amount and its qualifier are
+  anchored to the same fact and source; debt-inclusive arithmetic refuses unless both
+  currencies are known and equal; no internal FX), and period coherence is enforced
+  (`POINT_IN_TIME` plus an exact `balance_sheet_as_of_date` shared by both components).
+  **That does not unpark item 3.** It was held for an independent reason — below control,
+  `implied_enterprise_value` is the grossed-up whole-company figure and would report Pinnacle
+  Gas as 2.22B rather than 600M. The gross-up problem is unaffected by currency or period
+  work and remains unresolved, so **do not add the EV rung** (see Change 1).
 - Named `*_as_reported` value fields — decided, no handoff
 - Deal-type taxonomy
 - Any change to how `equity_value`, `transaction_value` or the implied tier are computed

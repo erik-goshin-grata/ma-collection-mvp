@@ -40,11 +40,18 @@ exposed and validated independent preservation of source-supported
 `VC_ROUND` classification passed source review with a source-quality caveat.
 
 Newest Grata reconciliation/design documents:
-- `docs/grata_v2_inventory_and_recommendations.md`
-- `docs/grata_v2_data_dictionary.md`
+- `docs/grata_v2_reconciliation_2026_08_17.md` — **read this first.** The harness delta
+  against the two below: what is implemented and validated, what is recommended for Grata
+  ENG, what is already adequate in Grata, and what is deferred or not yet live-validated.
+  Carries the Adopt / Keep / Defer list and the remaining open schema questions.
+- `docs/grata_v2_inventory_and_recommendations.md` — v0.3, redlined inline 2026-08-17
+- `docs/grata_v2_data_dictionary.md` — v0.3, redlined inline 2026-08-17
 
-Treat those as current inventory/recommendation inputs, not as proof that their
-recommendations are implemented in this harness or in Grata production.
+Treat the latter two as current inventory/recommendation inputs, not as proof that their
+recommendations are implemented in this harness or in Grata production. The reconciliation
+is where that distinction is actually drawn — and its largest caveat is that the
+balance-sheet half of the value model (`total_debt`, `cash_st`, both calculated EV bases)
+is **fixture-validated only**, with zero live corpus rows.
 
 ---
 
@@ -170,7 +177,12 @@ Key config flags:
 - The implied-equity violation found during §4.2 verification is fixed:
   `implied_equity_value` derives from `equity_value` only, never from an
   unqualified `transaction_value` or `post_money_valuation`.
-- Currency + period anchoring not yet validated for broad balance-sheet extraction;
+- Currency + period anchoring is implemented and **validated on the live corpus** by
+  the Path A re-aggregation (2026-08-17): qualifiers anchor to the source of their own
+  amount, and the run produced no borrowed-qualifier losses because this corpus
+  contains no cross-source qualifier dependency. The fixture still reproduces the
+  defect. What remains unvalidated is the *balance-sheet* half — zero live debt/cash
+  cases exist, so the debt-inclusive bases have never fired on real data.
   SEC enrichment remains limited to transaction/merger documents, relevant
   exhibits such as 99s, and manually collected values, not general financial-
   statement mining.
@@ -191,10 +203,12 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    `balance_sheet_as_of_date` added to `transaction_record`. See decisions.md
    "Financial Qualifiers Anchor to the Source of Their Own Amount" and
    `scripts/test_currency_period_anchoring.py`.
-   **Still owed before debt/cash extraction:** the extraction must populate the
-   currency anchors (the cross-currency guard is dormant without them), and the
-   period-coherence tolerance between `balance_sheet_as_of_date` and the multiple
-   denominator's period is deliberately still undecided.
+   **Discharged:** HC prompt 0.17 populates the currency anchors, and Stage 4a
+   persists them (2026-08-17). The cross-currency guard is live rather than dormant.
+   **Still deliberately undecided:** the period-coherence tolerance between
+   `balance_sheet_as_of_date` and the multiple denominator's period. No tolerance was
+   invented; the as-of date is preserved so corpus behaviour can be evaluated once a
+   real debt/cash case exists.
 2. ~~**`total_debt` + `Cash_ST` as `target_financials` metrics**~~ — **landed 2026-08-17.**
    Extracted as point-in-time items with per-source currency and
    `balance_sheet_as_of_date` (no period type — they are as-of figures). Derived
@@ -215,18 +229,28 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    (`equity_value`, `implied_equity_value`, `transaction_value`, `investment_amount`,
    `deal_value_currency`, and funding round fields) without treating `_v2` shadow
    columns as reviewer-facing Grata enum fields.
-4. **`transaction_size` + export column** — the reviewer-facing deliverable now that
-   the first §4.2 re-aggregation is discharged (`docs/handoff_transaction_size.md`).
+4. **`transaction_size` + export column** — **the next code task** (reconfirmed
+   2026-08-17). Its §4.2 dependency is fully discharged: the second/owed re-aggregation
+   ran as Path A and was accepted, so the waterfall builds against settled inputs
+   (`docs/handoff_transaction_size.md`). Deterministic — no network, no model calls, no
+   live DB. **Settle the basis vocabulary first**: the Grata docs and the handoff disagree
+   on two rungs and the handoff omits `SPIN_SPLIT_CONSIDERATION_VALUE`
+   (`docs/grata_v2_reconciliation_2026_08_17.md` §5 question 6). A rename now, or a data
+   migration later.
 5. **Legacy value-field inventory/reorganization** — `enterprise_value` is now a
    compatibility mirror of `implied_enterprise_value`; decide later whether to
    remove, alias, or formally deprecate it after downstream consumers are known.
-6. **Grata V2 recommendation triage** — use
-   `docs/grata_v2_inventory_and_recommendations.md` and
-   `docs/grata_v2_data_dictionary.md` as recommendation inputs. Do not treat
-   unimplemented proposals there as accepted harness behavior.
+6. **Grata V2 recommendation triage** — **done 2026-08-17**, in
+   `docs/grata_v2_reconciliation_2026_08_17.md`: 14 items sorted into implemented+validated
+   / recommended for ENG / already adequate in Grata / deferred, plus Adopt-Keep-Defer and
+   six open schema questions. The v0.3 inventory and dictionary are redlined inline. Still
+   true, and the reason the triage exists: do not treat unimplemented proposals there as
+   accepted harness behavior.
 
-Owed operational: the **second re-aggregation** below — route through `run.py` so
-`_apply_migrations` adds the columns first.
+Owed operational: **none.** The second re-aggregation was executed and accepted as Path A
+on 2026-08-17 (`docs/runbook_second_reaggregation.md` §8). Path B re-extraction is
+deliberately deferred until a naturally occurring or manually collected debt/cash case
+exists.
 
 Still open, lower priority: write `stages/funding_lc_extract.py`; `deal_summary` v0.10
 funding framing.
@@ -244,8 +268,11 @@ The first owed re-aggregation (item 1 below) is **discharged on `pl_funding.db` 
 the two live targets. Both routed through `init_db` (columns asserted), full AGGREGATED→CLUSTERED
 reset with row-count assertions, real Stage 9, diff classified by decision lineage. `ma_valu8.db`
 / `ma_grata.db` remain deferred (control-heavy fixtures, not read from). **The second re-aggregation
-(item 2, after `total_debt` + `Cash_ST`) is still owed** — and per the dormancy finding above it is
-substantive: §4.2's `EQUITY_PLUS_TOTAL_DEBT` branch has produced zero values on real data to date.
+is discharged as of 2026-08-17** — executed and accepted as Path A on `ma_mvp.db`
+(`docs/runbook_second_reaggregation.md` §8): 92 → 92 transactions, 98 re-derived, observation read
+path corpus-wide. What it could *not* discharge is the dormancy finding: §4.2's
+`EQUITY_PLUS_TOTAL_DEBT` branch has still produced zero values on real data, because no staging row
+carries debt or cash. Only a re-extraction (Path B, deliberately deferred) can change that.
 
 A mid-run verification surfaced a decision violation in `_derive_implied_equity` (below), which was
 **fixed before `ma_mvp` ran** (`065a87d`). A corrective re-aggregation of `pl_funding.db` nulled its
@@ -267,12 +294,16 @@ since corrected).
 then was applied to the two live DBs by deliberate re-aggregation. Aggregation remains
 **incremental** (only CLUSTERED rows are derived; existing AGGREGATED rows keep old
 semantics), so any future semantic change still needs an explicit reset-and-run, not a normal
-pipeline pass. **One deliberate re-aggregation remains owed:**
+pipeline pass. **The re-aggregation that was owed here is now discharged:**
 
-1. **After total_debt + Cash_ST extraction (the next piece):** re-aggregate again to populate
+1. ~~**After total_debt + Cash_ST extraction (the next piece):** re-aggregate again to populate
    the transaction_value total-debt branch (dormant until then) and derive net_debt from
-   `total_debt − Cash_ST` (cash is defined as `Cash_ST` — see decisions.md "Debt and Cash
-   Inputs").
+   `total_debt − Cash_ST`~~ — **run as Path A, 2026-08-17.** The extraction landed in code
+   (prompt 0.17 + Stage 4a persistence), but the existing corpus was extracted under 0.16 and
+   earlier, so re-aggregation alone could not activate the debt branch — the runbook's §0
+   finding. Path A therefore delivered the read-path, typed-equity and anchoring changes across
+   the corpus; the debt branch and derived `net_debt` remain dormant pending Path B. Cash is
+   still defined as `Cash_ST` (decisions.md "Debt and Cash Inputs").
 
 Expect **unattributable diffs** from re-aggregation: the DB holds several historical
 derivation semantics (aggregation has always been incremental), not just a single expected

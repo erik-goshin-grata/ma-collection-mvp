@@ -4,6 +4,13 @@
 **Basis:** Current Grata schemas/enums plus accepted/tested transaction-model decisions through 2026-08-13.  
 **Important:** Physical storage/table placement remains an ENG decision unless cardinality requires a repeating child/relationship.
 
+> **Redlined 2026-08-17 — see `docs/grata_v2_reconciliation_2026_08_17.md`.**
+> Inline redlines below touch §7 (canonical EV rule; missing `equity_value_basis`), §9
+> (`POINT_IN_TIME` QA contract; FX semantics) and §10 (`value_usd_basis`). The rest of
+> v0.3 stands. Caveat carried from that document: everything involving `total_debt`,
+> `cash_and_equivalents` and the calculated EV bases is **fixture-validated only** — zero
+> live rows.
+
 ## 1. Dictionary conventions
 
 **Data shapes**
@@ -172,10 +179,34 @@ Canonical EV rule:
 - source-stated whole-company EV → `implied_enterprise_value`
 - otherwise `implied_equity_value + net_debt` when supported
 - reported net debt preferred
-- otherwise calculate net debt only from period-coherent `total_debt - cash_and_equivalents`
+- otherwise calculate net debt only from period-coherent **and currency-coherent** `total_debt - cash_and_equivalents`
 - never assume missing debt/cash is zero
+- **never backsolve `net_debt` from `implied_enterprise_value - equity_value`**
 
 `ENTERPRISE_VALUE` may remain as an observation/compatibility type during migration, but should not be a competing canonical output.
+
+**Redline 2026-08-17 (reconciliation §3 items 3, 10, 12).**
+
+- **Currency coherence.** Every calculation mixing consideration with a balance-sheet
+  figure requires **both currencies known and equal**. Unknown does not calculate; known
+  but differing does not calculate; no conversion is attempted. *Unknown is insufficient
+  evidence, not permission to assume agreement.* `STATED` values are exempt — one
+  source-stated figure is not a sum.
+- **No backsolve.** `EQUITY_VALUE` is stake-level, `ENTERPRISE_VALUE` is whole-company;
+  below control their difference is mostly the un-acquired stake, and even at 100% it is a
+  residual of every inconsistency between two sources. A backsolved net debt is
+  indistinguishable from a reported one once stored.
+- **Missing row — `equity_value_basis`.** This table gives `transaction_value_basis` and
+  `implied_equity_value_basis` but no basis for `equity_value`. Add:
+
+| Field / Concept | Definition | Shape | Population | Scope |
+|---|---|---|---|---|
+| `equity_value_basis` | Waterfall rung producing stake-level equity value. | ENUM / attribute | System | Recommended: `STATED`, `PER_SHARE_X_SHARES`. |
+
+- **`transaction_value_basis` vocabulary** needs a fourth rung, `EQUITY_BELOW_CONTROL`
+  (`pct_acquired < 50`: stake consideration, no debt applicable). Without it, "debt does
+  not apply" collapses into `EQUITY_VALUE_ONLY`, which means "debt applies but is
+  unknown" — a research queue item rather than a complete record.
 
 ---
 
@@ -224,6 +255,35 @@ Change:
 Deprecate/reconcile:
 - `ENTERPRISE_VALUE` → converge canonical output on `IMPLIED_ENTERPRISE_VALUE`
 
+**Redline 2026-08-17 — three semantics to state explicitly (reconciliation §3 items 1, 8,
+9, 11, 14).** None require a new column.
+
+- **`POINT_IN_TIME` is derived, not collected.** Balance-sheet metric types — `TOTAL_DEBT`,
+  `CASH_AND_EQUIVALENTS`, `NET_DEBT`, `SHAREHOLDERS_EQUITY` — must carry
+  `period_type = POINT_IN_TIME`, an exact `period_end_date`, and
+  `period_end_date_precision = exact`. A balance sheet covers no period; it is a position
+  on one date, so `LTM`, `TTM`, `NTM`, `ANNUAL` and `QUARTERLY` are category errors on
+  these types. The specific trap is recording the *filing's* period label — that describes
+  where the figure was found, not what it measures. Derive from `metric_type` so it cannot
+  be mislabelled, and add the rule to §16.
+- **Qualifiers never inherit.** A row's `value_currency`, `period_type` and
+  `period_end_date` belong to that row's own amount and must never be taken from a sibling
+  row — including rows on the same transaction and rows from the same source. Unstated is
+  null. The harness fixture for this shows a borrowed period end manufacturing a 5.0x
+  multiple from figures that never described the same period: a number that reads as
+  entirely ordinary and is unfalsifiable without returning to both sources. This is the
+  same defect class as Silver parity item K1.
+- **`fx_rate` / `fx_rate_date` record a conversion that was actually performed** by the
+  source or a researcher — never one the pipeline invented. Where currencies differ and no
+  stated conversion exists, the correct canonical output is null. Complementing this:
+  where a source states the same figure in both a local currency and USD
+  (*"3.14 trillion won ($2.2 billion)"*), prefer the **stated** USD figure and set the
+  currency to USD. That is how comparable USD figures are obtained without an FX engine.
+- **Per-fact provenance.** Rows need source attribution and a fact key, so *corroboration*
+  (two sources, same figure) is distinguishable from *multiplicity* (one source, two
+  different figures). Both are legitimate and they mean opposite things about confidence.
+  Supersession on re-collection is an open question — see reconciliation §5.
+
 ---
 
 # 10. Transaction multiples
@@ -241,7 +301,7 @@ Deprecate/reconcile:
 | `denominator_financial_id` | Linked financial metric denominator. | FK | Expected for calculated rows. |
 | `source_flag` | Source-stated vs calculated. | ENUM | `as_reported`, `calculated`. |
 | `quality` | Multiple quality/state. | ENUM | Current: `CALCULATED`, `NM`, `NOT_CALCULABLE`; verify naming. |
-| `value_usd_basis` | USD numerator/value basis metadata. | DATA POINT | Existing; exact semantics/name to verify. |
+| `value_usd_basis` | USD numerator/value basis metadata. | DATA POINT | Existing; exact semantics/name to verify. **Redline 2026-08-17:** candidate definition — *the USD figure the source itself stated*, not one converted downstream. Confirm whether that is the intent or whether it denotes a conversion Grata performed; the two are opposite and the name does not disambiguate. |
 | `is_calculated` | Calculated indicator. | FLAG | Overlaps `source_flag`; review redundancy. |
 
 Rules:

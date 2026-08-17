@@ -1,6 +1,8 @@
 # Runbook — Path B: Debt/Cash Re-extraction
 
-**Status:** PLAN ONLY. Nothing here has been executed.
+**Status:** PLAN ONLY — and **deliberately deferred** (2026-08-17). Nothing here has
+been executed. Path B waits for a naturally occurring or manually collected debt/cash
+case; the current corpus will not be re-extracted merely to seek one.
 **Prepared:** 2026-08-17
 **Target:** `data/ma_mvp.db` (92 transactions, 99 staging rows)
 **Prerequisite:** Path A discharged and accepted (2026-08-17).
