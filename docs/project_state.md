@@ -143,6 +143,23 @@ Only; Market Cap Is Its Own Type".
   It does not retroactively clean the corpus, and no re-extraction is scheduled —
   Path B remains deferred. Existing rows keep whatever scope semantics produced them.
 
+**Legacy funding value-mapping remediation (OPEN — 10 rows, data not code):**
+Ten `VC_ROUND`/`GROWTH_EQUITY` rows carry a raise in `transaction_value` with
+`round_size` NULL. **All ten are at HC prompt 0.12; none at 0.13+**, so this is legacy
+data, not a defect in the current funding extraction path — Stage 4a processed funding
+rows until 2026-08-07 and had no `round_size` write or capital-raised precondition until
+0.13. 8/10 have heuristic round language; 2 (Cellares, Rejoni) need a source read.
+- **Guard landed:** Stage 9 now family-gates `transaction_value` and `equity_value`
+  (decisions.md, "Funding Events Derive No transaction_value or equity_value"), so
+  re-aggregation can no longer regenerate M&A values from these rows. The guard refuses;
+  it never moves an amount into `round_size`.
+- **Remediation is per-row and human-approved.** No bulk copy. The amount stays visible
+  in `investment_amount`, `staging_extraction.value_amount`, and the observation ledger.
+- **`VENTURE_DEBT` is out of scope** — `round_size` vs `facility_size` is a separate
+  decision, not to be settled while fixing historical VC/Growth rows.
+- The retired XLSX shadow masked this by falling through to `transaction_value`; the
+  family-keyed `transaction_size` rule exposing null is what surfaced it.
+
 **PIPE coverage in `transaction_size` (open — classifier/product decision):**
 The Funding family is `{VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT}`, unchanged. A PIPE or
 public-company primary raise is deliberately *not* forced into it

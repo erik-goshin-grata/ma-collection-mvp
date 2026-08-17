@@ -561,7 +561,20 @@ def _derive_transaction_value(
     EQUITY_VALUE_ONLY does not assume debt=0; it preserves the known purchase-price
     component for the stake actually acquired. The gross-debt branch
     is dormant until total_debt is populated (extraction is a later piece).
+
+    **Funding events derive no transaction value at all.** A round is primary capital
+    into the company; there is no purchase price, so the field is categorically
+    inapplicable rather than merely usually absent. This used to be an assumption about
+    upstream — funding rows reach the funding extractor, which never writes the M&A
+    value fields — and the assumption does not hold for rows extracted before
+    2026-08-07, which went through the M&A path when it had no `round_size` write. On
+    those, a raise sits in `value_amount` typed `TRANSACTION_VALUE`, and without this
+    gate every re-aggregation regenerates a canonical purchase price from it.
+    `MINORITY_INVESTMENT` is deliberately outside the gate: a secondary purchase of a
+    stake is an ordinary acquisition with a real consideration.
     """
+    if _event_type(fv) in _FUNDING_EVENT_TYPES:
+        return None, None
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "TRANSACTION_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
@@ -686,8 +699,16 @@ def _derive_equity_value(
                            permitted only at pct == 100 (see below).
 
     Post-money is NOT equity value: it belongs in post_money_valuation (and the
-    implied tier via _derive_implied_equity), never here. A primary-capital raise has
-    null value fields, so it yields None here and lives in investment_amount (bug #8).
+    implied tier via _derive_implied_equity), never here.
+
+    **Funding events derive no equity value**, enforced rather than assumed. A raise
+    buys no existing equity, so the field is categorically inapplicable. This was
+    previously left to upstream — "a primary-capital raise has null value fields, so it
+    yields None here" — which is true only of rows extracted after the funding path
+    split on 2026-08-07. Older rows carry the raise in `value_amount`, and without the
+    gate a stale `EQUITY_VALUE` there would gross up through `_derive_implied_equity`
+    into an implied tier and a multiple. The amount still reaches `investment_amount`
+    (bug #8), so nothing is lost by refusing here.
 
     **Every writer here must be stake-level by construction**, because the field feeds
     `_derive_implied_equity`, which divides by pct. A whole-company amount arriving
@@ -710,6 +731,8 @@ def _derive_equity_value(
     amount no source stated. Unknown pct is refused for the same reason: unknown scope
     is not a licence to claim the whole company. None is the correct answer.
     """
+    if _event_type(fv) in _FUNDING_EVENT_TYPES:
+        return None, None
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "EQUITY_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"

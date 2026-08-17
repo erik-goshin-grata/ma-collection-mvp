@@ -1611,3 +1611,53 @@ Consequences:
   separate a below-control M&A from a control one (both stamp `TRANSACTION_VALUE`), so
   a grouping key wanting that distinction needs `is_minority` or `pct_acquired` too.
 - Stage 9 now owns 117 columns, up from 115.
+
+## 2026-08-17 - Funding Events Derive No transaction_value or equity_value
+
+Status: accepted. Implemented. **Model-integrity guard, independent of the historical
+backfill** — it stops the class; it does not correct the ten existing rows.
+
+Decision:
+
+- `_derive_transaction_value` and `_derive_equity_value` return `(None, None)` for
+  `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`. A round is primary capital into the
+  company: there is no purchase price and no equity bought, so both fields are
+  **categorically inapplicable**, not merely usually absent.
+- **The gate is the funding family only.** `MINORITY_INVESTMENT` stays outside it — a
+  secondary purchase of a non-controlling stake is an ordinary acquisition whose
+  consideration is a real `EQUITY_VALUE`, and the classifier routes genuine secondaries
+  to `ACQUISITION` so that stays true.
+- The guard **refuses; it does not reclassify.** It never moves an amount into
+  `round_size`. That is source-supported remediation, not a derivation.
+
+Context:
+
+- Stage 9 previously relied on funding rows simply not having the M&A value fields
+  populated — an assumption about upstream, never an enforced rule. `_compute_multiples`
+  and `_derive_investment_amount` already gated on family; these two did not.
+- The assumption holds only for rows extracted after the funding path split on
+  2026-08-07. Before that, funding rows went through the M&A extractor, which had no
+  `round_size` write and no capital-raised precondition until prompt 0.13 (2026-08-11),
+  so a Series A had nowhere to land but `value_amount` typed `TRANSACTION_VALUE`.
+- The live corpus has **ten** such rows, **all at prompt 0.12** and **none at 0.13+**.
+  That is what makes this legacy-data remediation rather than evidence of a broken
+  current extraction path. Without the gate, every re-aggregation would faithfully
+  regenerate a canonical M&A `transaction_value` from each of them, indefinitely.
+- The stale `EQUITY_VALUE` path was the worse of the two: it would gross up through
+  `_derive_implied_equity` into an implied tier and then a multiple.
+
+Consequences:
+
+- Guarded by `scripts/test_funding_value_family_gate.py`, verified to fail against each
+  gate independently.
+- **Nothing is destroyed by refusing.** The amount remains in
+  `staging_extraction.value_amount`, in the observation ledger, and in the canonical
+  `investment_amount` — asserted by the regression, because the remediation depends on
+  those amounts staying visible.
+- Ten rows will show null `transaction_value` after the next re-aggregation. That is the
+  correct canonical state: the amount is not a purchase price, and no evidence yet
+  supports it as a round size either. **Null is the honest answer until a human
+  classifies each row against its source.**
+- This is a canonical-model correction for every consumer — DB, API, analytics, the
+  Grata model. It is not a review-sheet concern, and no part of it was shaped to
+  preserve the historical XLSX appearance.
