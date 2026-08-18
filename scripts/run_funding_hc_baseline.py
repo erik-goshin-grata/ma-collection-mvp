@@ -13,8 +13,9 @@ Failure classification, which is the point of the exercise:
 
   PROMPT_WORDING      the schema has the right field; the prompt did not steer the model
                       to it. Fixable by rewording.
-  SCHEMA_LIMITATION   there is no field that can hold the correct answer. No wording
-                      fixes it.
+  SCHEMA_LIMITATION   there is no field that can hold the correct answer, and the
+                      correct answer is not "discard". No wording fixes it. Chronograph's
+                      lower bound is the one case that qualifies.
   PARSING             the model answered correctly and the value was lost or mangled
                       between response and record.
   DOWNSTREAM_ONLY     extraction is right; the defect is later in the pipeline.
@@ -35,7 +36,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.funding_hc_baseline_fixtures import ECONOMIC_CLASSES, FIXTURES  # noqa: E402
+from scripts.funding_hc_baseline_fixtures import (  # noqa: E402
+    DISCARDED_CLASSES, ECONOMIC_CLASSES, FIXTURES,
+)
 
 _PROMPT_NAME = "funding_hc_extraction"
 
@@ -64,10 +67,10 @@ def _classify(path: str, expected, actual, fixture: dict) -> str:
     if path == "round.size" and isinstance(actual, (int, float)):
         for trap, why in fixture["traps"].items():
             if abs(float(actual) - float(trap)) < 0.5:
-                if "AUM" in why or "firm size" in why:
-                    return (f"SCHEMA_LIMITATION — took {actual:,.0f}: {why}. No field "
-                            "exists for it and the prompt gives no rule, so the model has "
-                            "nowhere to put it but round.size")
+                # An investor's AUM leaking into round.size is a WORDING failure, not a
+                # schema one. The correct handling is to discard it, which needs no field
+                # — so adding one would not fix a contamination, and the baseline showed
+                # the prompt already discards it.
                 return f"PROMPT_WORDING — took {actual:,.0f}: {why}"
     if actual in (None, "<no such path>") and expected not in (None, "REPRESENTATION_GAP"):
         return "PROMPT_WORDING — correct field exists and was left empty"
@@ -91,7 +94,13 @@ def main() -> int:
     print("  corpus   : NOT touched — prompt logging goes to a temp database\n")
     print("  Economic classes and where each belongs in the 0.1 schema:")
     for cls, home in ECONOMIC_CLASSES.items():
-        print(f"    {cls:<22} {home or '*** NO FIELD — structural gap ***'}")
+        if home:
+            print(f"    {cls:<22} {home}")
+        else:
+            note = ("correctly DISCARDED — not a gap; a field would only be needed if "
+                    "AUM itself belonged in the data model"
+                    if cls in DISCARDED_CLASSES else "no field")
+            print(f"    {cls:<22} {note}")
 
     if args.dry_run:
         print(f"\n{'-' * 78}\nDRY RUN — no model calls. Fixtures and their traps:\n{'-' * 78}")

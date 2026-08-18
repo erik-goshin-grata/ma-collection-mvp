@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.funding_hc_baseline_fixtures import (  # noqa: E402
-    ECONOMIC_CLASSES, FIXTURES, fixture,
+    DISCARDED_CLASSES, ECONOMIC_CLASSES, FIXTURES, fixture,
 )
 
 FUNDING_TYPES = {"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"}
@@ -58,8 +58,12 @@ def main() -> None:
 
     # The structural finding this whole exercise turns on: four economic classes have a
     # home in the 0.1 schema and one does not.
+    # AUM has no field because it is correctly DISCARDED, not because one is missing.
+    # The baseline proved round.size is not contaminated without it, so calling this a
+    # structural gap overstated the finding.
     homeless = [k for k, v in ECONOMIC_CLASSES.items() if v is None]
-    _check(failures, "exactly one class has no schema home", homeless, ["investor / fund AUM"])
+    _check(failures, "the only class without a field is the discarded one",
+           set(homeless), DISCARDED_CLASSES)
     for cls in ("round size", "valuation", "cumulative funding", "investor check"):
         if not ECONOMIC_CLASSES.get(cls):
             failures.append(f"{cls!r} should have a schema home and does not")
@@ -127,10 +131,21 @@ def main() -> None:
     _check(failures, "elektrik states exactly one figure", len(amounts), 1)
     _check(failures, "elektrik expects no round size", elektrik["expected"]["round.size"], None)
 
-    # Computomic is the no-amount control.
+    # Computomic is the no-amount control AND the disclosure-taxonomy discriminator.
     computomic = fixture("computomic_no_amount")
     if re.search(r"\$[\d.]", computomic["clean_text"]):
         failures.append("computomic fixture should contain no monetary figure at all")
+    # UNKNOWN is correct precisely because the source is SILENT. If the text ever gained
+    # an explicit non-disclosure phrase, the right answer would flip to UNDISCLOSED and
+    # this fixture would stop testing what it claims to.
+    _check(failures, "computomic expects UNKNOWN",
+           computomic["expected"]["financials_disclosure_status"], "UNKNOWN")
+    if re.search(r"not\s+(?:been\s+)?disclos|were\s+not\s+announc|undisclosed",
+                 computomic["clean_text"], re.IGNORECASE):
+        failures.append(
+            "computomic text now states non-disclosure explicitly — the expectation must "
+            "become UNDISCLOSED, since silence is what makes UNKNOWN correct"
+        )
 
     # The control must be unambiguous: one figure, and it is the answer.
     control = fixture("control_clean_series_b")
@@ -142,7 +157,7 @@ def main() -> None:
             print("FAIL", failure)
         raise SystemExit(1)
     print(f"PASS funding HC baseline fixtures: {len(FIXTURES)} real-text cases, "
-          "traps verified present in source, one class with no schema home")
+          "traps verified present in source, disclosure taxonomy pinned")
 
 
 if __name__ == "__main__":

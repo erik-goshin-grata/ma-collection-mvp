@@ -2003,3 +2003,74 @@ Consequences:
 - **The corpus needs a Stage 9 re-run for Cellares to derive.** No data is wrong today —
   `round_size` and `transaction_size` are NULL, which understates rather than misstates.
   Not run here.
+
+## 2026-08-17 - Funding HC Baseline: 8/8, and Three Corrections to My Own Findings
+
+Status: accepted. **No prompt or schema change.** The baseline is the permanent
+regression set.
+
+Result: 8 of 8 real-text fixtures produce the correct economic semantics. The prompt is
+substantially healthier than the legacy HC 0.12 corpus suggested — the corpus defects
+traced to extraction under a prompt that predated the funding path, not to
+`funding_hc_extraction` 0.1.
+
+### 1. Computomic — the model was right; my expectation was wrong
+
+The fixture expected `financials_disclosure_status = UNDISCLOSED`; the model returned
+`UNKNOWN`. **`UNKNOWN` is correct**, and both prompts define the pair identically:
+
+| Value | Definition (both `high_confidence_extraction` and `funding_hc_extraction`) |
+|---|---|
+| `DISCLOSED` | at least one financial value is stated |
+| `UNDISCLOSED` | source **explicitly states** terms are not disclosed |
+| `UNKNOWN` | source is **silent** on financials (neither states nor denies) |
+
+The Computomic release never mentions terms at all. Silence is `UNKNOWN`; only an
+explicit *"terms were not disclosed"* is `UNDISCLOSED`. **There is no inconsistency in
+the codebase** — the two prompts agree and both validators accept the same three values.
+The inconsistency was between the taxonomy and my fixture. Per the instruction to report
+rather than change the prompt where the taxonomy already defines the terms, the prompt is
+untouched and the fixture is corrected.
+
+The fixture regression now pins the *reason*, not just the value: it fails if the
+Computomic text ever gains an explicit non-disclosure phrase, because the correct answer
+would flip to `UNDISCLOSED` and the fixture would stop testing what it claims to.
+
+### 2. Chronograph — a representation issue, not a prompt failure
+
+The source states *"a minority growth equity investment of over $140 million"*. That
+**is** the funding-event magnitude — unlike the valuation and AUM traps, the figure is
+about this raise. The limitation is representational: `round.size` is a bare number with
+no qualifier field at any layer (the prompt's `round` object has none,
+`staging_extraction` has no `round_size_qualifier`, `transaction_record` has no
+`*_qualifier` column at all), so a lower bound and a stated figure become
+indistinguishable once written. Carried as reported-separately, never scored, never
+coerced. See also "FINDING: No Qualifier Representation for Non-Exact Amounts".
+
+### 3. Investor/fund AUM is NOT a structural gap — retracting my own framing
+
+I recorded AUM having no schema field as a "structural gap". **That overstated it, and
+the baseline proves the opposite.** The Elektrik fixture — whose only figure is Lead Edge
+Capital's $9B firm size, in "About" boilerplate — produced no `round.size`. Discarding an
+investor's own size is the correct outcome for funding-magnitude extraction, and
+discarding needs no field.
+
+It would only be a gap if AUM were decided to belong in the data model as a fact worth
+keeping, which is a separate product question about investor profiles. Consequences of
+the corrected framing:
+
+- An AUM figure leaking into `round.size` would be a **prompt-wording** failure, not a
+  schema limitation. Adding a field would not prevent a contamination; a rule would — and
+  the baseline shows none is currently needed.
+- `SCHEMA_LIMITATION` in the harness now means "no field can hold the correct answer, and
+  the correct answer is not *discard*". Chronograph's lower bound is the only case that
+  qualifies.
+
+### Standing decisions
+
+- The eight real-text fixtures are the **permanent** regression set. They are not to be
+  replaced with synthetic paraphrases: an earlier classifier in this branch was validated
+  against language written to match its own patterns, reported clean, and broke on the
+  real articles. The regression asserts the source text itself.
+- No broad rewrite of `funding_hc_extraction`. The one open item is representational and
+  is recorded, not patched.

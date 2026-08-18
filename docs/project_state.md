@@ -186,6 +186,21 @@ rows until 2026-08-07 and had no `round_size` write or capital-raised preconditi
 - The retired XLSX shadow masked this by falling through to `transaction_value`; the
   family-keyed `transaction_size` rule exposing null is what surfaced it.
 
+**Funding HC baseline — 8/8 on real text (2026-08-17):**
+`funding_hc_extraction` 0.1 separates round size, valuation, cumulative funding and
+investor check correctly on the eight verbatim-article fixtures
+(`scripts/funding_hc_baseline_fixtures.py`, run via
+`scripts/run_funding_hc_baseline.py`). **No prompt or schema change.** The legacy corpus
+defects traced to HC 0.12, which predated the funding path — not to this prompt.
+- Computomic `UNKNOWN` was **correct**; the fixture expectation was wrong. Silence is
+  `UNKNOWN`; only an explicit "terms were not disclosed" is `UNDISCLOSED`. Both prompts
+  agree, so there is no taxonomy inconsistency to fix.
+- Chronograph's "over $140M" is recognised economically but cannot be preserved —
+  `round.size` carries no lower-bound qualifier at any layer. Representation issue.
+- **Investor/fund AUM is not a structural gap** (earlier framing retracted). Discarding
+  an investor's own size is correct for magnitude extraction and needs no field.
+- The eight fixtures are permanent and must stay verbatim, never paraphrased.
+
 **PIPE coverage in `transaction_size` (open — classifier/product decision):**
 The Funding family is `{VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT}`, unchanged. A PIPE or
 public-company primary raise is deliberately *not* forced into it

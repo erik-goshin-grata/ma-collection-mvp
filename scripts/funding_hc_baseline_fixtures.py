@@ -12,14 +12,21 @@ An earlier classifier pass was validated against synthetic language written to m
 own patterns and reported clean while the real text broke it — these fixtures exist so
 that cannot recur.
 
-Five economic classes must stay separated. The first four have their own schema field in
-funding_hc_extraction 0.1; **the fifth does not**:
+Five economic classes must stay separated. Four have their own schema field in
+funding_hc_extraction 0.1; the fifth is correctly **discarded**:
 
     round size          -> round.size
     valuation           -> round.pre_money_valuation / post_money_valuation
     cumulative funding  -> round.total_raised_to_date
     investor check      -> investors[].investment_amount
-    investor/fund AUM   -> NO FIELD, AND NO RULE          <-- structural gap
+    investor/fund AUM   -> none, and none is needed
+
+**AUM having no field is not a gap.** The baseline established that the prompt ignores an
+investor's own size rather than routing it into `round.size`, which is the only thing
+funding-magnitude extraction needs from it. A field would only be required if AUM were
+decided to belong in the data model as a fact worth keeping — a separate product
+question about investor profiles, not a defect in magnitude extraction. Recording it as
+a "structural gap" overstated the finding; the Elektrik fixture proves the opposite.
 
 `expected` is the canonical outcome. `traps` names the figures in the text that must NOT
 become `round.size`, so a harness can report *which* wrong number a failure picked up
@@ -28,6 +35,9 @@ rather than only that it was wrong.
 
 from __future__ import annotations
 
+# Baseline result 2026-08-17: 8/8 on the economic semantics. Chronograph is carried as a
+# representation limitation rather than a scored expectation — see its `why`.
+#
 # Each fixture: label, event type, published_date, title, clean_text, expected, traps.
 FIXTURES = [
     {
@@ -170,8 +180,8 @@ FIXTURES = [
         },
         "traps": {
             9_000_000_000: (
-                "the INVESTOR's firm size / AUM, from boilerplate. The schema has no field "
-                "for it and the prompt has no rule about it — the structural gap."
+                "the INVESTOR's firm size / AUM, from boilerplate. Correctly discarded — "
+                "it is a property of the investor, not a magnitude of this financing."
             ),
         },
         "why": (
@@ -198,13 +208,21 @@ FIXTURES = [
         "expected": {
             "round.size": None,
             "round.total_raised_to_date": None,
-            "financials_disclosure_status": "UNDISCLOSED",
+            # UNKNOWN, not UNDISCLOSED. Both prompts define the pair the same way:
+            # UNDISCLOSED means the source EXPLICITLY says terms were not disclosed;
+            # UNKNOWN means it is SILENT on financials, neither stating nor denying.
+            # This release never mentions terms at all, so it is silent. An earlier
+            # version of this fixture expected UNDISCLOSED and was simply wrong about
+            # the taxonomy — the model was right.
+            "financials_disclosure_status": "UNKNOWN",
         },
         "traps": {},
         "why": (
-            "A disclosed event with undisclosed terms. Null is the correct canonical "
-            "state, not a gap — and the control for whether the model invents a figure "
-            "when none exists."
+            "An announced event whose source is silent on financials. Null round size is "
+            "the correct canonical state, not a gap, and this is the control for whether "
+            "the model invents a figure when none exists. It is also the discriminator "
+            "for the disclosure pair: silence is UNKNOWN; only an explicit "
+            "'terms were not disclosed' is UNDISCLOSED."
         ),
     },
     {
@@ -262,6 +280,8 @@ FIXTURES = [
 ]
 
 # The five classes and where each belongs. The last has no home.
+# Where each class belongs. AUM maps to None because it is correctly DISCARDED, not
+# because something is missing — see the module docstring.
 ECONOMIC_CLASSES = {
     "round size": "round.size",
     "valuation": "round.pre_money_valuation / round.post_money_valuation",
@@ -269,6 +289,7 @@ ECONOMIC_CLASSES = {
     "investor check": "investors[].investment_amount",
     "investor / fund AUM": None,
 }
+DISCARDED_CLASSES = {"investor / fund AUM"}
 
 
 def fixture(label: str) -> dict:
