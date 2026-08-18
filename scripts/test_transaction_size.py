@@ -28,11 +28,17 @@ round size. Ordering only has meaning *within* a family.
   figure there could be the whole company.
 - **No EV rung.** Below control an enterprise value is the grossed-up whole-company
   figure; it would report a 27%-for-$600M deal as $2.22B.
-- **No live `SOLE_INVESTOR_AMOUNT` rung.** The vocabulary reserves it, but
-  `transaction_participant` has no per-investor amount column, so there is nothing to
-  read. Deriving it from `transaction_record.investment_amount` would be actively
-  wrong: that field is transaction-level and falls back to the legacy value slot, so it
-  is not a single investor's check.
+- **No `SOLE_INVESTOR_AMOUNT` rung, and the value is not in the vocabulary at all.**
+  It is *not* reserved-pending-a-source-field; it was **removed outright on semantics**.
+  An investor's check is never the event's magnitude, at any disclosure level, so no
+  amount of storage would make the rung correct — per-investor amounts are in fact
+  storable at staging (`staging_investor.investment_amount`), which is why availability
+  was never the argument. The assertion below enforces the *absence* of the value, so
+  this docstring and that check say the same thing.
+
+  Deriving it from `transaction_record.investment_amount` would be wrong for a second,
+  independent reason: that field is transaction-level and falls back to the legacy value
+  slot, so it is not a single investor's check either.
 """
 
 from __future__ import annotations

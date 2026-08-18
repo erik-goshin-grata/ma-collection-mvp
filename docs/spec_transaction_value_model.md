@@ -2,6 +2,12 @@
 
 **Status:** Reconciled against decisions of 2026-08-10. Sections 2 and 3 rewritten.
 **Date:** 2026-08-10
+
+> ⚠️ **§2.4 (`transaction_size` population) is SUPERSEDED — see the marker in that section.**
+> The waterfall written there predates the landed implementation and lists two rungs that
+> were removed. Current target: `stages/aggregate.py`; `docs/decisions.md`,
+> "transaction_size: Family-Keyed Waterfall, Two Rungs Reserved";
+> `docs/handoff_transaction_size.md`; inventory §D4. The rest of this spec stands.
 **Supersedes/absorbs:** `docs/handoff_bug8_funding_value_semantics.md` (this generalizes it)
 **Related:** `docs/decisions.md` (authoritative), `docs/qa_runbook_mergerlinks_2026_08_01.md`,
 `mvp_goal_and_schema.md`
@@ -210,18 +216,53 @@ Opt in explicitly.
 
 ### 2.4 `transaction_size` population
 
+> ## ⚠️ SUPERSEDED 2026-08-17 — do not implement from this section
+>
+> **This section is retained as the reasoning of record, not as the target.** The waterfall
+> below was written 2026-08-10 and **two of its rungs were subsequently removed outright**.
+> Both the basis spellings and the rung set changed.
+>
+> **The current target, landed and live in `stages/aggregate.py`:**
+>
+> | Family | Rung | Basis |
+> | --- | --- | --- |
+> | M&A (`ACQUISITION` / `MERGER` / `REVERSE_MERGER`) | `transaction_value` | `TRANSACTION_VALUE` |
+> | Funding (`VC_ROUND` / `GROWTH_EQUITY` / `VENTURE_DEBT`) | `round_size` | `ROUND_SIZE` |
+> | Spin/Split | *reserved — no live rung* | `SPIN_SPLIT_CONSIDERATION_VALUE` |
+> | everything else | — | null |
+>
+> Branches are **disjoint** — a funding round never falls through to a purchase price and an
+> M&A deal never falls through to a round size. Ordering has meaning only within a family.
+>
+> **What changed, and why:**
+> - The **M&A equity fallback** (`EQUITY_CONSIDERATION`) is removed. It is unreachable in
+>   every *safe* case — whenever equity is stated and `pct_acquired` is known,
+>   `transaction_value` is already populated. Its only reachable states are those where
+>   `pct_acquired` is unknown, i.e. transaction scope is unknown and the equity figure may be
+>   whole-company. The reachable set was the unsafe complement of the intended one.
+> - The **sole-investor fallback** (`SOLE_INVESTOR_CHECK`) is removed **on semantics, not
+>   sequencing** — see the marker on §2.4.2, whose argument no longer applies.
+> - The basis vocabulary adopted the **Grata spellings**: `ROUND_SIZE`,
+>   `SPIN_SPLIT_CONSIDERATION_VALUE`.
+>
+> **Read instead:** `docs/decisions.md`, "transaction_size: Family-Keyed Waterfall, Two Rungs
+> Reserved" · `docs/handoff_transaction_size.md` (LANDED banner) ·
+> `docs/grata_v2_inventory_and_recommendations.md` §D4.
+
 Derived in aggregation. **Never extracted** — no extractor decides what belongs in this field.
+
+*Original 2026-08-10 table, with the removed rungs struck:*
 
 | Deal type | Waterfall | Basis stamp |
 |---|---|---|
 | M&A | `transaction_value` | `TRANSACTION_VALUE` |
-| M&A | → `equity_value`, where transaction value is unavailable but equity is stated | `EQUITY_CONSIDERATION` |
+| ~~M&A~~ | ~~→ `equity_value`, where transaction value is unavailable but equity is stated~~ | ~~`EQUITY_CONSIDERATION`~~ **— removed** |
 | Funding | `round_size` | `ROUND_SIZE` |
-| Funding | → sole investor's `investment_amount` | `SOLE_INVESTOR_CHECK` |
+| ~~Funding~~ | ~~→ sole investor's `investment_amount`~~ | ~~`SOLE_INVESTOR_CHECK`~~ **— removed** |
 | Any | none of the above | null |
 
 `transaction_size_basis` is **NOT NULL whenever `transaction_size` is populated**, and must
-travel with the field in every export, sheet, and view.
+travel with the field in every export, sheet, and view. *(This requirement still holds.)*
 
 A third rung — feeding `implied_enterprise_value` into `transaction_size`, control deals only
 — is an open item. See §2.10.
@@ -241,7 +282,18 @@ So: **$500MM = `transaction_value` and `transaction_size`. Not equity value, not
 The qualified/unqualified distinction is a property of `transaction_value` and belongs on its
 `_method` flag; `transaction_size` inherits it rather than restating it.
 
-#### 2.4.2 Why the funding fallback is restricted to sole-investor rounds
+#### 2.4.2 ~~Why the funding fallback is restricted to sole-investor rounds~~ — SUPERSEDED
+
+> **The rung this section defends no longer exists**, and the reason it was removed is *not*
+> the reason argued below. This subsection treats the problem as a **disclosure threshold** —
+> restrict the fallback to the one case where the check equals the round. The removal was on
+> **semantics**: an investor's check is never the event's magnitude, so reporting a $50M check
+> as a $100M round's size is wrong regardless of how many investors disclosed. A sole-investor
+> restriction could not fix that, because it was never a disclosure problem.
+>
+> When the round total is undisclosed, the honest `transaction_size` is **null**.
+> `investment_amount` remains correct as investor-level detail on `transaction_party`; it
+> simply never rolls up. Retained below as the reasoning of record.
 
 Per-investor disclosure is sparse — lead investor around 30%, other participants under 5%.
 Summing whatever `investment_amount` rows happen to exist understates the round systematically

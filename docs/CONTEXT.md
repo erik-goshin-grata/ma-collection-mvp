@@ -13,6 +13,31 @@ uncommitted local additions: `scripts/ingest_predictleads.py` (PredictLeads inge
 
 ---
 
+> ## ⚠️ DATED SNAPSHOT — DO NOT READ THE TABLES BELOW AS CURRENT CONTRACT
+>
+> This file is a **point-in-time, code-derived snapshot taken at commit `c5feb6f`
+> (2026-08-06/07)**. It is preserved unedited as a historical record of what the code
+> said on that date. Later work has superseded parts of it. **The snapshot tables are
+> not maintained**, and two rows in §4 are known to be stale as of 2026-08-18:
+>
+> | §4 row | What the snapshot says | Superseded by |
+> |---|---|---|
+> | **`v2_event_type`** (§4 table) | Lists `MINORITY_INVESTMENT` as a canonical value, omits `PIPE`, cites **classifier 0.6**, and marks the row ✅ aligned. | Classifier prompt is **0.8**. `MINORITY_INVESTMENT` was **removed** from the core output vocabulary in **0.7** — minority is a derived flag (`is_minority`), not an event type. **`PIPE`** was **added** in **0.8** as a recognized-but-not-profiled terminal type. Current vocabulary: `stages/deal_type_classify._VALID_V2_EVENT_TYPES` and `prompts/deal_type_classifier.md`. |
+> | **relevancy `reason_code`** (§4 table) | Marked ⚠️ **DRIFT**, citing **relevancy 0.5**. | The drift is **resolved**. Prompt and stage are both at **0.6** (the stage had been stamping 0.4), and parity is now asserted by `scripts/test_reason_code_parity.py`. `PIPE` was added to the RELEVANT reason codes in 0.6. Current vocabulary: `stages/relevancy_filter._VALID_REASON_CODES` and `prompts/relevancy_filter.md`. |
+>
+> **Current sources of truth**, in preference order:
+> 1. **The code and prompts themselves** — the `_VALID_*` frozensets in `stages/`, and
+>    the version + changelog tables inside each file in `prompts/`.
+> 2. `docs/prompt_versions.md` §"Current State" — the maintained cross-prompt version view.
+> 3. `docs/decisions.md` — the running decision record.
+> 4. `docs/grata_v2_inventory_and_recommendations.md` and
+>    `docs/grata_v2_data_dictionary.md` — the current field/vocabulary target.
+>
+> Everything else in this file may also have drifted; the two rows above are the ones a
+> consistency sweep has positively identified, **not** a warranty about the rest.
+
+---
+
 ## 1. Pipeline (14 stages + funding branch)
 
 | # | Stage module | Role |

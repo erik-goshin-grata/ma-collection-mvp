@@ -606,10 +606,13 @@ def _derive_transaction_value(
 # §2.4 — the rungs that may supply `transaction_size`. Every value names the SOURCE
 # FIELD the magnitude came from, which is what keeps the enum one-dimensional.
 #
-# Two are reserved rather than live, because the field each would read does not exist:
-# `transaction_participant` has no per-investor amount column, and there is no
-# spin/split consideration value. Reserving them keeps the vocabulary stable so a later
-# commit adds a branch rather than renaming stored data.
+# ONE value is reserved rather than live: `SPIN_SPLIT_CONSIDERATION_VALUE`, because no
+# spin/split consideration field exists to read. Reserving it keeps the vocabulary stable
+# so a later commit adds a branch rather than renaming stored data.
+#
+# `SOLE_INVESTOR_AMOUNT` is NOT reserved — it is removed outright, on semantics rather
+# than availability; see the note under "Deliberately ABSENT" below, which supersedes the
+# earlier framing that grouped it here as a second reserved-for-want-of-a-field value.
 #
 # Deliberately ABSENT, and not to be added without reopening the decision:
 #   EQUITY_VALUE / EQUITY_CONSIDERATION — every case where a stake-level equity figure

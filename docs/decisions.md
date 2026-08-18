@@ -1557,6 +1557,14 @@ Decision:
 - Two vocabulary values are **reserved but not live**: `SOLE_INVESTOR_AMOUNT` and
   `SPIN_SPLIT_CONSIDERATION_VALUE`. Reserving them keeps the enum stable so a later
   commit adds a branch rather than renaming stored data.
+
+  > **SUPERSEDED for `SOLE_INVESTOR_AMOUNT`.** It was not merely left unbuilt — it was
+  > **removed outright** from the waterfall, the basis vocabulary and the Grata
+  > recommendation, on semantics rather than sequencing: an investor's check is never the
+  > event's magnitude, at any disclosure level. See the later entry in this file,
+  > "`SOLE_INVESTOR_AMOUNT` is removed", and inventory §D4. The shipped vocabulary is
+  > `{TRANSACTION_VALUE, ROUND_SIZE, SPIN_SPLIT_CONSIDERATION_VALUE}`.
+  > `SPIN_SPLIT_CONSIDERATION_VALUE` remains correctly described as reserved.
 - **No equity rung and no EV rung.** `EQUITY_BELOW_CONTROL` stays exclusively a
   `transaction_value_basis` value.
 - The review export's shadow waterfall is **removed**, not kept as a backstop. The
@@ -1581,11 +1589,29 @@ Context:
   derivation condition, and the control status it records is already carried by
   `transaction_value_basis`, `is_minority` and `pct_acquired`. Duplicating it would
   make the field two-dimensional.
-- **Why `SOLE_INVESTOR_AMOUNT` is reserved rather than built.**
-  `transaction_participant` has no per-investor amount column — the funding prompt asks
-  for one, but there is nowhere to store it. `transaction_record.investment_amount` is
-  not a substitute: it is transaction-level and falls back to the legacy value slot, so
-  reading it would report a round, or a valuation, as one investor's check.
+- ~~**Why `SOLE_INVESTOR_AMOUNT` is reserved rather than built.**~~ —
+  **SUPERSEDED IN FULL, rationale as well as heading.** The rung was not deferred for
+  want of somewhere to put the number; it was **removed outright on semantics**. An
+  investor's check is never the event's magnitude, at any disclosure level, so no
+  storage change would make the rung correct. The shipped vocabulary is
+  `{TRANSACTION_VALUE, ROUND_SIZE, SPIN_SPLIT_CONSIDERATION_VALUE}`
+  (`stages/aggregate.py`), and `scripts/test_transaction_size.py` asserts
+  `SOLE_INVESTOR_AMOUNT` is **absent** from it.
+
+  > *Superseded text, retained for the record:* "`transaction_participant` has no
+  > per-investor amount column — the funding prompt asks for one, but there is nowhere
+  > to store it. `transaction_record.investment_amount` is not a substitute: it is
+  > transaction-level and falls back to the legacy value slot, so reading it would
+  > report a round, or a valuation, as one investor's check."
+  >
+  > Both the conclusion and one of its premises are wrong. The `transaction_participant`
+  > observation is true but is the wrong layer: per-investor amounts **are** storable at
+  > staging — `staging_investor.investment_amount` (`schema/003_funding_path.sql`) —
+  > which is where the funding prompt's per-investor asks actually land. Availability
+  > was therefore never the binding constraint. The `transaction_record.investment_amount`
+  > caution remains accurate and still holds as a separate point: that field is
+  > transaction-level and falls back to the legacy value slot, so it is not a single
+  > investor's check.
 - **Why a multi-investor round goes null.** Per-investor disclosure runs around 30% for
   leads and under 5% for others, so summing whatever amounts exist understates the
   round while presenting as one — worse than null, because the shortfall is invisible.
@@ -2681,9 +2707,13 @@ required" (superseded by "preferred home"), and Silver parity item K1 (absorbed 
 
 ### What is left
 
-**Seven items, none of them a Product decision.** Grouped by who can move them, because the
-groups have different unblocking conditions — ENG items are schedulable now, evidence-blocked
-items cannot be scheduled at all, and external asks depend on another team answering.
+**Eight items, none of them a Product decision.** Grouped by who can move them, because the
+groups have different unblocking conditions — ENG items are schedulable now, the prompt review
+needs a decision before it can be scheduled, evidence-blocked items cannot be scheduled at
+all, and external asks depend on another team answering.
+
+*(Seven until 2026-08-18; the source-of-truth correction sweep added the prompt /
+legacy-compatibility item below.)*
 
 **ENG implementation (3)**
 
@@ -2692,6 +2722,12 @@ items cannot be scheduled at all, and external asks depend on another team answe
 | Reconciliation / supersession **key** and implementation | Semantics settled by R1. The key is unlikely to be single-valued: a filed document is immutable, a web source can change under the same URL. |
 | Silver/Gold placement against the R6 invariants | Product does not prescribe the layer. No longer gates §E4. |
 | `PER_SHARE_X_SHARES` wiring | `aggregate.py` hard-codes `sec_shares = None`; `agreement_extract.py` already writes `transaction_security.shares_outstanding` with a diluted total and quality marker. Live population unverified, coverage limited to agreement-bearing deals. |
+
+**Prompt / legacy-compatibility review (1)** — a decision is owed before any edit
+
+| item | note |
+| --- | --- |
+| Downstream prompts still enumerate `MINORITY_INVESTMENT` as a V2 event type | `prompts/strategic_rationale.md`, `prompts/aggregation.md`, `prompts/deal_summary.md`. **Not** treated as a stale-documentation fix — see the finding recorded below. |
 
 **Evidence-blocked (2)** — cannot be scheduled; each needs a case that does not yet exist
 
@@ -2709,3 +2745,91 @@ items cannot be scheduled at all, and external asks depend on another team answe
 
 The earlier statement of "four items" was a miscount against a six-row table that had
 bundled the two external asks into one line.
+
+---
+
+## Source-of-Truth Consistency Correction (2026-08-18)
+
+A sweep for text that still presented superseded `transaction_size` / `transaction_size_basis`
+semantics as current. Documentation only — **zero executable change**, verified by AST
+comparison against `HEAD` with docstrings stripped, by classifying every changed line in the
+three touched code files as a comment or docstring, and by confirming that no code reads
+`__doc__` as data in those files. Suite 36/36.
+
+### What was corrected
+
+| File | Correction |
+| --- | --- |
+| `grata_v2_inventory_and_recommendations.md` | §A5 row, §D3 struck rungs, §D4 status banner separating *Grata spec as supplied* from *Transactions target as shipped*; §Q's "settle the rung spellings **before** implementation starts" paragraph superseded in full |
+| `grata_v2_data_dictionary.md` | `transaction_size_basis` row leads with the shipped vocabulary; Grata's two extra values marked recommended-for-removal |
+| `decisions.md` | Supersession banner on the "reserved but not live" bullet; the **entire** "Why `SOLE_INVESTOR_AMOUNT` is reserved rather than built" rationale struck, corrected, and its superseded text retained as a marked quotation |
+| `spec_transaction_value_model.md` | Header pointer; §2.4 banner carrying the landed table and per-rung removal reasons; §2.4.2 struck |
+| `project_state.md` | Corrected to the landed semantics |
+| `CONTEXT.md` | Staleness banner; the dated snapshot tables left **unedited** by design |
+| `funding_path_design.md` | Staleness banner; the dated design draft left unedited |
+| `stages/aggregate.py` | Comment above `TRANSACTION_SIZE_BASES` said "Two are reserved", contradicting its own note fifteen lines below |
+| `scripts/test_transaction_size.py` | Module docstring contradicted the assertion in the same file |
+| `stages/deal_type_classify.py` | Comment claimed the classifier prompt "does not yet offer" `PIPE`; 0.8 does |
+
+### The correction that matters
+
+`SOLE_INVESTOR_AMOUNT` was **removed outright on semantics**, not reserved pending a source
+field. An investor's check is never the event's magnitude, at any disclosure level, so no
+storage change would make the rung correct.
+
+The superseded framing rested on a premise that was also wrong: that there was "nowhere to
+store" a per-investor amount. There is — `staging_investor.investment_amount`
+(`schema/003_funding_path.sql`), which is where the funding prompt's per-investor asks land.
+The `transaction_participant` observation was true but at the wrong layer. **Availability was
+never the binding constraint**, and any future revisit must argue the semantics, not the
+plumbing.
+
+Shipped vocabulary: `{TRANSACTION_VALUE, ROUND_SIZE, SPIN_SPLIT_CONSIDERATION_VALUE}`
+(`stages/aggregate.py`), the last reserved with no live branch. Guarded by
+`scripts/test_transaction_size.py`, which asserts the **absence** of `SOLE_INVESTOR_AMOUNT`.
+
+### Separate finding — prompt / legacy-compatibility, NOT a documentation fix
+
+Three downstream prompts still enumerate `MINORITY_INVESTMENT` as a V2 event type:
+
+| File | Text | Strength of the concern |
+| --- | --- | --- |
+| `prompts/strategic_rationale.md` | "Values use V2 enum (`ACQUISITION`, … `MINORITY_INVESTMENT`, `RECAPITALIZATION`)." | **Strongest.** A direct claim about the *current* V2 enum, and false since classifier 0.7. |
+| `prompts/aggregation.md` | "deal_type **context** values: … `MINORITY_INVESTMENT` …" | Weaker. "Context values" reads as input-side. |
+| `prompts/deal_summary.md` | "`MINORITY_INVESTMENT`: minority stake. State percentage when known." | Weakest. A per-type handling instruction. |
+
+**Deliberately not changed, and not filed as stale documentation.** Two distinct concerns are
+being conflated by the surface similarity:
+
+1. **What the classifier may emit.** Settled: classifier 0.7 removed `MINORITY_INVESTMENT`
+   from the core output vocabulary. Minority is a derived flag (`is_minority`), not an event
+   type. `scripts/test_minority_core_classification.py` asserts the classifier rejects it.
+2. **What downstream stages must still accept.** *Not* settled, and not the same question.
+   Legacy rows carrying `MINORITY_INVESTMENT` remain in the corpus and are still handled in
+   code — `stages/aggregate.py` `_NON_CONTROL_TYPES` includes it deliberately, and
+   `scripts/test_funding_value_family_gate.py` pins that behaviour. Aggregation, deal summary
+   and strategic rationale all consume already-classified rows, so naming the value may be
+   **correct legacy tolerance rather than drift**.
+
+Deleting the references on the strength of (1) alone would be a change to live model contracts
+justified by an argument about a different layer. These are prompt files: an edit changes
+extraction behaviour and needs its own regression. The decision owed is whether downstream
+prompts should describe the *emitting* vocabulary or the *accepted* vocabulary — and if the
+latter, whether the legacy values should be labelled as such in the prompt text so a reader
+cannot mistake them for current classifier output.
+
+Until that is decided, no prompt edit. Recorded above as the single item in
+"Prompt / legacy-compatibility review".
+
+### Residual sweep state
+
+After correction, the tightened sweep returns seven hits, all triaged as legitimate: two in
+`grata_v2_reconciliation_2026_08_17.md` that *recommend* the strike (current, not stale), one
+historical corpus count in `handoff_bug5_funding_clustering.md`, two relevancy **reason code**
+occurrences where `MINORITY_INVESTMENT` is live and correct (a different vocabulary from
+`v2_event_type`), and the two prompt files recorded as the finding above. No unmarked
+superseded normative statement about `transaction_size` semantics is known to survive.
+
+`docs/prompt_versions.md` was left unchanged: its "Current State" table is already correct
+(classifier 0.8, relevancy 0.6), and its "V2 Alignment History" table is history, not a
+normative statement.

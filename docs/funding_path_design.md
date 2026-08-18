@@ -7,6 +7,29 @@
 
 ---
 
+> ## ⚠️ DATED DESIGN DRAFT — SUPERSEDED IN PART BY THE SHIPPED IMPLEMENTATION
+>
+> This is the **2026-07-28 design draft**, preserved as written. The header above still
+> says *"Status: Design — not yet implemented"*; **that is no longer true.** The funding
+> path shipped — `stages/funding_hc_extract.py`, `prompts/funding_hc_extraction.md`,
+> `prompts/funding_lc_extraction.md`, and the `staging_investor` table
+> (`schema/003_funding_path.sql`) all exist and run. Read the header status line as
+> historical.
+>
+> Two further items in this document are superseded and are **not** open questions:
+>
+> | Where | What the draft says | Current state |
+> |---|---|---|
+> | §10 Open Question 1 | **`MINORITY_INVESTMENT` routing** — "keep on M&A path or move to funding path? … Defer until QA identifies systematic misclassification." | **Resolved differently — the question dissolved rather than being answered.** Classifier **0.7** removed `MINORITY_INVESTMENT` from the core output vocabulary entirely: minority is a derived flag (`is_minority`), not an event type, so a minority deal now routes to its underlying economic event. There is no `MINORITY_INVESTMENT` class left to assign a path to. Legacy rows already in the corpus keep the value and are still handled (`stages/aggregate.py` `_NON_CONTROL_TYPES`). |
+> | Decisions table, row "`MINORITY_INVESTMENT` path" | "M&A path for now — Deferred" | Same as above: superseded by classifier 0.7, not still deferred. |
+>
+> Everything else here may also have drifted from the shipped code. Current sources of
+> truth are the `_VALID_*` frozensets in `stages/`, the version tables inside `prompts/`,
+> and `docs/decisions.md`. The rows above are what a consistency sweep positively
+> identified — **not** a warranty about the rest of this draft.
+
+---
+
 ## 1. Overview
 
 The pipeline currently handles M&A events end-to-end. This document designs the

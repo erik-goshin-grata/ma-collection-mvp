@@ -65,10 +65,11 @@ _VALID_V2_EVENT_TYPES = frozenset({
     "ACQUISITION", "MERGER", "SPIN_OFF", "SPLIT_OFF", "REVERSE_MERGER",
     "JOINT_VENTURE", "RECAPITALIZATION",
     "VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT",
-    # Recognized, not profiled. Accepted here so the value validates whether it comes
-    # from the deterministic recognizer or, later, from the classifier itself — the
-    # prompt does not yet offer it, and adding it to the enum first is what makes that
-    # a prompt-only change when it happens.
+    # Recognized, not profiled. Accepted here so the value validates whichever way it
+    # arrives: from the deterministic recognizer in `lib/pipe_recognition`, or from the
+    # classifier itself — `prompts/deal_type_classifier.md` 0.8 offers `PIPE` as a type,
+    # so **both** paths are live. Either way Stage 3 stamps the terminal status
+    # `RECOGNIZED_NOT_PROFILED` and nothing downstream runs.
     PIPE_EVENT_TYPE,
     "UNKNOWN",
 })

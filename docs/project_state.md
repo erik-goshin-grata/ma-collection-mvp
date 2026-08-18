@@ -435,10 +435,17 @@ Current queue (source: `docs/session_handoff_2026_08_10_value_model.md`):
    columns as reviewer-facing Grata enum fields.
 4. ~~**`transaction_size` + export column**~~ — **landed 2026-08-17.** Family-keyed
    waterfall: M&A takes `transaction_value`, Funding takes `round_size`, Spin/Split and
-   everything else are null. `SOLE_INVESTOR_AMOUNT` and `SPIN_SPLIT_CONSIDERATION_VALUE`
-   are reserved in the vocabulary but have no live rung, because neither source field
-   exists — `transaction_participant` has no per-investor amount column. No equity rung
-   and no EV rung. The review export's shadow waterfall is retired, so the sheet now
+   everything else are null. The shipped basis vocabulary is exactly
+   `{TRANSACTION_VALUE, ROUND_SIZE, SPIN_SPLIT_CONSIDERATION_VALUE}`
+   (`stages/aggregate.py`). `SPIN_SPLIT_CONSIDERATION_VALUE` is reserved with no live
+   rung, because no such source field exists yet. `SOLE_INVESTOR_AMOUNT` is **not
+   reserved — it was removed outright**, on semantics rather than sequencing: an
+   investor's check is never the event's magnitude, at any disclosure level.
+   *(An earlier revision of this line read "`SOLE_INVESTOR_AMOUNT` and
+   `SPIN_SPLIT_CONSIDERATION_VALUE` are reserved… because neither source field exists".
+   Superseded on both counts: the removal was a semantic decision, and per-investor
+   amounts are in fact storable — `staging_investor.investment_amount` — so availability
+   was never the reason.)* No equity rung and no EV rung. The review export's shadow waterfall is retired, so the sheet now
    shows blank where canonical rules find the magnitude unsupported; the 67-column shape
    is unchanged. Guarded by `scripts/test_transaction_size.py`.
 5. **Legacy value-field inventory/reorganization** — `enterprise_value` is now a

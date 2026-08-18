@@ -185,7 +185,7 @@ Current `PartyType` covers PE, VC, growth equity firm, corporation, individual, 
 | `sponsor_investment_role` | **TYPED DIMENSION** | ADD | Replaces `is_platform_investment` / `is_add_on`. §A6. |
 | `target_type` | ENUM | ADD | Transaction fact. |
 | `transaction_size` | DERIVED DATA POINT | ADD | Common product magnitude. |
-| `transaction_size_basis` | ENUM / basis attribute | ADD | Identifies the underlying magnitude selected: e.g. `TRANSACTION_VALUE`, `EQUITY_VALUE`, `ROUND_SIZE`, `SOLE_INVESTOR_AMOUNT`, `SPIN_SPLIT_CONSIDERATION_VALUE`. Required wherever `transaction_size` is populated. |
+| `transaction_size_basis` | ENUM / basis attribute | ADD | Identifies which rung supplied the magnitude. Required wherever `transaction_size` is populated. **Target vocabulary (Transactions, shipped 2026-08-17): `TRANSACTION_VALUE` · `ROUND_SIZE` · `SPIN_SPLIT_CONSIDERATION_VALUE`.** The Grata spec additionally lists `EQUITY_VALUE` and `SOLE_INVESTOR_AMOUNT`; both are recommended for removal — see §D4 and reconciliation §3 item 5. |
 | `transaction_terms_disclosure_status` | ENUM | ADD | Separate from financials disclosure; covers deal economics/consideration/value terms using the same `DISCLOSED / PARTIALLY_DISCLOSED / UNDISCLOSED / UNKNOWN` vocabulary. |
 | ~~`is_reverse_merger`~~ | FLAG | **SUPERSEDED (v0.4)** | Rolls up from `combination_structure`; not stored. |
 
@@ -627,12 +627,14 @@ Recommended examples:
   - `EQUITY_BELOW_CONTROL` — *added by redline 2026-08-17*
   - `EQUITY_VALUE_ONLY`
   - `EQUITY_VALUE_PLUS_TOTAL_DEBT`
-- `transaction_size_basis`
+- `transaction_size_basis` — **the list below is the Grata spec as supplied.** The
+  Transactions target, shipped 2026-08-17, is the three unmarked values only.
   - `TRANSACTION_VALUE`
-  - `EQUITY_VALUE`
+  - ~~`EQUITY_VALUE`~~ — **recommended for removal**, unreachable in every safe case (§D4)
   - `ROUND_SIZE`
-  - `SOLE_INVESTOR_AMOUNT`
-  - `SPIN_SPLIT_CONSIDERATION_VALUE`
+  - ~~`SOLE_INVESTOR_AMOUNT`~~ — **recommended for removal**, an investor's check is never
+    the event's magnitude (§D4)
+  - `SPIN_SPLIT_CONSIDERATION_VALUE` — reserved; no source field exists yet
 - `implied_equity_value_basis`
   - `STATED`
   - `GROSSED_UP_FROM_EQUITY_VALUE`
@@ -655,13 +657,26 @@ These names are semantic recommendations; ENG may implement field-specific basis
    which carries bases for transaction value and implied equity but none for equity value.
    Add it: `STATED` / `PER_SHARE_X_SHARES`.
 
-The `transaction_size_basis` vocabulary here also disagrees with
-`docs/handoff_transaction_size.md` on two rungs (`EQUITY_VALUE` vs `EQUITY_CONSIDERATION`,
-`SOLE_INVESTOR_AMOUNT` vs `SOLE_INVESTOR_CHECK`), and the handoff omits
-`SPIN_SPLIT_CONSIDERATION_VALUE`. Recommended resolution: **the Grata spellings win** —
-`transaction_size` is a Grata product concept — and the Spin/Split rung is added to the
-harness waterfall. Settle this **before** implementation starts; it is a rename now or a
-data migration later.
+> **SUPERSEDED — resolved by the 2026-08-17 implementation, not by a spelling choice.**
+> This paragraph asked which spelling of two rungs should win and told the reader to
+> settle it *before* implementation. Both premises are now obsolete: **implementation
+> shipped 2026-08-17**, and **both disputed rungs were removed outright**, so there is no
+> spelling left to settle. The equity rung is gone (a stake-level equity figure is only
+> available in exactly the states where the transaction scope is unknown), and the
+> sole-investor rung is gone on semantics (an investor's check is never the event's
+> magnitude, at any disclosure level). The only rung the paragraph named that survives is
+> `SPIN_SPLIT_CONSIDERATION_VALUE`, which was indeed added — reserved, with no live branch,
+> because no such source field exists yet. Shipped vocabulary:
+> `{TRANSACTION_VALUE, ROUND_SIZE, SPIN_SPLIT_CONSIDERATION_VALUE}` (`stages/aggregate.py`),
+> guarded by `scripts/test_transaction_size.py`. See §D4.
+>
+> *Superseded text, retained for the record:* "The `transaction_size_basis` vocabulary here
+> also disagrees with `docs/handoff_transaction_size.md` on two rungs (`EQUITY_VALUE` vs
+> `EQUITY_CONSIDERATION`, `SOLE_INVESTOR_AMOUNT` vs `SOLE_INVESTOR_CHECK`), and the handoff
+> omits `SPIN_SPLIT_CONSIDERATION_VALUE`. Recommended resolution: **the Grata spellings
+> win** — `transaction_size` is a Grata product concept — and the Spin/Split rung is added
+> to the harness waterfall. Settle this **before** implementation starts; it is a rename
+> now or a data migration later." 
 
 The Tier 2 vocabularies (`implied_equity_value_basis`, `implied_enterprise_value_basis`)
 need no change: the harness implements them exactly as written here.
@@ -670,14 +685,47 @@ need no change: the harness implements them exactly as written here.
 
 `transaction_size` is a derived common/product magnitude, not a new economic value definition.
 
-Accepted waterfall:
-- M&A → `transaction_value`
-- M&A fallback → `equity_value` where equity is stated and debt is unknown under the accepted rule
-- Growth / VC → `round_size`
-- Funding fallback → one sole investor's `transaction_party.investment_amount` only when it is the only safe disclosed check
-- Spin/Split → `spin_split_consideration_value` when available
+> **Status, and the distinction that matters here.** Three different things get called
+> "the waterfall" and they are not the same:
+>
+> | | |
+> | --- | --- |
+> | **Grata spec, as supplied** | Defines `transaction_size` with five basis values and the five-rung waterfall reproduced below. **The field itself is not implemented in the Grata schema** — D1 and §A5 both mark it *Missing / ADD*. So this is a specification, not current behaviour. |
+> | **Transactions target — shipped 2026-08-17** | Family-keyed and **disjoint**: `TRANSACTION_VALUE` · `ROUND_SIZE` · `SPIN_SPLIT_CONSIDERATION_VALUE` (the last reserved, no source field exists). Live in `stages/aggregate.py`. |
+> | **The delta** | Two rungs recommended for removal from the Grata spec. Both are *acknowledgement items* — the Transactions side is built and settled — not unresolved Product decisions. |
 
-`transaction_size_basis` identifies exactly which source field/rung supplied the magnitude and is required whenever `transaction_size` is populated.
+**Grata spec waterfall, as supplied** *(reproduced for reference; two rungs struck)*:
+- M&A → `transaction_value`
+- ~~M&A fallback → `equity_value` where equity is stated and debt is unknown under the accepted rule~~
+  **Recommended for removal.** Unreachable in every *safe* case: whenever equity is stated
+  and `pct_acquired` is known, `transaction_value` is already populated and the primary rung
+  returns the same number. The only reachable states are those where `pct_acquired` is
+  **unknown** — i.e. transaction scope is unknown and the equity figure may be whole-company.
+  The rung's reachable set is exactly the unsafe complement of its intended one.
+- Growth / VC → `round_size`
+- ~~Funding fallback → one sole investor's `transaction_party.investment_amount` only when it is the only safe disclosed check~~
+  **Recommended for removal.** An investor's check is not the event's magnitude — reporting
+  a $50M check as a $100M round's size is wrong regardless of how many investors disclosed,
+  so this was never a disclosure-threshold problem a sole-investor restriction could fix.
+  When the round total is undisclosed the honest `transaction_size` is **null**. This does
+  not diminish §D5: `investment_amount` remains correct as investor-level detail on
+  `transaction_party`; it simply never rolls up.
+- Spin/Split → `spin_split_consideration_value` when available *(reserved in the shipped
+  implementation — no such source field exists yet)*
+
+**Transactions target, as shipped:**
+
+| Family | Rung | Basis |
+| --- | --- | --- |
+| M&A (`ACQUISITION` / `MERGER` / `REVERSE_MERGER`) | `transaction_value` | `TRANSACTION_VALUE` |
+| Funding (`VC_ROUND` / `GROWTH_EQUITY` / `VENTURE_DEBT`) | `round_size` | `ROUND_SIZE` |
+| Spin/Split | *reserved — no live rung* | — |
+| everything else | — | null |
+
+Branches are **disjoint**: a funding round never falls through to a purchase price, and an
+M&A deal never falls through to a round size. Ordering has meaning only within a family.
+
+`transaction_size_basis` identifies exactly which source field/rung supplied the magnitude and is required whenever `transaction_size` is populated. Full reasoning: reconciliation §3 item 5; `decisions.md`, "transaction_size: Family-Keyed Waterfall, Two Rungs Reserved".
 
 ## D5. Funding `investment_amount`
 
