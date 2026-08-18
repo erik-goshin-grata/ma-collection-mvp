@@ -274,6 +274,27 @@ findable rather than quietly dropping deals.
 **No backfill.** Rows classified before this change keep whatever they were given; the
 corpus is test/validation data and cleaning it was explicitly declined.
 
+**PIPE workstream CLOSED 2026-08-18 — recognition is lexical only, and that is known to
+be incomplete.** Three real examples (Silvaco/Micron, MySize, Ensysce/Cy Biopharma)
+showed that a structural PIPE need not use the word, that the ELOC boundary is undecided,
+and that a single source can carry an acquisition *and* a concurrent placement. The
+findings are recorded in decisions.md, "PIPE: Unresolved Architecture and Product
+Findings"; no further PIPE code is planned.
+
+Backlog left behind, none of it started:
+
+| item | blocked on |
+| --- | --- |
+| Structural recognition (public issuer + primary private issuance to limited/named investors + equity-linked), with 144A/QIB, registered, private-issuer and secondary carve-outs | reading the three sources — all outbound web including `sec.gov` is egress-blocked from the container, and the corpus DB is not present |
+| MySize ELOC / committed-equity boundary | the full MySize source. **Do not decide either way without it.** |
+| Value contamination on a compound source (acquisition + concurrent placement) | the Ensysce text — determines whether the risk is live or theoretical |
+| Event/component-level exclusion rather than source-level | **not a PIPE patch.** Belongs to the inventory assessment / Grata reconciliation as an architecture question |
+
+Verified at `79a93f9`: the shipped recognizer returns nothing for all three headlines, so
+Silvaco seated at `UNKNOWN` still proceeds into M&A HC. The lexical path closed the leak
+for releases that name the structure; it did not close it for releases that only have the
+structure.
+
 **Funding path (partial):**
 - `stages/funding_lc_extract.py` — not written; prompt exists
 - `adapters/sec_api.py` Form D extension — deferred

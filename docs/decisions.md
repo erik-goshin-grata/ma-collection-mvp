@@ -2497,3 +2497,112 @@ Three things made this survivable for as long as it was, and all three are now c
 The general shape is worth keeping: **a guard that covers one axis of a pair reads as
 covering the pair.** Reason-code parity existing made the relevancy prompt look guarded,
 which is precisely why nobody looked at the version.
+
+---
+
+## PIPE: Unresolved Architecture and Product Findings
+
+**Recorded 2026-08-18.** PIPE implementation is **stopped here**. This entry preserves
+what three real examples exposed that the shipped implementation does *not* answer, so
+the questions survive the workstream rather than being rediscovered.
+
+### Status of what shipped (`f92da7a`, `79a93f9`)
+
+- `PIPE` is first-class in the classifier (`deal_type_classifier` 0.8) and relevancy
+  (`relevancy_filter` 0.6) vocabularies.
+- A recognized PIPE is queryable with provenance at `RECOGNIZED_NOT_PROFILED`.
+- It cannot enter M&A HC, Funding HC, SEC trigger/enrich, LC, clustering, Stage 9, or
+  transaction-size derivation.
+- No historical backfill.
+
+### Evidence limitation — read this before acting on anything below
+
+The three source URLs were **not readable from the working container**: all outbound web
+is blocked by the egress proxy, including `sec.gov`, so neither the releases nor the
+underlying 8-Ks could be fetched. The live corpus was not present either, so no existing
+row was inspected.
+
+What follows is therefore split deliberately. Structural conclusions are stated as
+standing decisions. Case facts are attributed to the person who supplied them and marked
+unverified. **Nothing here was derived from source text this session.** Anyone picking
+this up should read the three sources first and correct what does not survive contact.
+
+### The three real examples
+
+| case | what it is (as supplied, source text **unverified**) | why it is kept |
+| --- | --- | --- |
+| **Silvaco / Micron** | Public issuer privately issues a convertible note to a named strategic purchaser. Release headline is "Silvaco Signs Convertible Note Financing With Micron" — it does **not** use the word PIPE. | The structural case. Proves lexical recognition is insufficient. |
+| **MySize** | Equity purchase agreement plus registration agreement. | **UNRESOLVED.** This is the real case for the ELOC / committed-equity / PIPE boundary. Do **not** decide that boundary without the full source — see below. |
+| **Ensysce / Cy Biopharma** | One source carrying an in-scope acquisition **and** a concurrent private placement of convertible preferred. | Proves PIPE exclusion must ultimately be event/component-level, not source-level. |
+
+**Verified this session:** the shipped recognizer at `79a93f9` returns `None` for all
+three headlines, and for Silvaco under every classifier seat the row keeps its
+classification at status `CLASSIFIED`. If the classifier seats Silvaco at `UNKNOWN`, it
+proceeds into M&A HC extraction — the original leak, unclosed for the structural case.
+That was established by running the code, not by reading the sources.
+
+### Standing conclusions
+
+1. **PIPE recognition may be structural, not merely lexical.** A release that never
+   writes "PIPE" can still be one. The shipped recognizer requires the literal term and
+   therefore misses this class entirely.
+
+2. **Core structural shape:** public issuer **+** primary private issuance to
+   limited/named investor(s) **+** equity or equity-linked security. Conjunctive — each
+   element positively established from the text. Absence is not satisfaction, which is
+   what keeps private-company financings out without a separate rule.
+
+3. **Security form alone is insufficient.** A convertible note, a preferred issuance, a
+   warrant — none of these makes a PIPE by itself. The issuer's public status and the
+   private, primary, limited-purchaser character of the placement are what do.
+
+4. **Carve-outs must include:** public/underwritten offerings; registered direct
+   offerings; 144A/QIB syndicated offerings; private-company convertibles; straight debt
+   with no equity link; and secondary purchases from existing holders.
+
+   The 144A carve-out is the sharpest of these and is **not optional**: a public issuer
+   placing convertible senior notes with QIBs in an unregistered offering satisfies a
+   literal reading of conclusion 2, yet is a capital-markets offering rather than a PIPE.
+   The discriminator is *limited or named purchasers* versus an anonymous institutional
+   syndicate. A named strategic purchaser — Micron — sits clearly on the PIPE side.
+
+5. **"Selling stockholders" is not by itself a secondary disqualifier.** PIPE resale
+   registrations routinely describe the PIPE investors that way. Any secondary test must
+   bind to the *announced purchase* having existing holders as the seller, not to the
+   phrase appearing anywhere in the document. This is the same binding-not-proximity
+   discipline the funding coverage review arrived at.
+
+6. **PIPE is recognized but not profiled, for now.** That is a product decision, not a
+   technical limit, and the shipped design makes reversing it a small change.
+
+7. **If PIPEs are later profiled**, the likely minimum consideration model is
+   issuer + investor(s) + security type + placement/proceeds size. Share counts, price
+   per share, coupon, conversion terms and warrant coverage are supplemental. This is a
+   sketch to argue with when the time comes, not a schema.
+
+8. **A single source may contain multiple economic events.** Ensysce is the proof:
+   an acquisition and a concurrent private placement in one release. Whether the pipeline
+   can represent an acquisition and a concurrent PIPE **independently** is an
+   architecture question and belongs to the inventory assessment and Grata
+   reconciliation. It is explicitly **not** a PIPE patch to implement now.
+
+   The shipped design happens to protect the acquisition — `ACQUISITION` is not in
+   `PIPE_OVERRIDABLE_EVENT_TYPES`, so the recognizer never displaces it. But that is
+   suppression by *not acting*, not component-level handling. The unanswered part is
+   value contamination: if the only dollar figure in such a release belongs to the
+   financing, M&A HC extraction has nothing stopping it from reading that figure as the
+   acquisition's consideration. Whether that is real depends on the Ensysce text, which
+   was not read.
+
+### Explicitly unresolved
+
+- **MySize / the ELOC boundary.** An equity purchase agreement with registration rights
+  is consistent with a genuine PIPE (private purchase, resale registration) *and* with a
+  committed equity facility / equity line of credit, which most datasets treat as a
+  different instrument. Deciding this from the headline would be guessing. The full
+  source settles it and nothing should be built on either reading until it is read.
+- **Whether the Ensysce release states acquisition consideration at all**, which
+  determines whether the contamination risk in conclusion 8 is live or theoretical.
+- **Where the structural test should live** — classifier prompt, deterministic
+  recognizer, or both with different jobs — was designed but not decided, because the
+  design was not validated against real text.
