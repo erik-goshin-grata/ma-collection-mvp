@@ -1177,12 +1177,25 @@ Mappings for `asset_sale` and `unit_acquisition` to `ACQUISITION` are directiona
 
 ---
 
-# O. Cross-cutting open questions *(v0.4 — ENG directives 8 and 9)*
+# O. Cross-cutting questions — **five decided 2026-08-19**
+
+> **Status change.** Five of these were Product/data-semantic questions and have been
+> **decided**. What remains under each is an Engineering implementation choice, an ask to
+> another system, or a genuine evidence block. The decisions themselves are recorded in
+> **§R**; the per-question status is updated in place below.
+>
+> | | was | now |
+> | --- | --- | --- |
+> | O1 supersession | open | **DECIDED** — precedence/authority, not recency (§R1). Key + implementation → ENG |
+> | O2 Silver/Gold | open, "gates §E4" | **REFRAMED** → ENG, subject to the §R invariants. **No longer a gate** |
+> | O3 `value_usd_basis` | open | **CLOSED on our side** — the field does not exist in our model. Grata definition ask |
+> | O4 FX / conversion | open | **DECIDED** (§R2, §R3) — placement → ENG |
+> | O5 period coherence | open, blocked | **DECIDED** — exact match retained, with a revisit trigger (§R4) |
+> | O6 multi-event per source | open | **DECIDED** — source ≠ transaction (§R5). Mechanism deferred |
 
 Carried forward from `grata_v2_reconciliation_2026_08_17.md` §5, plus one new entrant.
-None is resolvable inside a single section of this document; each cuts across the model.
 
-### O1. Observation supersession — **corrected; this supersedes the earlier framing**
+### O1. Observation supersession — **DECIDED 2026-08-19; see §R1**
 
 `grata_v2_reconciliation_2026_08_17.md` previously stated, in three places, that the
 harness ledger is append-only and has no `is_current` handling. **All three have been
@@ -1212,40 +1225,56 @@ This sharpens the question rather than closing it. The right framing for Grata i
 needs both, and they behave differently: a document is immutable once filed, a web source
 is not.
 
-**Status: ENG DECISION**, and the most likely blocker on any large re-collection.
+**Status: the Product semantic is DECIDED (§R1).** Reconciliation is precedence/authority-based, fact identity is established before any supersession question arises, and lifecycle events are not fact updates. **The key and its implementation are ENG's**, and remain the most likely gating item on any large re-collection.
 
-### O2. Silver / Gold financial system-of-record
+### O2. Silver / Gold financial system-of-record — **REFRAMED to ENG 2026-08-19**
 
-If period-untagged Silver scalars feed Gold, the per-fact provenance recommended in §E4
-rule 6 is destroyed before Gold ever sees it. Whether Gold can re-derive from retained
-observations, or only from Silver's collapse, **determines how much of §E4 is achievable at
-all** — this question gates the metric policy rather than sitting beside it. Should be
-answered first.
+**This is an Engineering implementation decision, not a Product one.** Product states
+logical invariants (§R6); Engineering decides whether they are satisfied in Silver, in Gold,
+or across both. Product does not prescribe medallion-layer architecture, and this document
+does not redesign either layer.
 
-### O3. `value_usd_basis`
+**The earlier claim that it "gates §E4" is withdrawn.** The invariants hold regardless of
+where they are satisfied; what varies with the answer is *implementation cost*, not
+achievability. It is sequencing input, not a blocker.
 
-Semantics unverified. Candidate meaning: *the figure the source itself stated in USD, not a
-converted one.* The alternative — that it denotes a conversion Grata performed — is the
-**opposite** meaning, and the field name does not disambiguate. §E4 rule 4 depends on the
-answer.
+The underlying concern remains real and is now expressed as an invariant rather than an
+architecture question: if period-untagged scalars are collapsed before per-fact provenance
+is captured, the provenance is gone. §R6 requires that it not be — wherever that is
+enforced.
 
-### O4. FX / conversion policy
+### O3. `value_usd_basis` — **CLOSED on our side 2026-08-19**
 
-Grata carries `fx_rate` / `fx_rate_date` but states no policy on when a conversion may
-occur, who performs it, and what date anchors it. §E4 rule 3 is this document's position;
-it needs Grata-side adoption. Until then cross-currency transactions are silently absent
-from EV-based analyses rather than visibly incomplete — an availability problem disguised
-as a data problem.
+**Not a decision we hold.** Verified this session: `value_usd_basis` appears nowhere in
+our code or schema — it is purely a Grata-side field. The Product semantic it touches is
+already decided: source-stated USD and converted USD must remain distinguishable (§R2,
+§E4 rule 4). What remains is a **definition ask to Grata**, not an open question on our
+backlog.
 
-### O5. Period-coherence tolerance
+The two candidate meanings are opposites — *the figure the source itself stated in USD*
+versus *a conversion Grata performed* — and the field name does not disambiguate.
 
-D2 requires `total_debt` and `cash_and_equivalents` to be period-coherent without defining a
-tolerance. The harness requires an **exact** shared as-of date, deliberately, because no
-tolerance was invented in the absence of evidence. Real filings may state debt and cash days
-apart. **Not resolvable without live cases**, and the corpus has none. Resolve after the
-first real sample.
+### O4. FX / conversion policy — **DECIDED 2026-08-19; see §R2, §R3**
 
-### O6. Multiple economic events per source *(new — from the PIPE / Ensysce finding)*
+The Product position is settled: three distinct currency concepts (§R3), normalization
+optional and derived, native facts never overwritten (§R2), and conversion reproducible
+from stored rate/date/basis. **Where and how conversion runs is ENG's.** Grata-side
+adoption of the same semantics is still needed.
+
+The consequence of leaving it unadopted is unchanged: cross-currency transactions go
+silently absent from EV-based analyses rather than visibly incomplete — an availability
+problem disguised as a data problem.
+
+### O5. Period-coherence tolerance — **DECIDED 2026-08-19; see §R4**
+
+**Decided: exact matching is retained**, and this stops being an open question. It was
+never blocked in the sense that mattered — the current behaviour is safe, and carrying it as
+"open pending data" cost attention without buying anything.
+
+The revisit trigger is specific rather than temporal: **a real debt/cash case where a
+legitimate pair is rejected by exact matching.** Absent that, no tolerance is invented.
+
+### O6. Multiple economic events per source — **DECIDED 2026-08-19; see §R5**
 
 A single source can carry more than one independently profileable economic event. The
 concrete case: an Ensysce release announcing **an in-scope acquisition and a concurrent
@@ -1267,10 +1296,15 @@ The harness currently avoids the acquisition being *displaced* by not acting —
 recognition never overrides `ACQUISITION` — but that is suppression by omission, not
 component-level handling, and it does nothing about contamination.
 
-**Status: ENG DECISION / architecture.** Explicitly **not** a PIPE patch. It touches the
-transaction/event cardinality assumption, related-transaction linkage (currently §M
-deferred), and per-event value attribution. Whether the contamination risk is live depends
-on source text that was not readable when this was written.
+**Status: the Product semantic is DECIDED (§R5) — source ≠ transaction.** One source may
+evidence zero, one, or several transactions, and profiling only some of them is a scope
+choice rather than a model limit. The **capability** requirement is that where several
+in-scope transactions are announced together, extraction can identify them independently
+and attribute observations to the right one rather than blending.
+
+**Implementation is deliberately not designed here**, and this is explicitly not a PIPE
+patch. Whether the contamination risk is live still depends on source text that was not
+readable when this was written — that part remains evidence-blocked.
 
 ---
 
@@ -1676,3 +1710,120 @@ sector/asset-class question (2), and single-value ambiguities in the deal-type f
 The 6 genuine `ADD`s cluster in offer mechanics and attitude, neither of which the target
 model had considered at all before this review. Those are the two areas where ML is
 carrying something the model does not.
+
+---
+
+# R. Approved Product semantics *(2026-08-19)*
+
+Five Product/data-semantic decisions, approved and closed. Everything downstream of them is
+an Engineering choice, an ask to another system, or evidence-blocked.
+
+**The dividing line this section establishes:** Product states **logical invariants**;
+Engineering decides how and where they are satisfied. Product does not prescribe storage
+layers, table shapes, or medallion architecture. Where a decision below reads like a design,
+it is a semantic requirement that any design must meet — not the design.
+
+## R1. Reconciliation is precedence-based, and fact identity comes first
+
+**Canonical reconciliation is precedence/authority-based, not recency.** Source tiering is
+an input to reconciliation. A newer observation does **not** supersede an older one merely
+by being newer — a low-tier re-scrape must not overwrite a filing.
+
+Three distinctions that must survive, and the second is the one most easily lost:
+
+1. **Fact identity precedes supersession.** Before asking which observation wins, establish
+   whether two observations are about the *same fact* at all. Two figures that are not the
+   same fact are not in competition and must both persist; collapsing them is the
+   corroboration-vs-multiplicity error §E4 rule 6 exists to prevent.
+
+2. **Lifecycle events are not fact updates.** A later source announcing `CLOSE` or
+   `TERMINATION` is a **related event**, not a correction of the announcement's facts.
+   Modelling it as supersession would silently delete the announced terms — the very
+   history the transaction/lifecycle relationship exists to hold. That relationship must
+   survive reconciliation intact.
+
+3. **Human adjudication is a first-class resolver.** A person may explicitly resolve
+   competing observations, and that resolution outranks automatic precedence. The harness
+   already does this for `MANUAL_REMEDIATION`; the semantic is now general.
+
+**ENG owns** the physical supersession/reconciliation key and its implementation. Note the
+key is unlikely to be single-valued: a filed document is immutable once filed, a web source
+can change under the same URL, and those two facts want different scoping.
+
+## R2. USD normalization is optional and derived
+
+Normalization to a display currency is a **derived** operation, never an authored value.
+**Native facts are preserved and never overwritten by conversion.** A converted figure
+never replaces the amount and currency the source stated.
+
+Conversion must be **reproducible and auditable** — stored rate, date and basis sufficient
+to re-derive the number. Product configuration and the conversion implementation are ENG's.
+
+## R3. Three currency concepts, and metrics never inherit
+
+| # | concept | definition |
+| --- | --- | --- |
+| 1 | **native / source metric currency** | The currency the source stated *for that metric*. |
+| 2 | **transaction / reference currency** | The transaction's reference currency, to which transaction financials **may** be aligned for coherent transaction-level analysis. |
+| 3 | **normalized / display currency** | e.g. USD. Derived, optional, never authored (§R2). |
+
+**The load-bearing rule: an observation with unknown native currency does NOT inherit
+`transaction_currency`.** Unknown stays unknown. Inheritance would manufacture a currency
+the source never stated, and the resulting figure is indistinguishable from a stated one —
+a plausible wrong number rather than a visible gap, which is the failure class §E4 rules
+1–3 refuse.
+
+**Do not assume every metric on one transaction shares the transaction currency.** Recorded
+as a future test fixture, not as an encoded interpretation: a single source stating an
+acquisition EV explicitly as approximately £988M while reporting target revenue as
+approximately `$1.2B`. **The `$` is ambiguous and its resolution is not established by that
+excerpt** — no reading of it is encoded here. The fixture's value is only the structural
+point: one source, one transaction, metrics in different native currencies, and a bare
+currency symbol requiring contextual resolution.
+
+## R4. Period coherence stays exact
+
+`total_debt` and `cash_and_equivalents` continue to require an **exact** shared as-of date.
+No tolerance is invented.
+
+**Revisit trigger, deliberately specific rather than temporal:** a real debt/cash case in
+which a legitimate combination is rejected by exact matching. Until such a case exists there
+is nothing to calibrate against, and this is no longer carried as an open question.
+
+## R5. Source ≠ transaction
+
+**One source may evidence zero, one, or several transactions or events.** A single release
+may carry an M&A event plus debt financing, a share issuance, or another financing
+component.
+
+Two consequences that are easy to conflate:
+
+- **Multiple events in a source does not mean every event becomes a canonical transaction.**
+  Profiling only the M&A component is a legitimate *product scope* choice. Scope and
+  capability are different questions.
+- **But where several in-scope, profileable transactions are announced together, the
+  extraction architecture must be able to identify them independently and attribute each
+  observation to the correct transaction rather than blending their facts.** Blending is the
+  failure mode: a financing figure read as an acquisition's consideration is a wrong value,
+  not a gap, and nothing downstream can detect it.
+
+Retained as an **HC/extraction and event-cardinality requirement**. Implementation is
+deliberately **not** designed here.
+
+## R6. Invariants for the system of record
+
+Product's contract, replacing the Silver/Gold architecture question (§O2). The eventual
+architecture — Silver, Gold, or both — must be capable of:
+
+1. preserving source-native metric value **and** currency;
+2. preserving source/provenance;
+3. preserving period/applicability where relevant;
+4. retaining distinct observations/facts rather than prematurely collapsing them;
+5. retaining native values when USD normalization is performed;
+6. making FX conversion reproducible and auditable, including sufficient rate/date/basis;
+7. distinguishing transaction currency from individual metric currency;
+8. distinguishing source-stated metrics from derived rollups such as `transaction_size`;
+9. preserving lineage through canonical/current selection and supersession.
+
+**Engineering decides whether these are satisfied in Silver, in Gold, or across both.**
+Product does not prescribe the layer, and this document does not redesign either.

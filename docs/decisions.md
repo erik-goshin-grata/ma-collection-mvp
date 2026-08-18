@@ -2606,3 +2606,106 @@ That was established by running the code, not by reading the sources.
 - **Where the structural test should live** — classifier prompt, deterministic
   recognizer, or both with different jobs — was designed but not decided, because the
   design was not validated against real text.
+
+---
+
+## Five Product Semantics Decided; No Product Decisions Left Open
+
+**Decided 2026-08-19.** Full text in `grata_v2_inventory_and_recommendations.md` §R; this
+records what changed and why the backlog shrank.
+
+### The dividing line
+
+**Product states logical invariants; Engineering decides how and where they are satisfied.**
+Product does not prescribe storage layers, table shapes, or medallion architecture. Applying
+that line is most of what closed the backlog: several long-running "open questions" turned
+out to be Engineering choices wearing Product clothing, and one was not ours at all.
+
+### What was decided
+
+| | decision |
+| --- | --- |
+| **R1** | Reconciliation is **precedence/authority-based, not recency**. Source tiering is an input. Fact identity is established *before* any supersession question. Lifecycle events (`CLOSE`, `TERMINATION`) are related events, **not** fact updates. Human adjudication outranks automatic precedence. |
+| **R2** | USD normalization is **optional and derived**; native facts are never overwritten. Conversion must be reproducible from stored rate/date/basis. |
+| **R3** | **Three** currency concepts — native metric, transaction/reference, normalized display. A metric with unknown native currency **never inherits** the transaction currency. |
+| **R4** | Period coherence stays **exact**. Revisit only on a real debt/cash case where a legitimate pair is rejected. |
+| **R5** | **Source ≠ transaction.** One source may evidence zero, one, or several. Profiling only some is a scope choice; identifying them independently is a capability requirement. |
+
+### The two that matter most, and why
+
+**Lifecycle is not supersession (R1).** This is the trap the earlier framing walked toward.
+"A newer source says something different, so it supersedes" is superficially reasonable and
+would have silently deleted announced deal terms every time a `CLOSE` release arrived — the
+exact history the transaction/lifecycle relationship exists to hold. Naming it before
+building the reconciliation key is worth more than any amount of care afterwards.
+
+**Metrics never inherit transaction currency (R3).** Inheritance produces a plausible wrong
+number rather than a visible gap, and the result is indistinguishable from a stated figure.
+This is the same failure class as the qualifier-anchoring rule and the currency-coherence
+refusal, and it fails the same way: quietly.
+
+A future test fixture is recorded for R3 — one source stating an acquisition EV explicitly
+as ~£988M while reporting target revenue as ~`$1.2B`. **No interpretation of that `$` is
+encoded**; the excerpt does not establish one. The fixture's value is the structural point
+alone: one source, one transaction, different native currencies, ambiguous symbol.
+
+### Reclassifications, not decisions
+
+- **Silver/Gold → ENG**, subject to the nine §R6 invariants. The earlier claim that it
+  *gates* §E4 is **withdrawn**: the invariants hold wherever they are satisfied, so what
+  varies is implementation cost, not achievability. Sequencing input, not a blocker.
+- **`value_usd_basis` → not ours.** Verified: it appears nowhere in our code or schema. The
+  Product semantic it touches (source-stated USD must stay distinguishable from converted)
+  is already decided. What remains is a definition ask to Grata.
+- **`PER_SHARE_X_SHARES` → ENG wiring, and the share-count path is confirmed in code.**
+  `stages/agreement_extract.py` writes `transaction_security` rows carrying
+  `shares_outstanding` per security class, dedupes by `(security_type, security_class)`
+  preferring the later as-of date, and computes a fully-diluted total with a quality marker
+  (`COMPLETE` when both common and option-like classes are present). `stages/aggregate.py`
+  then passes `sec_shares = None` — hard-coded. So the rung is not dormant awaiting data;
+  it is disconnected from data that is already being collected, and the collected form is
+  richer than a bare count. **Two caveats before calling it ready:** live population was not
+  verified (no corpus in the container), and coverage is limited to agreement-bearing deals.
+
+### Closed as stale
+
+The two Grata asks from the transaction-size work (M&A equity fallback, `SOLE_INVESTOR_AMOUNT`)
+are **not decisions we need**. Our side is implemented; they are notifications awaiting
+acknowledgement and should stop occupying the backlog. The same applies to the eleven Adopt
+recommendations — acceptance items, not open questions.
+
+Also closed: the append-only/`is_current` framing (corrected earlier), `transaction_size`
+implementation and basis vocabulary (shipped), the v0.3 `is_merger` / `is_reverse_merger`
+flag proposals and the four recap flags (superseded by v0.4), "a second metric table is not
+required" (superseded by "preferred home"), and Silver parity item K1 (absorbed into R6).
+
+### What is left
+
+**Seven items, none of them a Product decision.** Grouped by who can move them, because the
+groups have different unblocking conditions — ENG items are schedulable now, evidence-blocked
+items cannot be scheduled at all, and external asks depend on another team answering.
+
+**ENG implementation (3)**
+
+| item | note |
+| --- | --- |
+| Reconciliation / supersession **key** and implementation | Semantics settled by R1. The key is unlikely to be single-valued: a filed document is immutable, a web source can change under the same URL. |
+| Silver/Gold placement against the R6 invariants | Product does not prescribe the layer. No longer gates §E4. |
+| `PER_SHARE_X_SHARES` wiring | `aggregate.py` hard-codes `sec_shares = None`; `agreement_extract.py` already writes `transaction_security.shares_outstanding` with a diluted total and quality marker. Live population unverified, coverage limited to agreement-bearing deals. |
+
+**Evidence-blocked (2)** — cannot be scheduled; each needs a case that does not yet exist
+
+| item | what would unblock it |
+| --- | --- |
+| Multi-event value contamination: live or theoretical? | The Ensysce source text |
+| Live debt/cash path validation | A real debt/cash sample; the corpus has zero rows, and none will be manufactured |
+
+**External-system asks (2)** — answers owned by another team
+
+| item | asked of |
+| --- | --- |
+| 14 ML definition/example items (§Q7) | MergerLinks source system |
+| `value_usd_basis` semantics | Grata |
+
+The earlier statement of "four items" was a miscount against a six-row table that had
+bundled the two external asks into one line.

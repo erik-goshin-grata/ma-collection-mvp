@@ -274,6 +274,44 @@ findable rather than quietly dropping deals.
 **No backfill.** Rows classified before this change keep whatever they were given; the
 corpus is test/validation data and cleaning it was explicitly declined.
 
+**Grata backlog: five Product semantics decided 2026-08-19; no Product decisions left open.**
+Recorded in `grata_v2_inventory_and_recommendations.md` §R and decisions.md, "Five Product
+Semantics Decided". Reconciliation is precedence-based with fact identity established first
+and lifecycle events explicitly not fact updates (R1); USD normalization optional and
+derived (R2); three currency concepts with **no inheritance** of transaction currency by a
+metric of unknown native currency (R3); period coherence stays exact (R4); source ≠
+transaction (R5). Nine invariants (R6) replace the Silver/Gold architecture question, which
+is now ENG's and **no longer gates §E4**.
+
+**Seven items remain, none of them a Product decision.** Separated by owner because the
+groups unblock differently: ENG items are schedulable now, evidence-blocked items cannot be
+scheduled at all, and external asks wait on another team.
+
+*ENG implementation — 3*
+
+| item | note |
+| --- | --- |
+| Reconciliation / supersession **key** + implementation | Semantics settled by R1; the key is unlikely to be single-valued (immutable filings vs mutable web sources) |
+| Silver/Gold placement against the R6 invariants | Product does not prescribe the layer; no longer gates §E4 |
+| `PER_SHARE_X_SHARES` wiring | `aggregate.py` hard-codes `sec_shares = None` while `agreement_extract.py` already writes `transaction_security.shares_outstanding` with a diluted total and quality marker. Live population unverified; coverage limited to agreement-bearing deals |
+
+*Evidence-blocked — 2*
+
+| item | what would unblock it |
+| --- | --- |
+| Multi-event value contamination: live or theoretical? | the Ensysce source text |
+| Live debt/cash path validation | a real sample; corpus has zero rows and none will be manufactured |
+
+*External-system asks — 2*
+
+| item | asked of |
+| --- | --- |
+| 14 ML definition/example items (§Q7) | MergerLinks |
+| `value_usd_basis` semantics | Grata |
+
+Closed as stale: the two transaction-size Grata asks and the eleven Adopt recommendations
+are acknowledgement items, not open questions.
+
 **PIPE workstream CLOSED 2026-08-18 — recognition is lexical only, and that is known to
 be incomplete.** Three real examples (Silvaco/Micron, MySize, Ensysce/Cy Biopharma)
 showed that a structural PIPE need not use the word, that the ELOC boundary is undecided,
