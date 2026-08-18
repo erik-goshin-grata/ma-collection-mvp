@@ -253,10 +253,26 @@ transaction_record with M&A semantics.
 - **Promotion is one line.** Stop stamping the terminal status and the row flows as
   `CLASSIFIED`; the only open question then is which extractor owns it.
 
-Still open, and deliberately not done here: `prompts/deal_type_classifier.md` does not
-yet offer `PIPE` as a type, so recognition is entirely deterministic. Adding it would
-catch paraphrases the binding rule is too tight for — see decisions.md for why it was
-left out of this change.
+**PIPE is now first-class in the prompt vocabulary too (second commit, same day).**
+`deal_type_classifier` 0.8 offers `PIPE` as a twelfth type, gated on the source
+explicitly naming the structure and carrying a negative list (private placement,
+convertible notes or preferred, registered direct, ATM/underwritten offering) so the new
+bucket does not become a catch-all. `relevancy_filter` 0.6 adds a `PIPE` reason code on
+the **RELEVANT** side — deliberately not NOT_RELEVANT, which would drop the row before
+Stage 3 and destroy the recognized-exclusion record it exists to create.
+
+A classifier-emitted `PIPE` is excluded on the same terminal status as a
+recognizer-driven one. That branch is not cosmetic: `PIPE` is not in the funding family,
+so leaving a self-declared PIPE at `CLASSIFIED` would satisfy Stage 4's `NOT IN` gate and
+send it into M&A extraction — the original leak, reopened by the change meant to close
+it. Provenance records `recognition_form` (`CLASSIFIER` vs `ACRONYM`/`EXPANDED`) and
+`corroborated`, i.e. whether the deterministic recognizer independently found explicit
+PIPE language. An uncorroborated classifier verdict is still honoured — the exclusion
+deletes nothing and is reversible — but it is flagged, so an over-classifying prompt is
+findable rather than quietly dropping deals.
+
+**No backfill.** Rows classified before this change keep whatever they were given; the
+corpus is test/validation data and cleaning it was explicitly declined.
 
 **Funding path (partial):**
 - `stages/funding_lc_extract.py` — not written; prompt exists

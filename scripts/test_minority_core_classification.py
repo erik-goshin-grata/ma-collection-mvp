@@ -32,7 +32,7 @@ BASE_RESULT = {
     "overrides_relevancy_hint": False,
     "model_confidence": "HIGH",
     "notes": None,
-    "prompt_version": "deal_type_classifier:0.7",
+    "prompt_version": "deal_type_classifier:0.8",
 }
 
 
@@ -101,7 +101,12 @@ def _test_prompt_public_pipe_routing_language(failures: list[str]) -> None:
         "VC_ROUND only when the source supports",
         "A public-company\n  PIPE, primary share issuance, registered direct offering",
         "not automatically GROWTH_EQUITY or VC_ROUND merely\n  because it is primary capital",
-        "If no existing supported core type clearly fits,\n  use UNKNOWN with notes",
+        # Prompt 0.8 gave PIPE its own type, so the fallback sentence changed shape. The
+        # guard's intent is unchanged and is what matters: public-company primary capital
+        # must never be swept into a funding type. What moved is only where a recognized
+        # PIPE goes — to PIPE now, instead of to UNKNOWN.
+        "the source explicitly identifies the\n  structure as a PIPE",
+        "and whenever no supported core type\n  clearly fits, use UNKNOWN with notes",
     ]
     for snippet in required:
         if snippet not in text:
@@ -109,6 +114,10 @@ def _test_prompt_public_pipe_routing_language(failures: list[str]) -> None:
     forbidden = "PIPE or other public-company primary capital is the closest\n  funding type"
     if forbidden in text:
         failures.append("prompt still forces PIPE/public primary capital toward funding type")
+    # A recognized PIPE must not land back in UNKNOWN either: UNKNOWN satisfies Stage 4's
+    # NOT IN gate, which is how PIPEs reached M&A extraction in the first place.
+    if "use PIPE" not in text:
+        failures.append("prompt no longer routes an explicitly identified PIPE to PIPE")
 
 
 def _test_prompt_remaining_stake_routing_language(failures: list[str]) -> None:

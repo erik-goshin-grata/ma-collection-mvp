@@ -1,5 +1,5 @@
 """
-scripts/test_reason_code_parity.py — drift guard for relevancy reason codes (bug #7).
+scripts/test_reason_code_parity.py — drift guard for the relevancy prompt/stage pair.
 
 Parses the authoritative reason_code enum block in prompts/relevancy_filter.md
 (between the REASON_CODES_START / REASON_CODES_END markers) and asserts that every
@@ -9,6 +9,13 @@ target is itself a valid code.
 
 This stops the next prompt bump from silently reintroducing the drift that made the
 stage squash VC_ROUND_OR_FUNDING / RECAPITALIZATION to AMBIGUOUS_BUT_LIKELY_DEAL.
+
+Also asserts VERSION parity. The prompt file sat at 0.5 while the stage stamped
+`relevancy_filter:0.4` for weeks, so every row carried a version string naming a prompt
+that was not the one it was classified by — which makes the provenance actively
+misleading rather than merely incomplete, and silently defeats any "which prompt
+produced this?" query. Enum parity was guarded here from the start; version parity was
+not, which is exactly why this one survived.
 
 Run from project root:
     python scripts/test_reason_code_parity.py
@@ -21,7 +28,9 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from stages.relevancy_filter import _VALID_REASON_CODES, _REASON_CODE_ALIASES
+from stages.relevancy_filter import (
+    _REASON_CODE_ALIASES, _VALID_REASON_CODES, _VERSION,
+)
 
 PROMPT = os.path.join(os.path.dirname(__file__), "..", "prompts", "relevancy_filter.md")
 PASS = "\033[32mPASS\033[0m"
@@ -38,6 +47,15 @@ def prompt_reason_codes() -> set[str]:
         print(f"{FAIL} — REASON_CODES_START/END markers not found in {PROMPT}")
         sys.exit(1)
     return set(_CODE_RE.findall(m.group(1)))
+
+
+_VERSION_RE = re.compile(r"^\*\*Version:\*\*\s*([0-9][0-9.]*)", re.M)
+
+
+def prompt_version() -> str | None:
+    """The version the prompt file declares for itself."""
+    m = _VERSION_RE.search(open(PROMPT, encoding="utf-8").read())
+    return m.group(1) if m else None
 
 
 def main() -> int:
@@ -71,6 +89,23 @@ def main() -> int:
     extra = sorted(c for c in _VALID_REASON_CODES if c not in declared)
     if extra:
         print(f"  (info) stage accepts codes not in the prompt block: {extra}")
+
+    # 4. VERSION parity. The stage stamps every row with `relevancy_filter:<_VERSION>`,
+    #    so a stamp that names a different prompt than the one in the file is worse than
+    #    no provenance at all: it answers "which prompt produced this row?" wrongly, and
+    #    nothing downstream can tell. Shipping a prompt edit without moving the stamp is
+    #    the specific mistake this catches.
+    declared_version = prompt_version()
+    if declared_version is None:
+        ok = False
+        print(f"{FAIL} — no '**Version:** X.Y' line found in {PROMPT}")
+    elif declared_version != _VERSION:
+        ok = False
+        print(f"{FAIL} — prompt file is version {declared_version} but the stage stamps "
+              f"relevancy_filter:{_VERSION}; every row would carry a version string "
+              f"naming a prompt it was not classified by")
+    else:
+        print(f"{PASS} — prompt and stage agree on version {_VERSION}")
 
     print(("\n" + PASS + " parity holds") if ok else ("\n" + FAIL + " drift detected"))
     return 0 if ok else 1

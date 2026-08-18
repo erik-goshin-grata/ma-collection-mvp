@@ -40,6 +40,23 @@ status — the row then flows as `CLASSIFIED` like any other, and the only remai
 question is which extractor should own it. `PIPE_OVERRIDABLE_EVENT_TYPES` is the single
 knob controlling which seats a PIPE may take, kept explicit for that reason.
 
+TWO WAYS A ROW BECOMES A PIPE
+-----------------------------
+1. **The classifier says so.** `prompts/deal_type_classifier.md` 0.8 offers `PIPE` as a
+   type, so the model can return it directly. That verdict is honoured.
+2. **The deterministic recognizer says so**, for a row the classifier seated elsewhere.
+
+Both land in the same terminal state, and the branch matters: `PIPE` is not in the
+funding family, so a classifier-emitted `PIPE` left at status `CLASSIFIED` would satisfy
+Stage 4's `NOT IN` gate and go straight into M&A extraction — the original leak,
+reopened through the front door by the very change that was supposed to close it.
+
+A classifier verdict is recorded with `corroborated`: whether the deterministic
+recognizer independently found explicit PIPE language in the source. An uncorroborated
+verdict is still honoured — the exclusion deletes nothing, the row keeps every field, and
+it is trivially reversible — but the flag makes an over-classifying prompt findable
+instead of letting it drop deals quietly. It is a review queue, not a second policy.
+
 RECOGNITION IS DELIBERATELY NARROW
 ----------------------------------
 Only an explicit PIPE counts: the acronym **bound** to a financing construction, or the
@@ -158,26 +175,15 @@ def recognize_pipe(title: str, clean_text: str) -> dict | None:
     return None
 
 
-def resolve_classification(v2_event_type: str | None, title: str,
-                           clean_text: str) -> dict:
-    """Decide the row's event type and terminal status.
+_EXCLUSION_RULE = (
+    "explicit PIPE structure — recognized, not profiled. No HC extraction, no "
+    "clustering, no aggregation, so no round_size, transaction_size, valuation or "
+    "transaction_record is derived."
+)
 
-    -> {"v2_event_type", "status", "excluded": bool, "provenance": dict | None}
 
-    The recognizer is consulted **only** when the classifier's verdict is one this
-    module may displace. That ordering is the safety property: a row the classifier
-    called ACQUISITION or REVERSE_MERGER is never re-examined, so no amount of PIPE
-    language anywhere in its body can take its seat.
-    """
-    if v2_event_type not in PIPE_OVERRIDABLE_EVENT_TYPES:
-        return {"v2_event_type": v2_event_type, "status": "CLASSIFIED",
-                "excluded": False, "provenance": None}
-
-    found = recognize_pipe(title, clean_text)
-    if not found:
-        return {"v2_event_type": v2_event_type, "status": "CLASSIFIED",
-                "excluded": False, "provenance": None}
-
+def _excluded(classifier_verdict: str, form: str, matched: str | None,
+              evidence: str | None, corroborated: bool) -> dict:
     return {
         "v2_event_type": PIPE_EVENT_TYPE,
         "status": PIPE_EXCLUDED_STATUS,
@@ -185,12 +191,58 @@ def resolve_classification(v2_event_type: str | None, title: str,
         "provenance": {
             # What the classifier actually said. Kept so the exclusion is reviewable and
             # so a later promotion knows which seat the row came from.
-            "classifier_v2_event_type": v2_event_type,
-            "recognition_form": found["form"],
-            "matched": found["matched"],
-            "evidence": found["evidence"],
-            "rule": ("explicit PIPE structure — recognized, not profiled. No HC "
-                     "extraction, no clustering, no aggregation, so no round_size, "
-                     "transaction_size, valuation or transaction_record is derived."),
+            "classifier_v2_event_type": classifier_verdict,
+            "recognition_form": form,
+            "matched": matched,
+            "evidence": evidence,
+            "corroborated": corroborated,
+            "rule": _EXCLUSION_RULE,
         },
     }
+
+
+def _kept(v2_event_type: str | None) -> dict:
+    return {"v2_event_type": v2_event_type, "status": "CLASSIFIED",
+            "excluded": False, "provenance": None}
+
+
+def resolve_classification(v2_event_type: str | None, title: str,
+                           clean_text: str) -> dict:
+    """Decide the row's event type and terminal status.
+
+    -> {"v2_event_type", "status", "excluded": bool, "provenance": dict | None}
+
+    Two ways in, one terminal state:
+
+    * the classifier returned `PIPE` itself — honoured, and corroborated against the
+      source text so an over-classifying prompt is findable;
+    * the classifier seated the row somewhere a PIPE mis-occupies, and the source text
+      explicitly identifies one.
+
+    The recognizer is consulted **only** for that second group. That ordering is the
+    safety property: a row the classifier called ACQUISITION or REVERSE_MERGER is never
+    re-examined, so no amount of PIPE language anywhere in its body can take its seat.
+    """
+    # 1. The classifier's own verdict. Not in the funding family, so leaving this at
+    #    status CLASSIFIED would route it into M&A extraction — the leak this module
+    #    exists to close.
+    if v2_event_type == PIPE_EVENT_TYPE:
+        found = recognize_pipe(title, clean_text)
+        return _excluded(
+            PIPE_EVENT_TYPE,
+            "CLASSIFIER",
+            found["matched"] if found else None,
+            found["evidence"] if found else None,
+            corroborated=found is not None,
+        )
+
+    # 2. A seat a PIPE mis-occupies, plus explicit language in the source.
+    if v2_event_type not in PIPE_OVERRIDABLE_EVENT_TYPES:
+        return _kept(v2_event_type)
+
+    found = recognize_pipe(title, clean_text)
+    if not found:
+        return _kept(v2_event_type)
+
+    return _excluded(v2_event_type, found["form"], found["matched"], found["evidence"],
+                     corroborated=True)

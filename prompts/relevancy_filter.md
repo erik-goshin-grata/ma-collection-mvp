@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.5 (V2 alignment)
+**Version:** 0.6 (PIPE recognition)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -61,6 +61,7 @@ IN SCOPE (classify as RELEVANT):
 - Growth equity investments by growth equity or late-stage investors
 - Venture debt or venture lending facilities to venture-backed companies
 - Recapitalizations (dividend recap, equity recap, leveraged recap, sponsor recap)
+- PIPEs — private investment in public equity — where the source explicitly uses the term "PIPE" or the phrase "private investment in public equity". A private placement, convertible note, preferred issuance or registered direct offering is NOT a PIPE unless the source names it one.
 - Definitive agreements for any of the above
 - Closing or completion of any of the above
 
@@ -84,7 +85,7 @@ EDGE CASES:
 
 CRITICAL — reason_code MUST be chosen from the enum list
 
-The reason_code field must be exactly one of the 23 values listed in the in-scope and out-of-scope enumerations above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
+The reason_code field must be exactly one of the 24 values listed in the in-scope and out-of-scope enumerations above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
 
 If no listed value fits perfectly:
 - For RELEVANT classifications, use AMBIGUOUS_BUT_LIKELY_DEAL
@@ -107,6 +108,7 @@ Examples of invented values that must NOT be produced:
 - GROWTH_EQUITY_INVESTMENT → use VC_ROUND_OR_FUNDING
 - VENTURE_DEBT_FACILITY → use VC_ROUND_OR_FUNDING
 - DIVIDEND_RECAPITALIZATION → use RECAPITALIZATION
+- PIPE_FINANCING, PIPE_TRANSACTION, PIPE_OFFERING, PRIVATE_INVESTMENT_IN_PUBLIC_EQUITY → use PIPE
 
 Note on suffixes: Do NOT append _ANNOUNCEMENT, _CLOSING, _COMPLETION, _AMENDMENT, or _TERMINATION suffixes to any enum value. Event-type distinctions belong in the deal_type_classifier output, not in reason_code. Use the base enum value only.
 
@@ -114,7 +116,7 @@ Precision is not the goal — enum discipline is. The reason_code is for categor
 
 RESPONSE FORMAT
 
-Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 23 enum values listed above — no exceptions.
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 24 enum values listed above — no exceptions.
 
 {
   "classification": "RELEVANT",
@@ -178,6 +180,7 @@ Classify this release.
 - `MINORITY_INVESTMENT`
 - `VC_ROUND_OR_FUNDING` — VC round, growth equity investment, or venture debt facility
 - `RECAPITALIZATION` — dividend recap, equity recap, leveraged recap, or sponsor recap
+- `PIPE` — private investment in public equity, where the source explicitly names the structure. RELEVANT so the event is recorded and recognized downstream; the deal-type classifier marks it as recognized-but-not-profiled.
 - `DEAL_CLOSE_OR_COMPLETION`
 - `DEAL_AMENDMENT_OR_TERMINATION`
 - `AMBIGUOUS_BUT_LIKELY_DEAL` — use when release references an in-scope event but framing is unclear
@@ -320,3 +323,4 @@ Output:
 | 0.3 | 2026-04-23 | Tightened enum discipline: added explicit CRITICAL block before RESPONSE FORMAT listing invented values observed in validation runs and mapping each to the correct enum value. Strengthened RESPONSE FORMAT preamble with no-exceptions language. Addresses 30-47% failure rate from model inventing reason_codes like SHARE_BUYBACK, ACQUISITION_COMPLETION, etc. instead of using listed enum values. |
 | 0.4 | 2026-04-23 | Added suffix-pattern warning and two concrete examples. Addresses residual 13% failure rate from v0.3. |
 | 0.5 | 2026-07-28 | V2 alignment. Added VC/funding events to IN SCOPE: VC funding rounds, growth equity investments, venture debt, recapitalizations. Added `VC_ROUND_OR_FUNDING` and `RECAPITALIZATION` to reason_code enum (23 total, up from 21). Updated OUT OF SCOPE debt note to distinguish venture debt (in scope) from corporate bond issuances (out of scope). Added Example 4 (VC round). Updated CRITICAL block with invented-value examples for funding types. |
+| 0.6 | 2026-08-18 | Added `PIPE` to the RELEVANT reason_code enum (24 total, up from 23) and to IN SCOPE, gated on the source explicitly naming the structure. RELEVANT rather than NOT_RELEVANT on purpose: marking it not-relevant would drop the row before deal-type classification and lose the recognized-exclusion record. Added invented-value mappings for PIPE_FINANCING / PIPE_TRANSACTION / PIPE_OFFERING / PRIVATE_INVESTMENT_IN_PUBLIC_EQUITY. |

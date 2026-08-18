@@ -1,13 +1,13 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.7 (minority-as-flag routing)
+**Version:** 0.8 (PIPE as a recognized, unprofiled type)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
 
 ## 1. Purpose
 
-Classify each relevant press release into one of 11 mutually exclusive deal
+Classify each relevant press release into one of 12 mutually exclusive deal
 types (V2 `event_type` vocabulary). For SPIN_OFF and SPLIT_OFF transactions,
 also extract two discriminator fields. Separately, classify the target entity
 type (standalone, business unit, subsidiary) because this drives parent_seller
@@ -51,7 +51,7 @@ classifier may overrule it if the full text disagrees.
 
 ```
 You are a deal type classifier for an M&A data collection pipeline. Given the
-title and body of a press release, classify it into exactly one of eleven deal
+title and body of a press release, classify it into exactly one of twelve deal
 types. For SPIN_OFF and SPLIT_OFF transactions, also determine two discriminator
 fields.
 
@@ -114,7 +114,29 @@ DEAL TYPES (v2_event_type):
     companies. Distinct from RECAPITALIZATION by company stage (early/growth
     stage, not mature/PE-backed).
 
-11. UNKNOWN — The release clearly describes a transaction event but the type
+11. PIPE — A private investment in public equity: privately negotiated primary
+    issuance of already-public equity (or securities convertible into it) to
+    selected investors, outside a registered public offering.
+
+    Use this type ONLY when the source explicitly identifies the structure, by
+    the term "PIPE" or by the phrase "private investment in public equity". This
+    is a recognition, not an inference.
+
+    The following are NOT a PIPE on their own, however private the capital or
+    however public the issuer. Classify each on its own terms, and use UNKNOWN if
+    nothing else fits:
+      - a private placement of common or preferred stock
+      - an issuance of convertible notes or convertible preferred stock
+      - a registered direct offering
+      - an at-the-market or underwritten public offering
+      - any primary raise by a public company that the source does not name a PIPE
+
+    PIPE is a TERMINAL classification. This pipeline recognizes the structure but
+    does not profile it: no financial extraction follows, so do not reason about
+    round size, valuation, or consideration. Return the type, the parties you can
+    identify, and notes. Getting the type right is the whole job.
+
+12. UNKNOWN — The release clearly describes a transaction event but the type
     cannot be determined from the text alone.
 
 OUT OF SCOPE (not classifiable under this prompt):
@@ -146,8 +168,10 @@ IMPORTANT DISTINCTIONS:
   genuine venture financing; venture lending is VENTURE_DEBT. A public-company
   PIPE, primary share issuance, registered direct offering, or other public-company
   minority capital raise is not automatically GROWTH_EQUITY or VC_ROUND merely
-  because it is primary capital. If no existing supported core type clearly fits,
-  use UNKNOWN with notes. Do not output MINORITY_INVESTMENT.
+  because it is primary capital. When the source explicitly identifies the
+  structure as a PIPE or a "private investment in public equity", use PIPE. For
+  any other public-company primary raise, and whenever no supported core type
+  clearly fits, use UNKNOWN with notes. Do not output MINORITY_INVESTMENT.
 
 SPIN_OFF / SPLIT_OFF DISCRIMINATORS:
 
@@ -344,7 +368,7 @@ target status.
 
 | Field | Type | Values |
 | :--- | :--- | :--- |
-| `v2_event_type` | enum | `ACQUISITION`, `MERGER`, `SPIN_OFF`, `SPLIT_OFF`, `REVERSE_MERGER`, `JOINT_VENTURE`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `UNKNOWN` |
+| `v2_event_type` | enum | `ACQUISITION`, `MERGER`, `SPIN_OFF`, `SPLIT_OFF`, `REVERSE_MERGER`, `JOINT_VENTURE`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `PIPE`, `UNKNOWN` |
 | `deal_type` | enum | Same as `v2_event_type` — transitional alias, deprecated in future version |
 | `spin_split_type` | enum or null | `SPIN_OFF`, `SPLIT_OFF`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `distribution_mechanism` | enum or null | `PRO_RATA`, `EXCHANGE_OFFER`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
@@ -790,3 +814,4 @@ Output:
 | 0.5 | 2026-07-22 | Clarified event_type semantics — CLOSE reserved for separate later releases. Added examples 8–11. |
 | 0.6 | 2026-07-28 | V2 alignment. `deal_type` → `v2_event_type` (deal_type retained as transitional alias). `event_type` → `event_history_type` (eliminates V2 field name collision). SPIN_SPLIT split into SPIN_OFF and SPLIT_OFF as top-level types; SPLIT renamed SPLIT_OFF. RECAPITALIZATION added with recap_type discriminator. VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT added as classifiable types — previously routed to UNKNOWN. target_type values lowercased; spinco added for spin/split targets. ANNOUNCED/CLOSED replace ANNOUNCEMENT/CLOSE in event_history_type. Examples expanded to 14 — added recap (7), VC_ROUND (8), GROWTH_EQUITY (9), VENTURE_DEBT (10). Funding extraction handled by separate funding HC prompt (future workstream). |
 | 0.7 | 2026-08-12 | Removed MINORITY_INVESTMENT from core classifier output vocabulary. Minority status routes to the underlying economic event and is derived downstream as `is_minority`. |
+| 0.8 | 2026-08-18 | PIPE added as a recognized, unprofiled type (11 → 12 types; UNKNOWN renumbered to 12). Used only when the source explicitly identifies the structure by the term "PIPE" or the phrase "private investment in public equity" — a recognition, not an inference. Carries an explicit negative list (private placement, convertible notes or preferred, registered direct, ATM/underwritten offering) so a new bucket does not become a catch-all for private capital into public issuers; those still route to UNKNOWN. PIPE is terminal: Stage 3 stamps `RECOGNIZED_NOT_PROFILED` and no extraction, clustering or aggregation follows, so no round_size, transaction_size or valuation is derived. See `lib/pipe_recognition.py`. |

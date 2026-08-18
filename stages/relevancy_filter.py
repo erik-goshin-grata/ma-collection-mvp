@@ -18,7 +18,7 @@ relevancy result is nested under "relevancy":
         "reason_code": "ACQUISITION_ANNOUNCEMENT",
         "model_confidence": "HIGH",
         "notes": null,
-        "prompt_version": "relevancy_filter:0.2"
+        "prompt_version": "relevancy_filter:0.6"
       }
     }
 
@@ -43,7 +43,7 @@ from prompts.base import (
 )
 
 _PROMPT_NAME = "relevancy_filter"
-_VERSION = "0.4"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _VALID_CLASSIFICATIONS = frozenset({"RELEVANT", "NOT_RELEVANT"})
 _VALID_REASON_CODES = frozenset({
@@ -53,6 +53,9 @@ _VALID_REASON_CODES = frozenset({
     "MINORITY_INVESTMENT", "DEAL_CLOSE_OR_COMPLETION", "DEAL_AMENDMENT_OR_TERMINATION",
     "AMBIGUOUS_BUT_LIKELY_DEAL",
     "VC_ROUND_OR_FUNDING", "RECAPITALIZATION",  # bug #7 — prompt 0.5 emits these
+    # Recognized, not profiled. RELEVANT on purpose: marking a PIPE NOT_RELEVANT would
+    # drop the row before Stage 3 and destroy the recognized-exclusion record with it.
+    "PIPE",
     # NOT_RELEVANT side
     "PRODUCT_OR_COMMERCIAL", "PERSONNEL", "EARNINGS_OR_FINANCIAL_REPORTING",
     "BUYBACK_OR_DIVIDEND", "DEBT_OR_NON_DEAL_FINANCING", "REGULATORY_OR_COMPLIANCE",
@@ -95,6 +98,13 @@ _REASON_CODE_ALIASES = {
     "RECAP": "RECAPITALIZATION",
     "DIVIDEND_RECAP": "RECAPITALIZATION",
     "DIVIDEND_RECAPITALIZATION": "RECAPITALIZATION",
+    # PIPE variants. The bare term is the canonical code; these are the shapes Haiku
+    # reaches for when it decorates an enum value it has been given.
+    "PIPE_FINANCING": "PIPE",
+    "PIPE_TRANSACTION": "PIPE",
+    "PIPE_OFFERING": "PIPE",
+    "PIPE_INVESTMENT": "PIPE",
+    "PRIVATE_INVESTMENT_IN_PUBLIC_EQUITY": "PIPE",
 }
 
 

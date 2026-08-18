@@ -2380,3 +2380,120 @@ and both PIPE rows are picked up by Stage 4), the binding requirement (drop it a
 company name is recognized), the overridable set (widen it and the de-SPAC loses its
 `REVERSE_MERGER`), and case-sensitivity (add `IGNORECASE` and a plumbing contract is
 recognized).
+
+---
+
+## PIPE Becomes First-Class in the Prompt Vocabulary
+
+**Decided 2026-08-18**, immediately after the recognized-but-not-profiled exclusion
+landed. That change was deliberately deterministic-only; this one gives the classifier
+and the relevancy filter the word.
+
+### The bug this had to fix first
+
+Adding `PIPE` to the classifier's vocabulary is not additive on its own. `PIPE` is not in
+the funding family, so a classifier-emitted `PIPE` sitting at status `CLASSIFIED`
+satisfies Stage 4's gate:
+
+```sql
+AND COALESCE(se.v2_event_type, se.deal_type) NOT IN ('VC_ROUND','GROWTH_EQUITY','VENTURE_DEBT')
+```
+
+— and goes straight into M&A high-confidence extraction. **The original leak, reopened
+through the front door by the change meant to close it.** `resolve_classification` now
+branches on the classifier's own verdict before anything else, and the regression pins it.
+
+This is the second time in this workstream that a *positive* type has been unsafe
+because every gate is a membership test over one family. Worth stating as a standing
+rule: **a new `v2_event_type` value is not inert.** Adding one silently enrols it in
+every `NOT IN` gate in the pipeline, and the default enrolment is M&A.
+
+### What changed
+
+| | |
+| --- | --- |
+| `deal_type_classifier` 0.7 → 0.8 | `PIPE` as a twelfth type (UNKNOWN renumbered 11 → 12) |
+| `relevancy_filter` prompt 0.5 → 0.6 | `PIPE` reason code, RELEVANT side, 24 codes |
+| `stages/relevancy_filter.py` | `PIPE` in `_VALID_REASON_CODES` + five aliases |
+| `stages/deal_type_classify.py` | `_VERSION` 0.7 → 0.8 |
+| `lib/pipe_recognition.py` | classifier-verdict branch, `corroborated` flag |
+
+### Two design points worth defending
+
+**RELEVANT, not NOT_RELEVANT.** The tempting move is to drop PIPEs at Stage 2 — it is
+the cheapest possible noise reduction. It is also wrong for this design: Stage 2 sets
+`source_status` and creates no staging row, so a NOT_RELEVANT PIPE leaves no record that
+anything was recognized. The whole point of "recognized but not profiled" is that the
+recognition is written down, with the source sentence, reviewable and reversible. An
+exclusion with no record is indistinguishable from a miss.
+
+**An uncorroborated classifier verdict is honoured, and flagged.** If the model returns
+`PIPE` on a release that never says PIPE, that is exactly the over-classification the
+prompt's negative list exists to prevent. Two options were available: honour it, or
+refuse it. Refusing means falling back to `UNKNOWN`, which routes to M&A extraction —
+the leak again — so refusal is not the safe choice it appears to be. Honouring it costs
+at most one deal sitting in staging with full provenance and a `corroborated: false`
+flag, recoverable by anyone who looks. Uncorroborated is a review queue, not a second
+policy. The prompt is where over-classification gets prevented; the flag is where it
+gets noticed.
+
+### Negative list, scoped
+
+The PIPE definition names what is *not* a PIPE: private placement, convertible notes or
+preferred, registered direct, ATM or underwritten offering, and any public-company
+primary raise the source does not name a PIPE. Those still route to `UNKNOWN`.
+
+The regression checks that list **inside the PIPE definition block**, not anywhere in
+the prompt. The unscoped version passed after the negative list was deleted, because the
+same words appear in the 0.8 changelog row — a false pass caught in revert-verification,
+and the same right-answer-for-the-wrong-reason shape that has now appeared several times
+in this repo. Scope every wording assertion to the block it is about.
+
+### A second drift caught in the same pass
+
+Adding `PIPE` to the DEAL TYPES prose was not enough: the prompt's **output-schema enum
+row** still listed eleven values, so the model was being told to use a type and then told
+it was invalid. Every row so classified would have become `PROMPT_FAILED`.
+
+There is now a parity guard — the regression compares the prompt's `v2_event_type` enum
+row against `_VALID_V2_EVENT_TYPES` in both directions, the same shape as the existing
+reason_code parity test on the relevancy side. A type the stage validates but the prompt
+does not offer is dead vocabulary; a type the prompt offers but the stage rejects fails
+every row that uses it.
+
+### Not done
+
+**No backfill.** Rows classified before this change keep whatever they were given. The
+corpus is test/validation data and cleaning it was explicitly declined; Stage 3 selects
+on `NOT EXISTS staging_extraction`, so nothing is reprocessed and no historical row
+moves.
+
+### Pre-existing version drift, found and fixed
+
+`prompts/relevancy_filter.md` declared version 0.5 while `stages/relevancy_filter.py`
+stamped `relevancy_filter:0.4`. That predates this work, and my first instinct was to
+report it rather than touch `_VERSION` — on the reasoning that changing the stamp alters
+provenance on every future row and had not been asked for.
+
+That was the wrong call, and the instruction to fix it was right. **The stamp was already
+wrong.** It named a prompt that was not the one doing the classifying, so it answered
+"which prompt produced this row?" incorrectly — worse than answering nothing, because
+nothing downstream can tell a wrong version string from a right one. Leaving it while
+shipping a further prompt edit would have knowingly widened a known defect, and
+"provenance changes need care" is an argument for correcting a false stamp, not for
+preserving it.
+
+The stage now stamps `relevancy_filter:0.6`, matching the file.
+
+Three things made this survivable for as long as it was, and all three are now closed:
+
+- `scripts/test_reason_code_parity.py` guarded the reason_code enum for this pair from
+  the start, but not the version — so the one drift it did not check is the one that
+  happened. It now asserts version parity too.
+- The classifier pair had no version guard either; `test_pipe_recognition.py` adds one.
+- `docs/prompt_versions.md` had no row for the relevancy filter at all, so the table that
+  exists to show current prompt state could not have shown the mismatch. It has one now.
+
+The general shape is worth keeping: **a guard that covers one axis of a pair reads as
+covering the pair.** Reason-code parity existing made the relevancy prompt look guarded,
+which is precisely why nobody looked at the version.
