@@ -430,10 +430,27 @@ collapsed by the single-slot value object.
 - Rows must carry enough provenance to tell *corroboration* (two sources, same figure)
   from *multiplicity* (one source, two different figures). Both are legitimate; they mean
   opposite things about confidence. This is item 1's fact key and source attribution.
-- **Supersession must be a defined operation.** The harness ledger is append-oriented, so
-  a re-extracted value adds a row rather than replacing one, and there is no `is_current`
-  handling. That is an open harness question (see §5, open question 1) and Grata will face
-  the identical one the first time a transaction is re-collected.
+- **Supersession must be a defined operation.**
+
+  > **CORRECTED 2026-08-18.** This paragraph previously read: *"The harness ledger is
+  > append-oriented, so a re-extracted value adds a row rather than replacing one, and
+  > there is no `is_current` handling."* **That was wrong on both counts**, and the error
+  > understated what the harness had already decided. Verified against the code:
+  > `transaction_field_observation` **has** an `is_current` column
+  > (`schema/001_initial.sql`); `stages/agreement_extract.py` **writes** it, soft-deleting
+  > a document's prior observations inside a savepoint before re-extracting
+  > (`UPDATE transaction_field_observation SET is_current=0 WHERE source_document_id=?`);
+  > and Stage 9 **honours** it (`WHERE tfo.is_current = 1`).
+
+  The accurate statement: supersession **is** a defined operation in the harness, but it is
+  defined for **one producer and scoped to `source_document_id`**. Re-extracting an
+  agreement document supersedes that document's facts atomically. There is **no equivalent
+  keyed on `source_raw_id`** — press-release re-extraction, which is the Path B case.
+
+  So the question Grata faces is not "append or supersede?" but **"what is the supersession
+  key?"** — and the two keys behave differently: a filed document is immutable once filed,
+  a web source is not. See §5 open question 1, and
+  `grata_v2_inventory_and_recommendations.md` §O1.
 
 ---
 
@@ -509,8 +526,12 @@ collapsed by the single-slot value object.
   — items 7, 10
 - **`PER_SHARE_X_SHARES` validation.** Implemented but dormant; the SEC share count is not
   wired into equity derivation. — item 3
-- **Observation-ledger supersession.** Undecided in the harness; Grata will meet the same
-  question on first re-collection. — item 14
+- **Observation-ledger supersession — for `source_raw_id`-keyed observations only.**
+  *(Corrected 2026-08-18: not "undecided in the harness".)* Document-scoped supersession is
+  **built and live** — `is_current`, written by agreement re-extraction, honoured by
+  Stage 9. What is deferred is the source-scoped key, which press-release re-extraction
+  needs and which does not exist. Grata meets the same split on first re-collection.
+  — item 14
 - **P/TBV denominator enrichment, recap/IPO redesign, field-level null reasons** — v0.3's
   §M deferrals stand unchanged; nothing in this pass touches them.
 
@@ -518,10 +539,22 @@ collapsed by the single-slot value object.
 
 ## 5. Remaining unresolved Grata schema questions
 
-1. **Supersession.** When a transaction is re-collected and a metric changes, does the new
-   row supersede the old one, or do both persist with a currency marker? The harness ledger
-   appends and has no `is_current`. This blocks any large re-extraction on either side and
-   is the item most likely to need a decision before the next one runs.
+1. **Supersession — the open question is the KEY, not the operation.**
+   *(Restated 2026-08-18. The earlier framing — "the harness ledger appends and has no
+   `is_current`" — was factually wrong; see item 14 for the correction and the code
+   references.)*
+
+   The harness **has** supersession: `transaction_field_observation.is_current`, written by
+   agreement re-extraction scoped to `source_document_id`, and honoured by Stage 9's
+   aggregation read. What it does not have is a supersession key for `source_raw_id`
+   observations, so re-extracting a press release adds rows and supersedes nothing.
+
+   The question for both sides is therefore: **when a transaction is re-collected and a
+   metric changes, what scope does the new value supersede?** A filed document is immutable
+   and document-scoped supersession is safe; a web source can change under the same URL and
+   needs a different rule. This still blocks any large re-extraction and is still the item
+   most likely to need a decision before the next one runs — but the decision is narrower
+   than previously stated, and half of it is already made.
 
 2. **Period-coherence tolerance.** D2 requires `total_debt` and `cash_and_equivalents` to
    be period-coherent but does not define the tolerance. The harness currently requires an

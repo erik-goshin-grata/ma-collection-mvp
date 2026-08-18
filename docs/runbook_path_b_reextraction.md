@@ -87,11 +87,18 @@ Two further consequences:
 - **Every HC field is re-derived**, not just debt and cash. Names, dates, values,
   flags, financials — all of it moves if the model answers differently. This is why
   the diff must be reviewed field-by-field rather than spot-checked.
-- **The observation ledger is append-oriented.** Its unique index is
+- **The ledger is append-oriented *on this path specifically.*** Its unique index is
   `(staging_extraction_id, field_name, field_value, observation_fact_key)`, so a
   changed value *adds* a row rather than replacing one. Verify how the ledger should
-  represent supersession before running at corpus scale — this is an open question,
-  not a settled behaviour, and it is the single item most likely to need a decision.
+  represent supersession before running at corpus scale — it is the single item most
+  likely to need a decision.
+
+  *(Clarified 2026-08-18: "append-oriented" is true of `source_raw` / staging-keyed
+  observations, which is what Path B re-extracts. It is **not** true of the ledger as a
+  whole — `is_current` exists and agreement re-extraction supersedes by
+  `source_document_id`, honoured by Stage 9. The gap Path B faces is the absence of a
+  **source-scoped** supersession key, not the absence of supersession. See
+  `docs/grata_v2_inventory_and_recommendations.md` §O1.)*
 
 ---
 
@@ -182,8 +189,17 @@ fields drift on more than a handful of rows without cause.
 
 ## 7. Open question for the owner
 
-**Observation ledger supersession (§3).** Re-extraction appends observations rather
-than replacing them, and there is no `is_current` handling in the write path today.
+**Observation ledger supersession (§3).** Re-extraction on **this path** appends
+observations rather than replacing them: there is no `is_current` handling in the
+`source_raw` / staging-keyed write path.
+
+*(Corrected 2026-08-18: this is a statement about Path B's key, not about the ledger.
+`is_current` exists and IS handled for `source_document_id`-keyed observations — agreement
+re-extraction supersedes by document and Stage 9 honours it. The decision owed here is
+narrower than "does the ledger supersede at all": it is **what a source-scoped supersession
+key should be**, given a web source can change under the same URL where a filed document
+cannot.)*
+
 Before running at corpus scale, decide whether a re-extracted value should supersede
 its predecessor in the ledger, and how. Running the bounded set first keeps this
 bounded to a reviewable number of rows either way.

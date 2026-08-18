@@ -1,8 +1,14 @@
-# Grata V2 Transaction Data Dictionary — Revised Draft v0.3
+# Grata V2 Transaction Data Dictionary — Revised Draft v0.4
 
-**Status:** Revised working draft after human redline  
+**Status:** Engineering review incorporated  
 **Basis:** Current Grata schemas/enums plus accepted/tested transaction-model decisions through 2026-08-13.  
 **Important:** Physical storage/table placement remains an ENG decision unless cardinality requires a repeating child/relationship.
+
+> **v0.4, 2026-08-18 — Engineering review incorporated.** The authoritative record of the
+> review is `docs/grata_v2_inventory_and_recommendations.md` **§P**. This dictionary is
+> updated only where v0.3 entries would otherwise **contradict** it: the flag entries that
+> become typed dimensions or derivations (§2), the metric-row policy (§9), Spin/Split
+> placement (§11), and advisor specialty (§12/§13). Entries not touched below stand.
 
 > **Redlined 2026-08-17 — see `docs/grata_v2_reconciliation_2026_08_17.md`.**
 > Inline redlines below touch §7 (canonical EV rule; missing `equity_value_basis`), §9
@@ -44,26 +50,38 @@
 | `event_category` | High-level product/event family derived from event type. | ENUM | Derived | Recommended: `ma`, `spin_split`, `investment_funding`, `recapitalization`, `exit_liquidity`. `divestiture` is a feature (`is_divestiture`), not a competing category. |
 | `target_type` | Structural type of target/object acquired. | ENUM | Source / researcher | Proposed: `STANDALONE_COMPANY`, `BUSINESS_UNIT`, `SUBSIDIARY`, `ASSETS`, `NULL`. |
 | `acquirer_type` | Economic buyer classification. | ENUM / entity attribute | Entity data / researcher | Prefer canonical entity profile when available; not necessarily stored on transaction record. |
-| `is_merger` | Transaction is structured as a merger. | FLAG | Source / researcher | Recommended M&A structure flag. |
-| `is_reverse_merger` | Transaction uses a reverse-merger structure. | FLAG | Source / researcher | May coexist with `is_de_spac`. |
-| `is_de_spac` | Transaction is a de-SPAC business combination. | FLAG | Source / researcher | Existing flag; recommended under M&A rather than separate canonical event type. |
+| `combination_structure` | Structure of the combination. **Hierarchical**, stored at the most specific supported value. | **HIERARCHICAL TYPED DIMENSION** | Source / researcher | **v0.4.** `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`, with `SHARE_PURCHASE` / `ASSET_PURCHASE` / `NULL` as non-chain siblings. **Not three mutually exclusive peers** — the implication set is what preserves the nested facts the flags carried. Store the most specific value; **query broader questions by implication, never by equality** (`is_merger` is `IN (MERGER, REVERSE_MERGER, DE_SPAC)`, not `= MERGER`). Ambiguity resolves **upward**: a reverse merger with no established SPAC shell stays `REVERSE_MERGER`. The implication set belongs in the dictionary, not in per-consumer application logic. Inventory §A6.1. |
+| ~~`is_merger`~~ | | | | **v0.4 REMOVE-DERIVABLE** — `combination_structure IN (MERGER, REVERSE_MERGER, DE_SPAC)`. |
+| ~~`is_reverse_merger`~~ | | | | **v0.4 REMOVE-DERIVABLE** — `combination_structure IN (REVERSE_MERGER, DE_SPAC)`. |
+| ~~`is_de_spac`~~ | | | | **v0.4 REMOVE-DERIVABLE** — `combination_structure = DE_SPAC`. |
 | `is_merger_of_equals` | Merger-of-equals characteristic. | FLAG | Source / researcher | Implemented in current harness from explicit/qualified source evidence only. |
 | `is_take_private` | Public target is taken private. | FLAG | Source / derived / researcher | Existing. |
 | `is_lbo` | Leveraged-buyout characteristic. | FLAG | Source / derived / researcher | Existing. |
-| `is_mbo` | Management buyout. | FLAG | Source / researcher | Existing. |
-| `is_mbi` | Management buy-in. | FLAG | Source / researcher | Existing. |
-| `is_platform_investment` | Sponsor/platform characteristic. | FLAG | Source / researcher | Implemented in current harness from explicit/qualified platform-investment evidence only. |
-| `is_add_on` | Add-on acquisition. | FLAG | Source / researcher | Existing. |
+| `management_participation` | Management's role in the buyout. | **TYPED DIMENSION** | Source / researcher | **v0.4.** `MBO` / `MBI` / `BIMBO` / `NULL`. Replaces `is_mbo` + `is_mbi`, which could express a buy-in management buy-out only as both-true. |
+| `sponsor_investment_role` | The investment's role in the sponsor's thesis. | **TYPED DIMENSION** | Source / researcher | **v0.4.** `PLATFORM` / `ADD_ON` / `NULL`. Mutually exclusive. Evidence discipline unchanged: populated only on explicit/qualified evidence. |
 | `is_secondary_buyout` | Sponsor-to-sponsor secondary buyout. | FLAG | Source / researcher | Implemented in current harness from explicit evidence or side-qualified buyer/seller sponsor parties. |
-| `is_de_spac` | De-SPAC characteristic. | FLAG | Source / researcher | Existing / lower priority. |
+| `is_take_private`, `is_lbo`, `is_secondary_buyout` | Prior listing status, financing, seller identity. | FLAG | Source / derived / researcher | **v0.4: confirmed genuinely orthogonal.** One transaction can be all three; these are different axes and must not be collapsed. |
 | `is_divestiture` | Seller-side divestiture characteristic. | FLAG | Source / researcher | Existing. |
-| `is_stock_for_stock` | Stock-for-stock consideration characteristic. | FLAG | Derived / source | Existing summary flag. |
+| ~~`is_stock_for_stock`~~ | | | | **v0.4 REMOVE-DERIVABLE** — component forms ⊆ {`ACQUIRER_STOCK`} with no `CASH` component. **Conditional on `consideration_component` being populated**; until then the flag carries evidence no derivation can reach. Same for `has_earnout` / `has_cvr`. |
 | `financials_disclosure_status` | Disclosure state for target/company financial metrics and balance-sheet data. | ENUM | Source / researcher | `DISCLOSED`, `UNDISCLOSED`, `PARTIALLY_DISCLOSED`, `UNKNOWN`. |
 | `transaction_terms_disclosure_status` | Disclosure state for deal economics, consideration and valuation terms. | ENUM | Source / researcher | Same vocabulary; independent of financials disclosure. |
 | `linked_filings_count` | Number of linked supporting filings. | DATA POINT | System | Existing. |
 | `platform_transaction_id` | Existing Grata field with insufficient supplied semantic definition. | FK / relationship | System | VERIFY with ENG before using in product/data rules. |
 
-Funding/recap flags such as `is_down_round`, `is_up_round`, `is_unicorn_round`, `is_extension_round`, `cvc_participation`, `is_oversubscribed`, and recap flags remain existing/lower-priority fields.
+Funding flags. **v0.4:** `is_down_round` / `is_up_round` are replaced by
+`round_price_direction` ∈ `UP` / `DOWN` / `FLAT` / `NULL` — both-false previously conflated
+*flat* with *unknown*. The collection vocabulary must move with it: the harness emits
+`is_down_round` only, so `UP` and `FLAT` have no extraction path today.
+
+`is_unicorn_round` **stays a stored flag**: it looks derivable from post-money ≥ $1B and is
+not, because sources assert unicorn status without stating post-money. `is_extension_round`,
+`cvc_participation`, `is_oversubscribed` remain flags — each co-occurs freely with any price
+direction.
+
+Recap flags (`is_dividend_recap` / `is_equity_recap` / `is_leveraged_recap` /
+`is_sponsor_recap`) are **v0.4 REMOVE-DERIVABLE** — each is `recap_type = <value>`. These are
+the only flags removable immediately; `recap_type` already exists and is already populated,
+so there is no precondition. Redesign of the recap domain itself remains deferred.
 
 ---
 
@@ -212,12 +230,36 @@ Canonical EV rule:
 
 # 8. Deal-value vs company-financial metric classes
 
-The current Grata `financial_metric` physical table can remain a single normalized fact table, but the dictionary should distinguish two semantic classes derived from `metric_type`:
+**v0.4:** `financial_metric` is the **preferred home** for both classes — v0.3 said only
+that a second table was "not required". A monetary value that belongs in it should not also
+be authored as a scalar elsewhere, because a scalar column has nowhere to carry currency,
+period, FX treatment, provenance or basis, and each one either loses them or grows private
+companion columns that drift.
+
+Three semantic classes, derived from `metric_type`:
 
 - **DEAL_VALUE:** `EQUITY_VALUE`, `TRANSACTION_VALUE`, `ROUND_SIZE`, `PRE_MONEY_VALUATION`, `POST_MONEY_VALUATION`, `IMPLIED_EQUITY_VALUE`, `IMPLIED_ENTERPRISE_VALUE`
 - **COMPANY_FINANCIAL:** revenue/earnings, debt/cash, shareholders' equity, ARR/MRR, etc.
+- **DERIVED_ROLLUP** *(v0.4)*: `TRANSACTION_SIZE`. Admitted as a metric row so the §9 policy
+  applies to it, but deliberately **not** classed `DEAL_VALUE`: it is derived from other rows
+  in the same table, so as a peer row any consumer summing deal values would count the same
+  money twice. Never summed, never a multiple numerator, always carries
+  `transaction_size_basis`, always traceable to the row it was selected from.
 
-This distinction controls applicability: period metadata is essential for company financials; value-basis metadata is essential for deal values. No stored `metric_category` is required if it is deterministically mapped from `metric_type`.
+This distinction controls applicability: period metadata is essential for company financials; value-basis metadata is essential for deal values; a rollup needs neither but must never be aggregated. No stored `metric_category` is required if it is deterministically mapped from `metric_type`.
+
+## Metric-row policy — applies to every row *(v0.4)*
+
+1. Currency attaches to the value it qualifies; a row never inherits currency from another row, the transaction, or the source's other figures. Unstated is `NULL`.
+2. The same rule governs `period_type` / `period_end_date`.
+3. No implicit conversion. `fx_rate` / `fx_rate_date` **record a conversion performed**; they never license one.
+4. Source-stated USD is preferred over converted USD, and the two must stay distinguishable (see `value_usd_basis`, open).
+5. Debt-inclusive arithmetic requires both currencies known and equal. Unknown is not a match — refuse and emit `NULL`.
+6. Per-fact provenance on every row: source attribution plus a fact key.
+7. Basis is not a boolean. `is_calculated` records *that* a value was derived; the basis attribute records *how*.
+
+Rules 1–3 are the ones that fail quietly: an inherited currency or period produces a
+plausible wrong number rather than a visible gap. Inventory §E4.
 
 # 9. Financial metrics
 
@@ -316,6 +358,12 @@ Rules:
 
 # 11. Spin / Split
 
+> **v0.4 placement.** These are **transaction-level scalars**, not a `spin_split_mechanics`
+> child table. Assessed field by field: none is multi-valued per transaction except
+> per-security-class share counts, which belong to the generalized security/share model.
+> `spin_split_consideration_value` becomes a `financial_metric` row under the §9 policy.
+> Inventory §G.
+
 Event-specific fields:
 - `spin_split_type`
 - `spin_split_distribution_mechanism`
@@ -361,7 +409,8 @@ Rules:
 | `investment_currency` | Investor-check currency. | ISO 4217 string | Existing. |
 | `is_new_investor` | Investor is new to the company/round context. | FLAG | Existing current field. |
 | `investment_amount_usd` | Converted investor check. | DATA POINT | Existing. |
-| `advisor_specialty` | Advisor service. | ENUM | Current vocabulary needs source-mapping review before expansion. |
+| `advisor_specialty` | Advisor service. | ENUM | **v0.4 expansion accepted**, enumerated from actual extraction vocabulary. Keep `financial_advisory`, `legal`, `fairness_opinion`, `accounting`. **Add** `tax`, `proxy_solicitation`, `information_agent` — each named explicitly in the LC extraction prompt's own `OTHER` definition, so the evidence exists in sources and is discarded at the enum. `regulatory` exists in Grata with **no extraction path** — VERIFY a source of population or accept as researcher-only. `restructuring` / `capital_markets` / `communications` DEFER: no extraction evidence, do not freeze on speculation. Inventory §H4. |
+| `advised_party` | Which participant the advisor served. | ENUM | Harness collects `TARGET` / `ACQUIRER` / `PARENT_SELLER` / `BOTH` / `UNKNOWN`. **`BOTH` has no Grata equivalent** — `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` are side-specific. Either add a both-sides representation or stop emitting it; mapping it to one side asserts a fact the source did not state. ENG DECISION. |
 | `advised_party` | Party/client receiving advisory service. | ENUM / relationship | Existing; may need more precise participant/body linkage. |
 | `advisor_person_name` | Advisor individual name. | DATA POINT | Current one-person field is insufficient; move to child relationship. |
 | `advisor_person_title` | Advisor individual title. | DATA POINT | Same. |
@@ -397,6 +446,18 @@ Conceptual `transaction_advisor_person` fields:
 - source/provenance
 
 Many people must never create duplicate advisor-firm participations. Person/entity matching is optional; unresolved person name/title can be stored first and matched later.
+
+> **v0.4 — extraction requirement, not only a schema shape.** Person ↔ firm affiliation and
+> transaction role must be **preserved at extraction** wherever the source states them, even
+> though canonical people ownership sits with another team. Identity is theirs; *affiliation
+> and role in this transaction* are transaction facts that exist only in this source and
+> cannot be reconstructed downstream if collection discards them. Capture unresolved,
+> resolve optionally.
+>
+> Current state is a gap, not a refinement: the harness `advisor` table stores the **firm**
+> name, type and advised party, and **no person fields at all**. The same shape applies to
+> investor-side people (round lead, board seat), so the requirement is stated at the
+> participation level. Inventory §H3.
 
 ---
 
