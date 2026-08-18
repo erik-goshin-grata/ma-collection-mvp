@@ -35,8 +35,13 @@ rather than only that it was wrong.
 
 from __future__ import annotations
 
-# Baseline result 2026-08-17: 8/8 on the economic semantics. Chronograph is carried as a
-# representation limitation rather than a scored expectation — see its `why`.
+# Baseline result 2026-08-17: 8/8 on the economic semantics. That run scored seven
+# fixtures; Chronograph was carried as an unscored representation limitation.
+#
+# On 2026-08-18 the qualified-anchor convention resolved it, so Chronograph now carries a
+# scored expectation of 140,000,000. NOTE: that expectation has never been run against
+# the live model — the 8/8 result predates it. The next baseline run may report 8/8 or
+# 7/8, and either outcome is information rather than a regression.
 #
 # Each fixture: label, event type, published_date, title, clean_text, expected, traps.
 FIXTURES = [
@@ -237,22 +242,30 @@ FIXTURES = [
             "investment will accelerate Chronograph's product roadmap."
         ),
         "expected": {
-            # Deliberately unasserted: the model has no way to say "at least". See `why`.
-            "round.size": "REPRESENTATION_GAP",
+            # The stated anchor, by researcher-normalization convention. See `why`.
+            "round.size": 140_000_000,
         },
-        "traps": {
-            140_000_000: (
-                "a LOWER BOUND ('over $140 million'). Recording it as an exact round.size "
-                "asserts precision the source withheld."
-            ),
-        },
+        # 140M is no longer a trap: it is the answer. The traps dict names figures that
+        # must NOT become round.size, and this fixture no longer has one.
+        "traps": {},
         "why": (
             "Economically this IS the funding-event magnitude — unlike the valuation and "
-            "AUM traps, the figure is about this raise. The failure is representational: "
-            "`round.size` is a bare number with no qualifier field anywhere in the stack, "
-            "so 'over $140M' and a stated $140M become indistinguishable once written. "
-            "Either answer the model gives is defensible; the schema is what is wrong. "
-            "Report separately, never silently coerce."
+            "AUM traps, the figure is about this raise. What was in doubt was only how to "
+            "record it: `round.size` is a bare number with no qualifier field anywhere in "
+            "the stack, so 'over $140M' and a stated $140M are indistinguishable once "
+            "written. Rather than build qualifier infrastructure for one row, a "
+            "researcher-normalization CONVENTION was adopted: a single stated figure "
+            "under a lower-bound qualifier is recorded at its stated anchor, here "
+            "140,000,000, with the original 'over $140 million' wording preserved in the "
+            "source text and the remediation note. Recording the anchor is a normalization "
+            "of the record, not a claim that the source stated the figure exactly. "
+            "The convention is deliberately narrow and covers a SINGLE stated anchor only "
+            "— a range ('$120-150M'), an 'up to' ceiling, and a rumoured figure are all "
+            "still undecided and still leave round.size null; each is to be settled from "
+            "a real example rather than in advance. "
+            "UNVERIFIED against the live model: the 8/8 baseline ran while this "
+            "expectation was unscored, so no run has yet checked whether the model "
+            "returns the anchor."
         ),
     },
     {

@@ -14,8 +14,10 @@ Failure classification, which is the point of the exercise:
   PROMPT_WORDING      the schema has the right field; the prompt did not steer the model
                       to it. Fixable by rewording.
   SCHEMA_LIMITATION   there is no field that can hold the correct answer, and the
-                      correct answer is not "discard". No wording fixes it. Chronograph's
-                      lower bound is the one case that qualifies.
+                      correct answer is not "discard". No wording fixes it. No fixture
+                      currently qualifies: Chronograph's lower bound was the one case,
+                      and the qualified-anchor convention resolved it without a schema
+                      change. The branch is kept because the next such case needs it.
   PARSING             the model answered correctly and the value was lost or mangled
                       between response and record.
   DOWNSTREAM_ONLY     extraction is right; the defect is later in the pipeline.
@@ -62,8 +64,8 @@ def _get(payload: dict, path: str):
 def _classify(path: str, expected, actual, fixture: dict) -> str:
     """Name the layer at fault, not just the symptom."""
     if expected == "REPRESENTATION_GAP":
-        return ("SCHEMA_LIMITATION — round.size is a bare number with no qualifier field "
-                "at any layer; a lower bound cannot be recorded either way")
+        return ("SCHEMA_LIMITATION — no field can hold the correct answer and discarding "
+                "it is not correct either. Reported, never coerced.")
     if path == "round.size" and isinstance(actual, (int, float)):
         for trap, why in fixture["traps"].items():
             if abs(float(actual) - float(trap)) < 0.5:

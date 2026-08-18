@@ -15,19 +15,40 @@ ones are disqualifying:
   NOT_ROUND_VALUATION   a valuation or market cap. Never an as-transacted magnitude.
   NOT_ROUND_FACILITY    a debt facility. Belongs in facility_size, not round_size.
   INVESTOR_CHECK_ONLY   one named investor's amount, no round total. Party-level detail.
-  NON_EXACT_AMOUNT      a bounded or approximate figure ("over $140M"). See below.
+  LOWER_BOUND_NORMALIZED  a single stated figure under a lower-bound qualifier. See below.
+  NON_EXACT_AMOUNT      any other inexact figure. Deferred. See below.
   ROUND_SIZE_CANDIDATE  an exact primary-capital amount.
   NO_AMOUNT_DISCLOSED   no figure anywhere. Null is correct, not a gap.
   AMBIGUOUS             a figure with no language settling what it measures.
 
-**NON_EXACT_AMOUNT is a representation gap, not a candidate.** The model has nowhere to
-record that a number is a bound: the funding prompt's `round` object has no qualifier
-field, `staging_extraction` has no `round_size_qualifier`, and `transaction_record` has
-no `*_qualifier` column at all — `value_qualifier` exists at the staging and ledger
-layers but never reaches the canonical row. Writing "over $140 million" as
-`round_size = 140000000` would assert an exact figure the source declined to give, and
-nothing downstream could tell it apart from a stated $140M. Null plus this flag is the
-honest state until the model can carry the bound.
+QUALIFIED FIGURES — the convention, and its boundary
+----------------------------------------------------
+No qualifier infrastructure exists, and none is being built: the funding prompt's
+`round` object has no qualifier field, `staging_extraction` has no
+`round_size_qualifier`, and `transaction_record` has no `*_qualifier` column at all
+(`value_qualifier` exists at the staging and ledger layers but never reaches the
+canonical row). Rather than build that, one narrow convention was adopted:
+
+  **A single stated figure under a lower-bound qualifier is normalized to the stated
+  anchor.** "over $140 million" -> `round_size = 140,000,000`. This is a researcher
+  convention about what the canonical record holds. It is NOT a claim that the source
+  stated exactly $140M, and the original wording is preserved in the remediation note
+  and the source text so the difference stays recoverable.
+
+That convention is deliberately narrow, and the classifier enforces its edges rather
+than letting them erode:
+
+  normalized   over / more than / in excess of / at least / no less than /
+               greater than / north of / upwards of      -> LOWER_BOUND_NORMALIZED
+  deferred     ranges ("$120-150M")                      -> two anchors, not one
+  deferred     "up to" / "as much as"                    -> a ceiling; the true figure
+                                                            may sit far below it
+  deferred     approximately / about / around / roughly  -> no live example yet
+  deferred     reportedly / rumoured / "sources said"    -> the figure is not asserted
+
+The deferred shapes are not judged wrong — they are undecided, and the stated method is
+to decide each from a real example rather than in advance. Until then they keep the old
+answer: leave `round_size` NULL and report the gap.
 
 Also asserts the family-integrity invariant: no row in the funding family may carry
 `transaction_size_basis = 'TRANSACTION_VALUE'`.
@@ -173,6 +194,25 @@ _INVESTOR_CHECK = re.compile(
     r"(invest\w*\s+<AMT>\s+(?:in|into)\b|committed\s+<AMT>)", re.IGNORECASE,
 )
 
+# The lower-bound family: a floor stated against ONE figure. These are normalized to
+# the stated anchor. Everything else `_MONEY` can capture as a qualifier — the
+# approximation family and the "up to" ceiling family — falls through to DEFERRED,
+# which is the whole point of listing this set explicitly rather than negating a
+# smaller one: an unfamiliar qualifier defers, it does not normalize.
+_ANCHOR_QUALIFIERS = re.compile(
+    r"\A(?:in\s+excess\s+of|more\s+than|no\s+less\s+than|at\s+least|greater\s+than|"
+    r"north\s+of|upwards\s+of|over)\Z", re.IGNORECASE,
+)
+
+# A figure the source does not assert as fact. The convention covers what a source
+# STATES; a rumoured figure is a different question — about the claim's standing, not
+# the number's shape — and was explicitly left undecided.
+_RUMOURED = re.compile(
+    r"(reportedly|rumou?red|is\s+said\s+to|are\s+said\s+to|said\s+to\s+have|"
+    r"sources?\s+(?:said|say|told)|people\s+familiar|according\s+to\s+(?:people|sources)|"
+    r"unconfirmed)", re.IGNORECASE,
+)
+
 _MAG = {"billion": 1e9, "bn": 1e9, "million": 1e6, "mm": 1e6, "m": 1e6,
         "k": 1e3, "thousand": 1e3}
 
@@ -221,7 +261,12 @@ def _evaluate(sentence: str) -> list[dict]:
 
 
 def classify(title: str, body: str) -> dict:
-    """-> {classification, amount, exact, qualifier, evidence, action}"""
+    """-> {classification, amount, exact, qualifier, normalization, evidence, action}
+
+    `normalization` is the qualifier verdict, and is None unless the figure is inexact:
+    "ANCHOR"   the stated figure is taken as the canonical value (lower-bound family)
+    "DEFERRED" inexact in a shape the convention does not cover; leave round_size NULL
+    """
     blob = f"{title}\n{body}"
     sentences = [s.strip() for s in _SENT_SPLIT.split(blob[:14000]) if s.strip()]
 
@@ -248,7 +293,7 @@ def classify(title: str, body: str) -> dict:
 
     if not any_money:
         return {"classification": "NO_AMOUNT_DISCLOSED", "amount": None, "exact": None,
-                "qualifier": None, "evidence": [],
+                "qualifier": None, "normalization": None, "evidence": [],
                 "action": "leave round_size NULL — correct, not a gap"}
 
     if not candidates:
@@ -272,7 +317,8 @@ def classify(title: str, body: str) -> dict:
                     "human review — a figure with no language binding it to the "
                     "financing event"))
         return {"classification": label[0], "amount": cand["amount"], "exact": None,
-                "qualifier": None, "evidence": [sentence], "action": label[1]}
+                "qualifier": None, "normalization": None, "evidence": [sentence],
+                "action": label[1]}
 
     # A round total outranks an investor's check — the Cellares shape: a $50M
     # check inside a $327M Series D. Both are bound to the financing; only the
@@ -284,21 +330,53 @@ def classify(title: str, body: str) -> dict:
         r"(round|rais\w*|financing)", sentence, re.IGNORECASE
     ):
         return {"classification": "INVESTOR_CHECK_ONLY", "amount": cand["amount"],
-                "exact": None, "qualifier": None, "evidence": [sentence],
+                "exact": None, "qualifier": None, "normalization": None,
+                "evidence": [sentence],
                 "action": "not round_size — one investor's check is party-level detail"}
 
     is_range = bool(_RANGE.search(sentence))
-    if cand["qualifier"] or is_range:
+    qualifier = cand["qualifier"]
+
+    # A single stated figure under a lower-bound qualifier is normalized to its anchor.
+    # A range disqualifies it even when one of its ends carries a qualifier, because
+    # then there is no single stated figure to anchor on; a rumoured figure disqualifies
+    # it because the source is not stating it at all.
+    if (qualifier and not is_range
+            and _ANCHOR_QUALIFIERS.match(qualifier)
+            and not _RUMOURED.search(sentence)):
+        return {
+            "classification": "LOWER_BOUND_NORMALIZED", "amount": cand["amount"],
+            # exact stays False. The convention normalizes the RECORD; it does not
+            # upgrade the source, and reporting True here would erase the distinction
+            # the convention exists to keep recoverable.
+            "exact": False, "qualifier": qualifier, "normalization": "ANCHOR",
+            "evidence": [sentence],
+            "action": (
+                f"candidate round_size = {cand['amount']:,.0f} — researcher "
+                f"normalization of a single stated anchor. The source says "
+                f"'{qualifier} ...'; carry that wording into the remediation note. "
+                f"This is not a claim the source stated the figure exactly."
+            ),
+        }
+
+    if qualifier or is_range:
+        why = ("a range — two stated figures, so there is no single anchor"
+               if is_range else
+               "rumoured — the source does not assert the figure"
+               if _RUMOURED.search(sentence) else
+               f"qualifier '{qualifier}' is outside the normalization convention")
         return {
             "classification": "NON_EXACT_AMOUNT", "amount": cand["amount"], "exact": False,
-            "qualifier": cand["qualifier"] or "range", "evidence": [sentence],
-            "action": "REPRESENTATION GAP — leave round_size NULL. The model has no "
-                      "qualifier field for round_size at any layer, so writing this "
-                      "number would assert an exactness the source withheld.",
+            "qualifier": qualifier or "range", "normalization": "DEFERRED",
+            "evidence": [sentence],
+            "action": f"REPRESENTATION GAP — leave round_size NULL: {why}. The stack "
+                      "carries no qualifier for round_size, and this shape is not "
+                      "covered by the single-anchor convention. Decide it from this "
+                      "example if it should be.",
         }
     return {
         "classification": "ROUND_SIZE_CANDIDATE", "amount": cand["amount"], "exact": True,
-        "qualifier": None, "evidence": [sentence],
+        "qualifier": None, "normalization": None, "evidence": [sentence],
         "action": "candidate round_size — confirm against the source, then remediate",
     }
 
@@ -359,14 +437,16 @@ def main() -> int:
 
     if args.tsv:
         print("transaction_id\ttarget\tevent_type\tsource_evidence\tamount\t"
-              "exact_or_non_exact\tclassification\tproposed_canonical_action")
+              "exact_or_non_exact\tnormalization\tclassification\t"
+              "proposed_canonical_action")
         for r, c in results:
             ev = " | ".join(c["evidence"]).replace("\t", " ")[:400]
             amt = "" if c["amount"] is None else f"{c['amount']:,.0f}"
             ex = {True: "exact", False: f"non-exact ({c['qualifier']})",
                   None: "n/a"}[c["exact"]]
             print(f"{r['transaction_id']}\t{r['target_name']}\t{r['v2_event_type']}\t"
-                  f"{ev}\t{amt}\t{ex}\t{c['classification']}\t{c['action']}")
+                  f"{ev}\t{amt}\t{ex}\t{c['normalization'] or ''}\t"
+                  f"{c['classification']}\t{c['action']}")
     else:
         print(f"\n{'=' * 78}\nFUNDING COVERAGE REVIEW — VC_ROUND / GROWTH_EQUITY, "
               f"round_size IS NULL\n{'=' * 78}")
@@ -382,7 +462,10 @@ def main() -> int:
             amt = "none found" if c["amount"] is None else f"{c['amount']:,.0f}"
             ex = {True: "EXACT", False: f"NON-EXACT ({c['qualifier']})",
                   None: "n/a"}[c["exact"]]
-            print(f"      amount        : {amt}    {ex}")
+            norm = {"ANCHOR": "  [normalized to the stated anchor]",
+                    "DEFERRED": "  [deferred — outside the convention]"}.get(
+                        c["normalization"], "")
+            print(f"      amount        : {amt}    {ex}{norm}")
             print(f"      classification: {c['classification']}")
             print(f"      evidence      :")
             for e in c["evidence"] or ["(no money-bearing sentence found)"]:

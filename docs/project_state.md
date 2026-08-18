@@ -165,11 +165,19 @@ correctly absent from every canonical magnitude field. Deriving it required the
 `MANUAL_REMEDIATION` read-path fix (admission **and** precedence) — see decisions.md,
 "Manual Remediations Are First-Class Observations".
 
-**Still open from this workstream (both deliberately separate, neither blocking):**
-- **Chronograph** — a qualifier/representation issue only. "over $140 million" is
-  recognised as the funding-event magnitude, but `round_size` carries no lower-bound
-  qualifier at any layer, so it cannot be preserved without asserting false exactness.
-  Not a prompt defect and not a remediation candidate.
+**Chronograph — RESOLVED 2026-08-18 by convention, not by infrastructure.**
+"over $140 million" is recorded at its stated anchor: `round_size` = `transaction_size` =
+140,000,000, basis `ROUND_SIZE`, with the original wording preserved in
+`source_raw.clean_text` and quoted in the remediation note. This is a
+researcher-normalization convention, **not** a claim the source stated exactly $140M —
+which is why the wording has to survive in provenance. It covers a **single stated
+anchor** only; ranges, "up to" ceilings, approximations and rumoured figures are still
+deferred and still leave `round_size` NULL, each to be decided from a real example. No
+qualifier schema work was done or is planned. `batch3_qualified_anchor` in the planner is
+prepared and **not applied**; `UNRESOLVED` is now empty. See decisions.md, "Qualified
+Anchors: A Researcher-Normalization Convention, Not Qualifier Infrastructure".
+
+**Still open from this workstream (deliberately separate, not blocking):**
 - **PIPE coverage in `transaction_size`** — a separate product/classifier decision,
   recorded below.
 - **Coverage review found four false positives** from numeric proximity — investor AUM,
@@ -205,8 +213,10 @@ defects traced to HC 0.12, which predated the funding path — not to this promp
 - Computomic `UNKNOWN` was **correct**; the fixture expectation was wrong. Silence is
   `UNKNOWN`; only an explicit "terms were not disclosed" is `UNDISCLOSED`. Both prompts
   agree, so there is no taxonomy inconsistency to fix.
-- Chronograph's "over $140M" is recognised economically but cannot be preserved —
-  `round.size` carries no lower-bound qualifier at any layer. Representation issue.
+- Chronograph's "over $140M" was recognised economically and carried unscored. The
+  qualified-anchor convention (2026-08-18) resolved it to 140,000,000. **That expectation
+  has never been run against the live model** — the 8/8 result predates it, so the next
+  baseline run may report 8/8 or 7/8. Either is information, not a regression.
 - **Investor/fund AUM is not a structural gap** (earlier framing retracted). Discarding
   an investor's own size is correct for magnitude extraction and needs no field.
 - The eight fixtures are permanent and must stay verbatim, never paraphrased.

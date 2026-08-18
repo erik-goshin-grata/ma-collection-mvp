@@ -2047,6 +2047,11 @@ no qualifier field at any layer (the prompt's `round` object has none,
 indistinguishable once written. Carried as reported-separately, never scored, never
 coerced. See also "FINDING: No Qualifier Representation for Non-Exact Amounts".
 
+> **SUPERSEDED 2026-08-18** by "Qualified Anchors: A Researcher-Normalization
+> Convention, Not Qualifier Infrastructure" below. The representational analysis above
+> still holds — nothing about the schema changed. What changed is the answer: rather
+> than build the missing qualifier, the anchor is recorded and the wording preserved.
+
 ### 3. Investor/fund AUM is NOT a structural gap — retracting my own framing
 
 I recorded AUM having no schema field as a "structural gap". **That overstated it, and
@@ -2063,8 +2068,9 @@ the corrected framing:
   schema limitation. Adding a field would not prevent a contamination; a rule would — and
   the baseline shows none is currently needed.
 - `SCHEMA_LIMITATION` in the harness now means "no field can hold the correct answer, and
-  the correct answer is not *discard*". Chronograph's lower bound is the only case that
-  qualifies.
+  the correct answer is not *discard*". Chronograph's lower bound was the only case that
+  qualified; as of 2026-08-18 the qualified-anchor convention resolved it and **no
+  fixture currently qualifies**. The branch is kept for the next such case.
 
 ### Standing decisions
 
@@ -2132,3 +2138,112 @@ that could have exposed either half of that defect — admission or precedence.
 - **Do not tune this prompt against legacy corpus symptoms.** If a funding row looks
   wrong, establish which prompt version extracted it before concluding anything about the
   current one.
+
+
+---
+
+## Qualified Anchors: A Researcher-Normalization Convention, Not Qualifier Infrastructure
+
+**Decided 2026-08-18.** Supersedes the Chronograph representation gap.
+
+### The decision
+
+A source that states **one** figure under a lower-bound qualifier is recorded at that
+stated figure. Chronograph's *"a minority growth equity investment of over $140 million"*
+becomes:
+
+| field | value |
+| --- | --- |
+| `round_size` | 140,000,000 |
+| `transaction_size` | 140,000,000 |
+| `transaction_size_basis` | `ROUND_SIZE` |
+
+with the wording *"over $140 million"* preserved verbatim in `source_raw.clean_text` and
+quoted in the remediation note on the staging row.
+
+**This is a researcher-normalization convention. It is not a claim that the source stated
+exactly $140 million.** The distinction is not decorative: it is why the original wording
+has to survive in provenance. A reader who later needs to know whether the figure was
+stated or normalized can recover it from the source text and the note. A reader who only
+sees `140000000` cannot — which is precisely the objection the earlier analysis raised,
+and the reason the answer is "preserve the wording", not "the distinction does not
+matter".
+
+### Why not build the qualifier field
+
+The representational analysis stands unchanged: there is no qualifier for `round_size` at
+any layer. Building one means a prompt field, a staging column, a canonical column, a
+ledger convention, aggregation rules for combining bounded and exact values, and export
+semantics — for **one** live row. A convention costs a sentence and is reversible; the
+infrastructure is neither. If bounded figures later turn out to be common enough that the
+distinction drives a decision downstream, the infrastructure can be built then, and the
+preserved wording is what makes the back-fill possible.
+
+### The boundary, and why it is drawn where it is
+
+The convention covers a **single stated anchor** only. Three shapes are explicitly *not*
+covered and continue to leave `round_size` NULL:
+
+| shape | example | why it is not the same case |
+| --- | --- | --- |
+| range | "$120–150M" | two stated figures; there is no single anchor to take |
+| ceiling | "up to $100 million" | a maximum, not a floor — the true figure may sit far below it, so the anchor is not an estimate of the value |
+| rumoured | "reportedly raised over $75M" | the source does not assert the figure at all; this is a question about the claim's standing, not the number's shape |
+
+The approximation family — "approximately", "about", "roughly" — is also deferred,
+although it is the closest sibling of the lower-bound case and arguably the easiest to
+normalize (it *is* a point estimate). It is deferred for a method reason rather than a
+semantic one: **there is no live example.** The stated method for these cases is to decide
+each from a real source rather than in advance, and deciding the approximation family now
+would be deciding it from imagination. When one appears, it is a one-line change.
+
+Drawing the boundary explicitly is the load-bearing part. A convention that normalizes
+"over $140M" without stating what it does *not* cover reads, six months later, as "any
+qualified number is a number" — which is the generalization that was declined.
+
+### What changed in code
+
+- `scripts/review_funding_coverage.py` — the classifier splits the old `NON_EXACT_AMOUNT`
+  class in two. `LOWER_BOUND_NORMALIZED` proposes the anchor as a `round_size` candidate
+  and carries the source wording in its action text; `NON_EXACT_AMOUNT` keeps the
+  leave-NULL action and now names *which* deferred shape it hit. A new `normalization`
+  key (`"ANCHOR"` / `"DEFERRED"` / `None`) makes the verdict machine-readable, and
+  `exact` stays `False` for a normalized anchor — the convention normalizes the record,
+  it does not upgrade the source.
+- `scripts/plan_funding_round_size_remediation.py` — `batch3_qualified_anchor`, one row.
+  `UNRESOLVED` is now **empty**: Chronograph was its last entry and was never unresolved
+  on evidence, only on representation. The write path now emits a remediation note
+  whenever an approval carries one, instead of only when the staged and canonical amounts
+  diverge — keying it on divergence would have silently dropped the explanation in the
+  one case where the numbers agree and the reasoning is the entire content.
+- `scripts/funding_hc_baseline_fixtures.py` — `chronograph_lower_bound` expects
+  `round.size = 140_000_000`, and 140M is removed from its traps because it is now the
+  answer.
+
+### An honest caveat on the baseline
+
+The 8/8 baseline was recorded on 2026-08-17 while Chronograph was **unscored**. The new
+expectation has never been run against the live model. The next baseline run may report
+8/8 or 7/8, and either is information rather than a regression — if the model returns
+null for a bounded figure, that is a prompt-wording question about whether extraction
+should apply the convention, separate from whether the canonical record should hold the
+anchor (which is settled). The fixture and the harness both say so in place. This
+container has no API key, so the run could not be made here.
+
+### Regressions
+
+- `scripts/test_review_funding_coverage.py` asserts **both edges**: the anchor case is
+  normalized, reported non-exact, and never proposes NULL while carrying the source
+  wording; and each deferred shape — range, ceiling, approximation, rumoured — still
+  proposes NULL. Losing the first re-opens a resolved case; losing the second silently
+  generalizes the convention into the rule that was declined.
+- `scripts/test_plan_funding_round_size_remediation.py` pins batch 3 to exactly one row
+  and asserts its note quotes *"over $140 million"* — a note that loses the wording turns
+  a documented normalization back into a bare unexplained number.
+- `scripts/test_funding_hc_baseline_fixtures.py` requires the fixture's `why` to name the
+  convention, its excluded shapes, and its unverified status.
+
+Both mechanisms were revert-verified: neutralizing the anchor set drops Chronograph back
+to `NON_EXACT_AMOUNT`, and neutralizing the rumour guard promotes the rumoured fixture to
+`LOWER_BOUND_NORMALIZED`. (The first attempt at the second revert left two alternatives
+standing in the pattern and passed — a botched revert, not a weak mechanism.)

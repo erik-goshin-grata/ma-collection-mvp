@@ -9,13 +9,16 @@ Two things are asserted, and the second is the one that matters most:
    language, including the three named live cases — Chronograph ("over $140 million"),
    Computomic and Elektrik (investment announced, no figure).
 
-2. **A non-exact amount is never promoted to an exact `round_size`.** This is the whole
-   point of separating the class. "over $140 million" is a lower bound; recording it as
-   `round_size = 140000000` asserts an exactness the source withheld, and nothing
-   downstream could distinguish it from a stated $140M. The model has no qualifier
-   field for `round_size` at any layer — the funding prompt's `round` object has none,
-   `staging_extraction` has no `round_size_qualifier`, and `transaction_record` has no
-   `*_qualifier` column at all — so null plus a flag is the only honest state.
+2. **The qualifier policy holds at both of its edges.** A single stated qualified
+   anchor — "over $140 million" — is normalized to the stated number by researcher
+   convention: it becomes a `round_size` candidate of 140,000,000, and the action text
+   must carry the source wording so provenance can preserve it. Everything else the
+   convention deliberately excludes — ranges, "up to", approximations, rumoured figures —
+   stays a representation gap and must still propose leaving `round_size` NULL.
+
+   Both edges matter. Losing the first re-opens a resolved case; losing the second
+   silently generalizes a narrow convention into "any qualified number is a number",
+   which is exactly what was declined.
 
 Also pins the family-integrity invariant, and that the review never writes.
 """
@@ -104,13 +107,26 @@ CASES = [
         "Northwind raised $250 million at a $3.2 billion post-money valuation.",
         "ROUND_SIZE_CANDIDATE", True,
     ),
-    # --- Non-exact: representation gap ------------------------------------
+    # --- Single stated anchor: NORMALIZED ---------------------------------
+    # The convention decided 2026-08-18. One stated number carrying a lower-bound
+    # qualifier is anchored at that number. Still reported non-exact — the normalization
+    # is a research convention, not a claim about what the source said.
     (
         "chronograph_over", "Chronograph announces growth investment",
         "Chronograph today announced a minority growth equity investment of over "
         "$140 million led by a global investment firm.",
-        "NON_EXACT_AMOUNT", False,
+        "LOWER_BOUND_NORMALIZED", False,
     ),
+    (
+        "in_excess_of", "Halcyon closes round",
+        "Halcyon announced the closing of a financing round of in excess of "
+        "$80 million.",
+        "LOWER_BOUND_NORMALIZED", False,
+    ),
+    # --- Deliberately NOT generalized: still representation gaps -----------
+    # Each of these was named as a case to decide later from a real example, so the
+    # classifier must keep declining them rather than sliding them in behind the
+    # lower-bound decision.
     (
         "approximately", "Halcyon closes round",
         "Halcyon announced the closing of a financing round of approximately "
@@ -118,8 +134,19 @@ CASES = [
         "NON_EXACT_AMOUNT", False,
     ),
     (
+        "up_to_ceiling", "Northgate secures facility-free round",
+        "Northgate announced it has raised up to $100 million in growth funding.",
+        "NON_EXACT_AMOUNT", False,
+    ),
+    (
         "range", "Vertex raises",
         "Vertex raised between $40 million and $50 million in new funding this quarter.",
+        "NON_EXACT_AMOUNT", False,
+    ),
+    (
+        "rumoured_lower_bound", "Zephyr said to have raised",
+        "Zephyr has reportedly raised over $75 million in a new round, according to "
+        "people familiar with the matter.",
         "NON_EXACT_AMOUNT", False,
     ),
     # --- Other disqualifying classes --------------------------------------
@@ -216,26 +243,51 @@ def main() -> None:
         )
     _check(failures, "Cellares resolves to the round", cellares["amount"], 327_000_000.0)
 
-    # --- 2. A non-exact amount is never a round_size candidate ------------
-    # The load-bearing assertion. Chronograph must not become an exact 140,000,000.
+    # --- 2. The qualifier policy, at both edges ---------------------------
+    # 2a. The single stated anchor is normalized to the stated number.
     chrono_case = next(c for c in CASES if c[0] == "chronograph_over")
     chrono = classify(chrono_case[1], chrono_case[2])
-    if chrono["classification"] == "ROUND_SIZE_CANDIDATE":
-        failures.append(
-            "'over $140 million' was promoted to an exact round_size candidate — that "
-            "asserts an exactness the source withheld"
-        )
+    _check(failures, "chronograph normalization", chrono["normalization"], "ANCHOR")
+    _check(failures, "chronograph anchor amount", chrono["amount"], 140_000_000.0)
     _check(failures, "chronograph qualifier captured", chrono["qualifier"], "over")
-    if "REPRESENTATION GAP" not in chrono["action"]:
-        failures.append("non-exact amount must be flagged as a representation gap")
-    # The amount is still surfaced for the human, just not proposed as canonical.
-    _check(failures, "chronograph amount surfaced", chrono["amount"], 140_000_000.0)
+    # Still non-exact. The convention normalizes the RECORD; it does not upgrade the
+    # source. Reporting exact=True here would be the claim the decision explicitly
+    # refused to make.
+    _check(failures, "chronograph is still reported non-exact", chrono["exact"], False)
+    if "NULL" in chrono["action"]:
+        failures.append("a normalized anchor must not propose leaving round_size NULL")
+    if "over" not in chrono["action"]:
+        failures.append(
+            "a normalized anchor's action must carry the source wording, or provenance "
+            "has nothing to preserve"
+        )
 
-    # No case in the taxonomy may propose writing a non-exact figure.
+    # 2b. Everything the convention excludes still proposes NULL.
+    for label in ("approximately", "up_to_ceiling", "range", "rumoured_lower_bound"):
+        case = next(c for c in CASES if c[0] == label)
+        r = classify(case[1], case[2])
+        _check(failures, f"{label} normalization", r["normalization"], "DEFERRED")
+        if "REPRESENTATION GAP" not in r["action"]:
+            failures.append(f"{label}: a deferred non-exact amount must be flagged as a gap")
+
+    # A DEFERRED figure is still surfaced for the human — it just is not proposed.
+    _check(failures, "range amount surfaced",
+           classify(*next(c[1:3] for c in CASES if c[0] == "range"))["amount"] is not None,
+           True)
+
+    # The invariant, stated once over the whole taxonomy: a non-exact amount either
+    # carries an explicit normalization or proposes NULL. Never neither, never both.
     for label, title, body, expected_class, _e in CASES:
         r = classify(title, body)
-        if r["exact"] is False and "NULL" not in r["action"]:
-            failures.append(f"{label}: non-exact amount without a leave-NULL action")
+        if r["exact"] is False:
+            if r["normalization"] == "DEFERRED" and "NULL" not in r["action"]:
+                failures.append(f"{label}: deferred amount without a leave-NULL action")
+            if r["normalization"] == "ANCHOR" and "NULL" in r["action"]:
+                failures.append(f"{label}: normalized amount proposing NULL")
+            if r["normalization"] not in ("DEFERRED", "ANCHOR"):
+                failures.append(f"{label}: non-exact amount with no normalization verdict")
+        if r["exact"] is True and r["normalization"] is not None:
+            failures.append(f"{label}: an exact amount must carry no normalization")
 
     # --- 3. Family-integrity invariant ------------------------------------
     with tempfile.TemporaryDirectory() as tmp:
@@ -275,8 +327,8 @@ def main() -> None:
         for failure in failures:
             print("FAIL", failure)
         raise SystemExit(1)
-    print("PASS funding coverage review: taxonomy pinned, non-exact never promoted, "
-          "family integrity asserted")
+    print("PASS funding coverage review: taxonomy pinned, single stated anchors "
+          "normalized, every other inexact shape deferred, family integrity asserted")
 
 
 if __name__ == "__main__":

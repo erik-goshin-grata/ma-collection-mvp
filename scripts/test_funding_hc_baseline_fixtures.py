@@ -100,12 +100,14 @@ def main() -> None:
             if isinstance(expected_size, (int, float)) and abs(trap - expected_size) < 0.5:
                 failures.append(f"{label}: {trap:,.0f} is both the expected size and a trap")
 
-        # Only Chronograph may decline to assert a size, and it must say why.
+        # No fixture declines to assert a size any more. The lower-bound case was the
+        # only one, and the researcher-normalization convention resolved it: every
+        # expectation in the set is now scored.
         if expected_size == "REPRESENTATION_GAP":
-            if label != "chronograph_lower_bound":
-                failures.append(f"{label}: only the lower-bound fixture may be a gap")
-            if "qualifier" not in f["why"]:
-                failures.append(f"{label}: a representation gap must explain the missing field")
+            failures.append(
+                f"{label}: REPRESENTATION_GAP is no longer an expectation in this set — "
+                "the qualified-anchor convention scores the lower-bound case"
+            )
 
     # --- The specific adversarial content must survive verbatim ----------
     # These passages are the whole point of using real text; losing any of them silently
@@ -145,6 +147,33 @@ def main() -> None:
         failures.append(
             "computomic text now states non-disclosure explicitly — the expectation must "
             "become UNDISCLOSED, since silence is what makes UNKNOWN correct"
+        )
+
+    # --- The qualified anchor -------------------------------------------
+    # "over $140 million" is normalized to the stated anchor by researcher convention.
+    # Three things have to hold together, and the fixture is worthless if any slips:
+    #   the expectation is the stated number, not a rounded or invented one;
+    #   140M is no longer listed as a trap, since it is now the answer;
+    #   the `why` records that this is a convention about the RECORD, and names the
+    #   shapes the convention deliberately does not cover, so the next person reading it
+    #   cannot mistake a narrow decision for a general rule about qualified numbers.
+    chrono = fixture("chronograph_lower_bound")
+    _check(failures, "chronograph expects the stated anchor",
+           chrono["expected"]["round.size"], 140_000_000)
+    if 140_000_000 in chrono["traps"]:
+        failures.append("chronograph still traps 140M, which is now its expected answer")
+    why = chrono["why"].lower()
+    for needle in ("convention", "range", "up to"):
+        if needle not in why:
+            failures.append(
+                f"chronograph `why` must name {needle!r} — a normalization convention "
+                "that does not state its own boundary will be read as a general rule"
+            )
+    if "unverified" not in why:
+        failures.append(
+            "chronograph `why` must mark the expectation UNVERIFIED against the live "
+            "model: the 8/8 baseline ran while this case was unscored, so no run has "
+            "ever checked it"
         )
 
     # The control must be unambiguous: one figure, and it is the answer.

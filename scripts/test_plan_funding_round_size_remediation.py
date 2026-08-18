@@ -64,9 +64,9 @@ _LEGACY_SR = (
     "clean_text TEXT",
 )
 
-# (target, event, staged amount) — two batch-1 approvals and the one row that remains
-# unresolved. Chronograph is unresolved by REPRESENTATION: its source clearly supports a
-# funding magnitude ("over $140 million"), but the model cannot carry a lower bound.
+# (target, event, staged amount) — two batch-1 approvals and one batch-3 approval.
+# Chronograph is the qualified-anchor case: the source says "over $140 million" and the
+# researcher-normalization convention anchors it at the stated figure.
 _ROWS = [
     ("Arcade.dev", "VC_ROUND", 60_000_000.0),
     ("Rejoni", "GROWTH_EQUITY", 25_000_000.0),
@@ -168,8 +168,10 @@ def main() -> None:
             planned = unresolved = skipped = []
 
         _check(failures, "legacy planned rows", len(planned), 2)
-        _check(failures, "legacy unresolved rows", len(unresolved), 1)
-        _check(failures, "legacy skipped rows", len(skipped), 0)
+        # Nothing is unresolved any more: the qualified-anchor convention retired the
+        # only entry. Chronograph is simply not in batch 1, so it is an ordinary skip.
+        _check(failures, "legacy unresolved rows", len(unresolved), 0)
+        _check(failures, "legacy skipped rows", len(skipped), 1)
         for row, _key, _amount in planned:
             # Absent columns must read as NULL, not raise and not fabricate.
             _check(failures, f"{row['target_name']} transaction_size reads NULL",
@@ -218,13 +220,61 @@ def main() -> None:
         # plan nothing from it and must report the batch1 rows as skipped, not invisible.
         b2_planned, b2_unres, b2_skipped = _plan(legacy, "batch2_coverage_review")
         _check(failures, "batch2 plans nothing from a batch1 fixture", len(b2_planned), 0)
-        _check(failures, "batch2 skips the batch1 rows", len(b2_skipped), 2)
-        _check(failures, "batch2 still carries the unresolved row", len(b2_unres), 1)
-        # Chronograph is carried as unresolved and can never be planned by any batch.
-        _check(failures, "Chronograph is unresolved, not approved",
-               any("Chronograph" in k for k in planner.UNRESOLVED), True)
+        _check(failures, "batch2 skips every row in the fixture", len(b2_skipped), 3)
+        _check(failures, "batch2 carries no unresolved row", len(b2_unres), 0)
+        _check(failures, "Chronograph is no longer unresolved",
+               any("Chronograph" in k for k in planner.UNRESOLVED), False)
         _check(failures, "Cellares is no longer unresolved",
                any("Cellares" in k for k in planner.UNRESOLVED), False)
+
+        # --- 4a. Batch 3: the qualified anchor -----------------------------
+        # "over $140 million" is normalized to the stated anchor. The batch must be
+        # exactly one row, and its note must carry the source wording verbatim — that
+        # wording IS the provenance the convention promises to preserve, so a note that
+        # loses it turns a documented normalization into a bare unexplained number.
+        _check(failures, "batch3 exists",
+               "batch3_qualified_anchor" in planner.BATCHES, True)
+        _check(failures, "batch3 is exactly Chronograph",
+               sorted(planner.BATCHES.get("batch3_qualified_anchor", {})), ["Chronograph"])
+        b3_planned, b3_unres, b3_skipped = _plan(legacy, "batch3_qualified_anchor")
+        _check(failures, "batch3 plans one row", len(b3_planned), 1)
+        _check(failures, "batch3 skips the batch1 rows", len(b3_skipped), 2)
+        _check(failures, "batch3 carries no unresolved row", len(b3_unres), 0)
+        if b3_planned:
+            row, key, amount = b3_planned[0]
+            _check(failures, "batch3 key", key, "Chronograph")
+            _check(failures, "batch3 anchors at the stated figure", amount, 140_000_000.0)
+        c_staged, c_canon, c_note = planner.resolve_approval(
+            planner.BATCHES["batch3_qualified_anchor"]["Chronograph"]
+        )
+        _check(failures, "anchor staged equals canonical", (c_staged, c_canon),
+               (140_000_000.0, 140_000_000.0))
+        # An approval whose staged and canonical amounts agree must STILL be able to
+        # carry a note. Before the convention, a note only existed on divergent
+        # approvals, so an equal-amount approval had nowhere to record why it was made.
+        # The note must also reach the printed plan. A note that exists only in the
+        # dict is invisible to the human approving the batch, and the plan output is
+        # what they actually read.
+        import contextlib, io
+        buf = io.StringIO()
+        argv = sys.argv[:]
+        sys.argv = ["plan", "--db", legacy, "--batch", "batch3_qualified_anchor"]
+        try:
+            with contextlib.redirect_stdout(buf):
+                planner.main()
+        finally:
+            sys.argv = argv
+        if "over $140 million" not in buf.getvalue():
+            failures.append(
+                "the dry-run plan does not print the qualified-anchor note — the "
+                "approver would see a bare 140,000,000 with no stated reason"
+            )
+
+        if not c_note or "over $140 million" not in c_note:
+            failures.append(
+                "the qualified-anchor approval must quote the source wording "
+                "'over $140 million' in its note — that is the preserved provenance"
+            )
 
         # --- 5. Divergent approval: staged amount is NOT the canonical one ---
         # Cellares' staged $50M is Prime Radiant's check; the round is $327M. The

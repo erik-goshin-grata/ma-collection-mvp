@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Plan the legacy funding round_size remediation. DRY RUN BY DEFAULT — mutates nothing.
 
-Nine rows have source-supported round sizes sitting in `transaction_value`. This plans
-their correction and prints the exact before/after canonical state for each. Cellares is
-carried as UNRESOLVED and is never written.
+Legacy funding rows carry source-supported round sizes sitting in `transaction_value`.
+This plans their correction, one approved batch at a time, and prints the exact
+before/after canonical state for each row. Anything not in the selected batch is skipped,
+never swept in.
 
 DESIGN — how history is preserved
 ---------------------------------
@@ -101,19 +102,45 @@ BATCHES: dict[str, dict[str, float]] = {
             ),
         },
     },
+    # Approved 2026-08-18 under the qualified-anchor convention. The evidence was never
+    # in doubt for this row — the figure is bound to the target's own financing event —
+    # only the representation was. Rather than build qualifier infrastructure for a
+    # single case, a researcher-normalization convention was adopted: a single stated
+    # figure under a lower-bound qualifier is recorded at its stated anchor, with the
+    # source wording preserved in the note below and in the source text.
+    #
+    # The staged figure and the canonical round_size AGREE here — the anchor is the
+    # number the source states. The entry is still a dict rather than a bare 140_000_000
+    # because the note is the point: it is the only place the record says WHY this row
+    # holds an exact-looking number, and a bare figure would leave a normalization
+    # indistinguishable from an ordinary stated amount.
+    "batch3_qualified_anchor": {
+        "Chronograph": {
+            "staged": 140_000_000,
+            "round_size": 140_000_000,
+            "note": (
+                "Researcher normalization of a single stated qualified anchor. Source: "
+                "'a minority growth equity investment of over $140 million'. The "
+                "canonical round_size is recorded at the stated anchor, 140,000,000. "
+                "This is NOT a claim that the source stated exactly $140 million — the "
+                "original 'over $140 million' wording is the provenance and is retained "
+                "verbatim in source_raw.clean_text and in this note. The convention "
+                "covers a single stated anchor only; ranges, 'up to', and rumoured "
+                "figures remain undecided and are still left NULL."
+            ),
+        },
+    },
 }
-DEFAULT_BATCH = "batch2_coverage_review"
+DEFAULT_BATCH = "batch3_qualified_anchor"
 
 # Carried through the plan, never written. Each needs a source sentence binding the
 # amount to the financing event before it can be approved.
-UNRESOLVED = {
-    # Unresolved by REPRESENTATION, not by evidence. The source clearly supports a
-    # funding magnitude; the model cannot carry a lower bound without asserting an
-    # exactness the source withheld.
-    "Chronograph": "source says 'over $140 million' — a lower bound. The model has no "
-                   "qualifier field for round_size at any layer, so writing 140M would "
-                   "assert an exactness the source withheld. Representation gap.",
-}
+#
+# Empty since 2026-08-18. Chronograph was the last entry and was never unresolved on
+# evidence — only on representation, which the qualified-anchor convention settled. The
+# dict is kept because the mechanism is still needed: the next row whose source does not
+# bind its figure to the financing event belongs here, not in a batch.
+UNRESOLVED: dict[str, str] = {}
 
 IN_SCOPE_EVENTS = ("VC_ROUND", "GROWTH_EQUITY")
 
@@ -134,9 +161,14 @@ def _wrap(text: str, width: int) -> list[str]:
 def resolve_approval(entry) -> tuple[float, float, str | None]:
     """-> (staged_amount_expected, canonical_round_size, note)
 
-    A bare number means the staged figure and the canonical round_size are the same.
-    A dict means they diverge because the staged figure was the wrong fact, and carries
-    the note explaining what the source actually said.
+    A bare number means the staged figure and the canonical round_size are the same and
+    the correction needs no explanation beyond the batch it sits in.
+
+    A dict carries a note. The usual reason is that the two amounts DIVERGE because the
+    staged figure was the wrong fact (Cellares: a check, not the round). But a note is
+    not tied to divergence — an approval whose amounts agree may still need to record
+    why it was made, which is the qualified-anchor case: the number matches the source
+    exactly and the note is the only place the normalization is written down.
     """
     if isinstance(entry, dict):
         return float(entry["staged"]), float(entry["round_size"]), entry.get("note")
@@ -303,9 +335,14 @@ def main() -> None:
         if abs(staged_expected - amount) > 0.5:
             print(f"      *** staged {staged_expected:,.0f} is NOT the round size ***")
             print(f"      canonical round_size is {amount:,.0f}")
-            if note:
-                for line in _wrap(note, 68):
-                    print(f"        {line}")
+        # Printed whenever the approval carries one, not only on divergence. On a
+        # qualified-anchor row the numbers agree and the note is the ENTIRE reason the
+        # row is in the batch — gating it on divergence would show a bare figure with
+        # no explanation, which is the state the convention exists to avoid.
+        if note:
+            print("      why:")
+            for line in _wrap(note, 66):
+                print(f"        {line}")
         print(f"      {'field':<24} {'before':>18}   {'after':>18}")
         print(f"      {'-' * 24} {'-' * 18}   {'-' * 18}")
         for field, before, after in (
@@ -381,11 +418,16 @@ def main() -> None:
         except (json.JSONDecodeError, TypeError):
             notes = {"raw": se["notes"]}
         staged_expected, _canon, note = resolve_approval(approved_map[key])
-        detail = (
-            f"staged {staged_expected:,.0f} was NOT the round size — {note}"
-            if abs(staged_expected - amount) > 0.5 and note
-            else f"canonicalized from a legacy transaction_value extracted under HC 0.12"
-        )
+        # The note is written whenever one exists, not only when the amounts diverge.
+        # Keying it on divergence would have silently dropped the qualified-anchor
+        # explanation, which is the one case where the numbers agree and the reasoning
+        # is the entire content of the remediation.
+        if note:
+            diverged = abs(staged_expected - amount) > 0.5
+            detail = (f"staged {staged_expected:,.0f} was NOT the round size — {note}"
+                      if diverged else note)
+        else:
+            detail = "canonicalized from a legacy transaction_value extracted under HC 0.12"
         notes["remediation"] = (
             f"{now}: round_size set to {amount:,.0f}. {detail} Approved by "
             f"{args.approved_by or '<pending>'}. Original value_amount/value_type left "
