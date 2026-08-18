@@ -2247,3 +2247,136 @@ Both mechanisms were revert-verified: neutralizing the anchor set drops Chronogr
 to `NON_EXACT_AMOUNT`, and neutralizing the rumour guard promotes the rumoured fixture to
 `LOWER_BOUND_NORMALIZED`. (The first attempt at the second revert left two alternatives
 standing in the pattern and passed — a botched revert, not a weak mechanism.)
+
+---
+
+## PIPE: A Recognized-But-Not-Profiled Exclusion
+
+**Decided 2026-08-18.**
+
+### The leak
+
+`prompts/deal_type_classifier.md` 0.7 already says the right thing: a public-company
+PIPE, primary share issuance or registered direct offering "is not automatically
+GROWTH_EQUITY or VC_ROUND merely because it is primary capital... use UNKNOWN with
+notes". That instruction was correct and it was being followed.
+
+It did not work, because of a gate two stages later:
+
+```sql
+-- stages/high_confidence_extract.py
+WHERE se.status = 'CLASSIFIED'
+  AND COALESCE(se.v2_event_type, se.deal_type) NOT IN ('VC_ROUND','GROWTH_EQUITY','VENTURE_DEBT')
+```
+
+`UNKNOWN` satisfies that `NOT IN`. So declining to call a PIPE a funding round routed it
+into **M&A high-confidence extraction** instead, and it came out the far end as a
+`transaction_record` carrying M&A semantics. The taxonomy said "neither"; the plumbing
+had only two doors and no wall.
+
+This is worth naming as a class: **a negative classification is not an exclusion.**
+Refusing to assign a type only helps if some downstream gate acts on the refusal. Here
+every gate was written as a positive or negative membership test over the funding
+family, so "not funding" meant "M&A" by construction.
+
+### The design
+
+Stage 3 stamps a recognized PIPE with `v2_event_type = 'PIPE'` and the terminal status
+`RECOGNIZED_NOT_PROFILED`. Both extraction gates select `status = 'CLASSIFIED'`, so the
+row is skipped by Stage 4 and Stage 4a **without either gate naming PIPE at all**, and
+never reaches Stage 8 clustering or Stage 9 aggregation. Nothing canonical is derived:
+no `round_size`, no `transaction_size`, no valuation, no `transaction_record`.
+
+Putting the wall in the status rather than in each gate is the load-bearing choice. A
+`NOT IN ('PIPE')` added to Stage 4 would have worked today and rotted tomorrow: the next
+excluded structure needs another clause in another gate, and a gate that forgets one
+fails silently in exactly the way this leak did.
+
+**No schema change was required.** Enumerations in this repo are enforced at the
+application layer, not by SQLite `CHECK` constraints (`schema/001_initial.sql` §7), so
+`PIPE` and `RECOGNIZED_NOT_PROFILED` are new values in existing columns.
+
+### Recognition reads the transaction language, never the provider
+
+`recognize_pipe(title, clean_text)` takes no source, provider, tier or adapter argument,
+and the regression asserts that structurally by inspecting the signature — not only by
+outcome. A rule keyed on provider identity would silently stop working the moment a
+source was re-labelled or a new one added, and provider identity is not evidence about
+what a transaction is in the first place.
+
+The insertion point makes this hold for every inbound source without a per-adapter
+change. Stage 2 admits `PR_NEWSWIRE` and `WEB_URL` (which is what a PredictLeads ingest
+writes); Stage 3 selects on `source_status = 'RELEVANT'` with no source-type filter. The
+one other place a `CLASSIFIED` staging row is born — `adapters/sec_api.py`, for an SEC
+document attached to an already-classified parent — is unreachable from a PIPE by
+construction: Stage 5 triggers SEC lookup from `status = 'HC_EXTRACTED'`, which an
+excluded row never reaches.
+
+### Recognition is deliberately narrow
+
+Only an explicit PIPE counts: the acronym **bound** to a financing construction, or the
+phrase spelled out. Binding, not proximity — the same discipline the funding coverage
+review arrived at after four confirmed false positives from co-occurrence.
+
+| not recognized | why |
+| --- | --- |
+| private placement | private capital into a public issuer is not by itself a PIPE |
+| convertible notes | instrument, not structure |
+| preferred issuance | instrument, not structure |
+| registered direct offering | a different structure the source names differently |
+| "PIPELINE", "clinical pipeline" | `\bPIPE\b` case-sensitive; L is a word character |
+| "Superior PIPE & Supply" | a company name satisfies no binding construction |
+
+The asymmetry is deliberate. Under-recognition leaves a row exactly where it already
+was; over-recognition silently deletes a deal that is in scope. Case-sensitivity carries
+real weight here — "pipe financing" in lower case is a plumbing contract.
+
+### Structural types are never displaced
+
+`PIPE_OVERRIDABLE_EVENT_TYPES` is exactly `{UNKNOWN, VC_ROUND, GROWTH_EQUITY,
+VENTURE_DEBT}` — the seats a PIPE mis-occupies. `ACQUISITION`, `MERGER`,
+`REVERSE_MERGER`, `SPIN_OFF`, `SPLIT_OFF`, `JOINT_VENTURE` and `RECAPITALIZATION` are
+never re-examined, however much PIPE language their body carries.
+
+This is not caution, it is the main correctness risk. "$150 million PIPE" is standard
+de-SPAC language: the PIPE is a financing component of a `REVERSE_MERGER` that is
+genuinely in scope, and an acquisition financed by a concurrent PIPE is still an
+acquisition. Overriding those seats would delete deals rather than reduce noise. The
+regression pins all seven.
+
+### Provenance
+
+`source_raw` is untouched. The `staging_extraction` row is written normally with the full
+classifier result, and `notes.pipe_exclusion` records the classifier's own verdict, the
+recognition form, the matched text and the source sentence the recognition rests on. An
+exclusion nobody can review is an exclusion nobody can trust, and the recorded original
+type is what a later promotion reads to know which seat the row came from.
+
+### What was deliberately NOT done
+
+- **`prompts/deal_type_classifier.md` is untouched.** Recognition is entirely
+  deterministic, which is what makes the regressions deterministic. Adding `PIPE` to the
+  classifier's vocabulary would catch paraphrases the binding rule is too tight for, and
+  is the natural follow-up — but it is a prompt-semantics change with model-dependent
+  behaviour, and the enum already accepts `PIPE` so it becomes a prompt-only edit when
+  it happens. It would also require updating the wording pinned by
+  `scripts/test_minority_core_classification.py`.
+- **No `transaction_size` change.** The funding family and the waterfall are untouched.
+- **No generalization to other excluded structures.** `RECOGNIZED_NOT_PROFILED` is a
+  general mechanism and the next structure can reuse it, but nothing else was moved into
+  it speculatively.
+
+### Regressions
+
+`scripts/test_pipe_recognition.py` — 13 recognition cases, 11 routing cases, and an
+end-to-end run of the real Stage 3 against a temp DB with a stubbed classifier and mixed
+providers. The end-to-end assertion is the load-bearing one: it lifts both extraction
+gates' **own predicate text** out of the stage sources and executes it, rather than
+retyping a copy that could drift from the gate it claims to test. A row that is
+recognized but still selected by a gate has changed nothing except its label.
+
+Four mechanisms were revert-verified: the terminal status (set it back to `CLASSIFIED`
+and both PIPE rows are picked up by Stage 4), the binding requirement (drop it and a
+company name is recognized), the overridable set (widen it and the de-SPAC loses its
+`REVERSE_MERGER`), and case-sensitivity (add `IGNORECASE` and a plumbing contract is
+recognized).

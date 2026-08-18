@@ -178,8 +178,8 @@ prepared and **not applied**; `UNRESOLVED` is now empty. See decisions.md, "Qual
 Anchors: A Researcher-Normalization Convention, Not Qualifier Infrastructure".
 
 **Still open from this workstream (deliberately separate, not blocking):**
-- **PIPE coverage in `transaction_size`** — a separate product/classifier decision,
-  recorded below.
+- **PIPE** — resolved 2026-08-18 as a recognized-but-not-profiled exclusion at
+  classification time, not as a `transaction_size` rung. Recorded below.
 - **Coverage review found four false positives** from numeric proximity — investor AUM,
   cumulative firm capital, and a post-money valuation read as round sizes. The
   classifier now requires the amount to be *bound* to the target's financing event and
@@ -221,14 +221,42 @@ defects traced to HC 0.12, which predated the funding path — not to this promp
   an investor's own size is correct for magnitude extraction and needs no field.
 - The eight fixtures are permanent and must stay verbatim, never paraphrased.
 
-**PIPE coverage in `transaction_size` (open — classifier/product decision):**
-The Funding family is `{VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT}`, unchanged. A PIPE or
-public-company primary raise is deliberately *not* forced into it
-(`prompts/deal_type_classifier.md`, guarded by
-`scripts/test_minority_core_classification.py`), so it falls to `UNKNOWN` and receives
-`transaction_size = null`. This was accepted rather than widened silently through the
-waterfall. Whether PIPEs should get a funding-size treatment is a separate
-classifier/product decision, not a `transaction_size` one.
+**PIPE: recognized, not profiled (2026-08-18).**
+The Funding family is `{VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT}`, **unchanged**, and the
+`transaction_size` waterfall is untouched. What changed is upstream, at classification.
+
+An explicitly recognized PIPE now gets its own seat: Stage 3 stamps
+`v2_event_type = 'PIPE'` and the terminal status `RECOGNIZED_NOT_PROFILED`. Both
+extraction gates select `status = 'CLASSIFIED'`, so the row is skipped by Stage 4 and
+Stage 4a **without either gate naming PIPE**, and never reaches clustering or
+aggregation — no `round_size`, no `transaction_size`, no valuation, no
+`transaction_record`.
+
+This closes a real leak rather than a theoretical one. Declining to call a PIPE a
+funding round used to route it into M&A instead: Stage 4's gate is
+`NOT IN ('VC_ROUND','GROWTH_EQUITY','VENTURE_DEBT')`, and `UNKNOWN` satisfies it, so an
+`UNKNOWN` PIPE fell into M&A high-confidence extraction and emerged as a
+transaction_record with M&A semantics.
+
+- **Recognition reads the transaction language, never the provider.** The same PIPE from
+  PredictLeads, PR Newswire or an SEC filing is treated identically; the functions take
+  no source parameter and the regression asserts that structurally.
+- **Narrow by construction.** Only the acronym bound to a financing construction, or the
+  phrase spelled out. A private placement, convertible note, preferred issuance or
+  registered direct offering is not a PIPE unless the source says so.
+- **Structural types are never displaced.** `ACQUISITION`, `MERGER`, `REVERSE_MERGER`,
+  `SPIN_OFF`, `SPLIT_OFF`, `JOINT_VENTURE`, `RECAPITALIZATION` are left alone —
+  "$150 million PIPE" is standard de-SPAC language and that deal is in scope. Only
+  `UNKNOWN` and the funding family can be overridden.
+- **No schema change.** Enums are application-layer in this repo (`schema/001_initial.sql`
+  §7), so `PIPE` and `RECOGNIZED_NOT_PROFILED` are new values, not new columns.
+- **Promotion is one line.** Stop stamping the terminal status and the row flows as
+  `CLASSIFIED`; the only open question then is which extractor owns it.
+
+Still open, and deliberately not done here: `prompts/deal_type_classifier.md` does not
+yet offer `PIPE` as a type, so recognition is entirely deterministic. Adding it would
+catch paraphrases the binding rule is too tight for — see decisions.md for why it was
+left out of this change.
 
 **Funding path (partial):**
 - `stages/funding_lc_extract.py` — not written; prompt exists

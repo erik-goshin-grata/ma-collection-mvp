@@ -6,7 +6,15 @@ source_status = RELEVANT that does not yet have a staging_extraction row.
 
 Creates a staging_extraction row for each processed source:
   - status = CLASSIFIED on success
+  - status = RECOGNIZED_NOT_PROFILED when the source explicitly identifies a PIPE
   - status = PROMPT_FAILED on prompt failure or schema violation
+
+RECOGNIZED_NOT_PROFILED is a terminal state for structures this pipeline recognizes but
+does not profile. Both extraction gates select `status = 'CLASSIFIED'`, so such a row is
+skipped by Stage 4 and Stage 4a without either gate naming the structure, and never
+reaches clustering or aggregation. See lib/pipe_recognition.py for why a PIPE needs one:
+declining to call it a funding round previously routed it into M&A extraction instead,
+because Stage 4's gate is a NOT IN on the funding family and UNKNOWN satisfies it.
 
 On CLASSIFIED, populates: deal_type, v2_event_type, spin_split_type,
 spin_split_type_v2, distribution_mechanism, recap_type, target_type,
@@ -16,6 +24,9 @@ model_confidence, dt_prompt_version.
 Notes field shape for newly created staging_extraction rows:
     {"dt": "<model notes string or null>"}
     If overrides_relevancy_hint is True, adds "dt_overrides_relevancy": true.
+    If the row is excluded as a recognized PIPE, adds "pipe_exclusion": {...} carrying
+    the classifier's own verdict and the quoted source sentence, so the exclusion is
+    reviewable and reversible.
 
 Schema validation enforced:
   - v2_event_type must be in V2 EventType enum when present
@@ -39,6 +50,9 @@ import time
 from datetime import datetime, timezone
 
 from config import Config
+from lib.pipe_recognition import (
+    PIPE_EVENT_TYPE, PIPE_EXCLUDED_STATUS, resolve_classification,
+)
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
@@ -51,6 +65,11 @@ _VALID_V2_EVENT_TYPES = frozenset({
     "ACQUISITION", "MERGER", "SPIN_OFF", "SPLIT_OFF", "REVERSE_MERGER",
     "JOINT_VENTURE", "RECAPITALIZATION",
     "VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT",
+    # Recognized, not profiled. Accepted here so the value validates whether it comes
+    # from the deterministic recognizer or, later, from the classifier itself — the
+    # prompt does not yet offer it, and adding it to the enum first is what makes that
+    # a prompt-only change when it happens.
+    PIPE_EVENT_TYPE,
     "UNKNOWN",
 })
 # Legacy deal_type values accepted during migration
@@ -234,7 +253,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     ).fetchall()
 
     total = len(rows)
-    classified = failed = 0
+    classified = failed = excluded = 0
     log.info("Stage 3: %d rows to classify", total)
 
     for row in rows:
@@ -294,20 +313,39 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         v2_event_type = _resolve_v2_event_type(result)
         event_history_type = _normalize_event_history_type(result)
 
-        _insert(conn, sid, "CLASSIFIED", result, _VERSION, json.dumps(notes_dict),
-                v2_event_type=v2_event_type,
+        # Recognized-but-not-profiled exclusion. Consulted only for the seats a PIPE
+        # can mis-occupy; a structural verdict is never re-examined. The full classifier
+        # result is still written, so nothing about the row is lost.
+        routing = resolve_classification(v2_event_type, row["title"] or "",
+                                         row["clean_text"] or "")
+        if routing["excluded"]:
+            notes_dict["pipe_exclusion"] = routing["provenance"]
+
+        _insert(conn, sid, routing["status"], result, _VERSION, json.dumps(notes_dict),
+                v2_event_type=routing["v2_event_type"],
                 event_history_type=event_history_type)
-        classified += 1
-        log.info(
-            "source_raw_id=%d CLASSIFIED  v2_event_type=%s  event_history_type=%s  confidence=%s",
-            sid, v2_event_type, event_history_type, result.get("model_confidence"),
-        )
+        if routing["excluded"]:
+            excluded += 1
+            log.info(
+                "source_raw_id=%d %s  v2_event_type=%s  (classifier said %s)  evidence=%r",
+                sid, PIPE_EXCLUDED_STATUS, routing["v2_event_type"],
+                routing["provenance"]["classifier_v2_event_type"],
+                routing["provenance"]["evidence"][:120],
+            )
+        else:
+            classified += 1
+            log.info(
+                "source_raw_id=%d CLASSIFIED  v2_event_type=%s  event_history_type=%s  confidence=%s",
+                sid, v2_event_type, event_history_type, result.get("model_confidence"),
+            )
         time.sleep(_SLEEP)
 
-    log.info("Stage 3 done  total=%d classified=%d failed=%d", total, classified, failed)
+    log.info("Stage 3 done  total=%d classified=%d excluded=%d failed=%d",
+             total, classified, excluded, failed)
     return {
         "relevant_total": total,
         "classified": classified,
+        "recognized_not_profiled": excluded,
         "dt_failed": failed,
         "failures": failed,
     }

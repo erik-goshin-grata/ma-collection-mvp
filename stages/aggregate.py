@@ -664,9 +664,14 @@ def _derive_transaction_size(
 
     **The funding family is exactly the classifier's three funding types.** A PIPE or
     other public-company primary raise is deliberately *not* forced into it
-    (`prompts/deal_type_classifier.md`), so it lands in `UNKNOWN` and receives a null
-    size. That is an accepted coverage decision, not an oversight: widening the family
-    here would silently reclassify deals through the size field.
+    (`prompts/deal_type_classifier.md`). Widening the family here would silently
+    reclassify deals through the size field.
+
+    An explicitly recognized PIPE no longer reaches this function at all: Stage 3 stamps
+    it `RECOGNIZED_NOT_PROFILED` and the row stops at staging, so it is never clustered
+    and never aggregated (`lib/pipe_recognition.py`). Other public-company primary
+    raises still land in `UNKNOWN` and receive a null size, which remains an accepted
+    coverage decision rather than an oversight.
 
     No equity rung and no EV rung — see `TRANSACTION_SIZE_BASES` for why each is absent.
 
