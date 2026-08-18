@@ -1429,7 +1429,9 @@ This remains an incremental extension and semantic cleanup of Grata V2, not a wh
 Verdicts: **KEEP** · **CHANGE** · **ADD** · **REMOVE-DERIVABLE** · **DEFER** · **ENG DECISION**.
 
 The **Δ v0.3** column is the one to scan: ✱ marks every row where Engineering's review
-changed the prior recommendation. Fourteen rows changed; the rest of v0.3 stands.
+changed the prior recommendation. Scan the markers rather than any count — the rest of v0.3
+stands, and the MergerLinks subsection carries additional ✱ rows from the later v0.4.1
+vocabulary pass.
 
 ## Event and feature model
 
