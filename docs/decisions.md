@@ -2074,3 +2074,61 @@ the corrected framing:
   real articles. The regression asserts the source text itself.
 - No broad rewrite of `funding_hc_extraction`. The one open item is representational and
   is recorded, not patched.
+
+## 2026-08-17 - Funding HC Validation Pass: CLOSED
+
+Status: **closed.** No `funding_hc_extraction` change was made or is warranted.
+
+### Verdict
+
+`funding_hc_extraction` 0.1 is **accepted as correct** on the eight real-source
+fixtures. The prompt already distinguishes, unaided:
+
+| Distinction | Fixture that proves it |
+|---|---|
+| investor check vs round total | Cellares — $50M check inside a $327M Series D |
+| current round vs cumulative funding | AttoTude — $52M Series C, $143M raised to date |
+| valuation vs raise | Flutterwave — $3.2B values the company; no round size stated |
+| investor boilerplate vs event magnitude | Elektrik — Lead Edge's $9B firm size discarded |
+| undisclosed amount vs invented one | Computomic — silent source, no figure produced |
+| unlabelled round | Aston Power — "the deal, totaling $20M in new funding" |
+
+**The legacy bad data was not evidence that this prompt is bad.** It traced to two
+separate causes: extraction under HC 0.12, which predated the funding path and had
+neither a `round_size` write nor a capital-raised precondition; and downstream
+aggregation defects — the missing family gate, the `investment_amount` fallback, and the
+`MANUAL_REMEDIATION` read-path filter. Diagnosing a prompt by the quality of data
+produced by an older, different prompt was the trap here, and the real-text benchmark is
+what separated the two.
+
+### Remediation — closed
+
+Both batches applied and re-aggregated on `read_source=observation`. Live-verified
+Cellares state: `round_size` 327,000,000, `transaction_size` 327,000,000, basis
+`ROUND_SIZE`, `transaction_value` NULL, `investment_amount` NULL. The $50M check remains
+as provenance in `staging_extraction.value_amount` and the observation ledger, and is
+absent from every canonical magnitude field — which is the whole point of separating an
+investor's contribution from the event's size.
+
+That row also validated the `MANUAL_REMEDIATION` fix end to end. It is the only case in
+the corpus where the staged figure and the canonical figure differ, so it is the only one
+that could have exposed either half of that defect — admission or precedence.
+
+### What remains, and why each is separate
+
+- **Chronograph** — a qualifier/representation issue *only*. The figure is correctly
+  recognised as the funding-event magnitude; the model cannot record that it is a lower
+  bound. Fixing it means adding qualifier representation, not changing this prompt.
+- **PIPE coverage** — a product/classifier decision about which events belong to the
+  funding family, upstream of anything this prompt does.
+
+### Standing
+
+- The eight real-text fixtures are the **permanent** regression set for this prompt.
+  Verbatim, never paraphrased: the anti-paraphrase guard in
+  `scripts/test_funding_hc_baseline_fixtures.py` asserts the source text itself.
+- Re-run the baseline before any future `funding_hc_extraction` change, and treat a
+  regression there as blocking.
+- **Do not tune this prompt against legacy corpus symptoms.** If a funding row looks
+  wrong, establish which prompt version extracted it before concluding anything about the
+  current one.

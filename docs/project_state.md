@@ -143,25 +143,35 @@ Only; Market Cap Is Its Own Type".
   It does not retroactively clean the corpus, and no re-extraction is scheduled —
   Path B remains deferred. Existing rows keep whatever scope semantics produced them.
 
-**Legacy funding value-mapping remediation — batch 1 APPLIED, batch 2 approved:**
-Nine rows remediated and validated 2026-08-17 (Stage 9 re-run on
-`read_source=observation`): 92 records, 9 at `ROUND_SIZE`, 13 at `TRANSACTION_VALUE`,
-70 null. **Model-integrity assertion passed — 0 funding-family rows carry
-`transaction_size_basis = TRANSACTION_VALUE`.**
-- **Batch 2 approved, not applied:** Aston Power $20M, AttoTude $52M, **Cellares
-  $327M**. Cellares is the divergent case — its staged $50M is Prime Radiant's *check*
-  inside a $327M Series D, so the approval carries both the staged figure (to keep the
-  changed-under-us guard meaningful) and the canonical round size. The $50M survives as
-  provenance in `staging_extraction.value_amount` and the ledger; it is **not** written
-  to transaction-level `investment_amount`.
-- **Unresolved:** Chronograph only ("over $140 million" — a lower bound the model cannot
-  represent).
-- **Cellares needs a Stage 9 re-run to derive.** Its remediation is correct at both
-  source layers, but the observation read path dropped `MANUAL_REMEDIATION` observations
-  and, once admitted, let a stale extraction observation outrank a human correction on
-  confidence. Both fixed (decisions.md, "Manual Remediations Are First-Class
-  Observations"); the corpus has not been re-run. Current state understates rather than
-  misstates — `round_size`/`transaction_size` are NULL.
+**Legacy funding value-mapping remediation — CLOSED 2026-08-17. Both batches applied.**
+Batch 1 (nine rows) and batch 2 (Aston Power $20M, AttoTude $52M, Cellares $327M) are
+applied and re-aggregated on `read_source=observation`. **Model-integrity assertion
+passed — 0 funding-family rows carry `transaction_size_basis = TRANSACTION_VALUE`.**
+
+**Cellares — live verified, closed.** The divergent case, and the one that exercised the
+whole chain end to end:
+
+| field | live value |
+|---|---|
+| `round_size` | 327,000,000 |
+| `transaction_size` | 327,000,000 |
+| `transaction_size_basis` | `ROUND_SIZE` |
+| `transaction_value` | NULL |
+| `investment_amount` | NULL |
+
+Its staged $50M is Prime Radiant's *check* inside a $327M Series D. The check survives as
+provenance in `staging_extraction.value_amount` and the observation ledger, and is
+correctly absent from every canonical magnitude field. Deriving it required the
+`MANUAL_REMEDIATION` read-path fix (admission **and** precedence) — see decisions.md,
+"Manual Remediations Are First-Class Observations".
+
+**Still open from this workstream (both deliberately separate, neither blocking):**
+- **Chronograph** — a qualifier/representation issue only. "over $140 million" is
+  recognised as the funding-event magnitude, but `round_size` carries no lower-bound
+  qualifier at any layer, so it cannot be preserved without asserting false exactness.
+  Not a prompt defect and not a remediation candidate.
+- **PIPE coverage in `transaction_size`** — a separate product/classifier decision,
+  recorded below.
 - **Coverage review found four false positives** from numeric proximity — investor AUM,
   cumulative firm capital, and a post-money valuation read as round sizes. The
   classifier now requires the amount to be *bound* to the target's financing event and

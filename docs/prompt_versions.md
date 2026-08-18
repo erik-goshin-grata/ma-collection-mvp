@@ -20,7 +20,7 @@ July 28, 2026.
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section added; LTM/NTM non-interchangeable rule; period type semantic conflict example |
 | Deal Summary | `prompts/deal_summary.md` | 0.9 | 2026-07-28 | V2-2026-07-28 | Input fields updated to V2 names; RECAPITALIZATION framing added; NTM multiples in framing rule |
 | Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |
-| Funding HC Extraction | `prompts/funding_hc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT. Multi-investment source support. Sparse source handling. |
+| Funding HC Extraction | `prompts/funding_hc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | **Validated 2026-08-17: 8/8 on real-source fixtures; no change warranted.** New prompt — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT. Multi-investment source support. Sparse source handling. |
 
 ---
 
