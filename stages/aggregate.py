@@ -32,7 +32,7 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
 
-from config import Config
+from config import DEFAULT_AGGREGATION_READ_SOURCE, Config
 from lib.field_priority import TIER_ORDER
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
@@ -108,6 +108,14 @@ _FIELDS = [
     ("target_ebitda_period_type_v2", "string"),
     ("target_ebitda_period_end", "date"),
     ("financials_currency", "string"),
+    # Point-in-time balance-sheet items. No period_type companion by design — these
+    # are as-of figures, not periods, so there is no LTM/TTM or annual/quarterly
+    # distinction to record.
+    ("total_debt", "number"),
+    ("total_debt_currency", "string"),
+    ("cash_st", "number"),
+    ("cash_st_currency", "string"),
+    ("balance_sheet_as_of_date", "date"),
     ("financials_disclosure_status", "string"),
     ("consideration_components", "json"),
     ("includes_earnout", "boolean"),
@@ -457,15 +465,27 @@ def _event_type(fv: dict) -> str | None:
 
 
 def _derive_investment_amount(fv: dict) -> float | None:
-    """Amount invested (round size / check) for a non-control investment.
+    """One named investor's check. Supplemental party-level detail, usually null.
 
-    Funding rows carry it in round_size; MINORITY_INVESTMENT (M&A path) in value_amount.
-    Returns None for control deals — they have a purchase price, not an investment.
+    **Not the event's magnitude.** That is `round_size` for a financing event, and it
+    reaches `transaction_size` from there. A $50M check into a $100M round leaves
+    `round_size = 100M` and the check recorded against its investor; nothing is added,
+    rolled up, or substituted in either direction.
+
+    This previously derived `round_size or value_amount` for any non-control event,
+    which broke the definition twice over: it copied a *round total* into a field that
+    means *one investor's check*, and where no round size existed it fell back to a
+    generic `value_amount` that names no investor at all. Both assert a party-level
+    fact no source stated, and on the legacy funding rows the second one is how a
+    misclassified raise acquired a canonical home.
+
+    Per-investor checks are captured at the staging layer in
+    `staging_investor.investment_amount`, keyed to the investor that wrote them. There
+    is no transaction-level source for this field, so it derives to None until one
+    exists — which is the documented expectation, not a gap: it is supplemental detail,
+    null for most deals. Deriving anything else here would be manufacturing.
     """
-    if _event_type(fv) not in _NON_CONTROL_TYPES:
-        return None
-    amt = fv.get("round_size") or fv.get("value_amount")
-    return float(amt) if amt and amt > 0 else None
+    return None
 
 
 def _derive_deal_value_currency(
@@ -535,6 +555,9 @@ def _derive_transaction_value(
     equity_value: float | None,
     total_debt: float | None,
     pct: float | None,
+    *,
+    equity_currency: str | None = None,
+    total_debt_currency: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Tier-1 transaction value + basis (§2.1.1). As-reported wins; otherwise
     equity_value below control, equity_value + gross debt (total_debt) at pct>=50
@@ -550,7 +573,20 @@ def _derive_transaction_value(
     EQUITY_VALUE_ONLY does not assume debt=0; it preserves the known purchase-price
     component for the stake actually acquired. The gross-debt branch
     is dormant until total_debt is populated (extraction is a later piece).
+
+    **Funding events derive no transaction value at all.** A round is primary capital
+    into the company; there is no purchase price, so the field is categorically
+    inapplicable rather than merely usually absent. This used to be an assumption about
+    upstream — funding rows reach the funding extractor, which never writes the M&A
+    value fields — and the assumption does not hold for rows extracted before
+    2026-08-07, which went through the M&A path when it had no `round_size` write. On
+    those, a raise sits in `value_amount` typed `TRANSACTION_VALUE`, and without this
+    gate every re-aggregation regenerates a canonical purchase price from it.
+    `MINORITY_INVESTMENT` is deliberately outside the gate: a secondary purchase of a
+    stake is an ordinary acquisition with a real consideration.
     """
+    if _event_type(fv) in _FUNDING_EVENT_TYPES:
+        return None, None
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "TRANSACTION_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
@@ -558,30 +594,170 @@ def _derive_transaction_value(
         return None, None
     if pct < 50:
         return equity_value, "EQUITY_BELOW_CONTROL"
-    if total_debt is not None:
+    # The debt-inclusive basis needs both currencies known and equal. When it is
+    # refused, the known equity consideration is not discarded — it falls to
+    # EQUITY_VALUE_ONLY, which has never implied debt is zero, only that debt could
+    # not be added.
+    if total_debt is not None and _currencies_usable(equity_currency, total_debt_currency):
         return round(equity_value + total_debt, 2), "EQUITY_PLUS_TOTAL_DEBT"
     return equity_value, "EQUITY_VALUE_ONLY"
+
+
+# §2.4 — the rungs that may supply `transaction_size`. Every value names the SOURCE
+# FIELD the magnitude came from, which is what keeps the enum one-dimensional.
+#
+# Two are reserved rather than live, because the field each would read does not exist:
+# `transaction_participant` has no per-investor amount column, and there is no
+# spin/split consideration value. Reserving them keeps the vocabulary stable so a later
+# commit adds a branch rather than renaming stored data.
+#
+# Deliberately ABSENT, and not to be added without reopening the decision:
+#   EQUITY_VALUE / EQUITY_CONSIDERATION — every case where a stake-level equity figure
+#     can safely stand for the magnitude already produces `transaction_value`. The only
+#     states where transaction_value is null while equity_value is known are those where
+#     pct_acquired is unknown, i.e. the scope is unknown, so the figure could be the
+#     whole company.
+#   ENTERPRISE_VALUE / IMPLIED_ENTERPRISE_VALUE — below control this is the grossed-up
+#     whole-company figure; it would report a 27%-for-$600M deal as $2.22B (spec §2.10
+#     item 3, parked on that gross-up and not unparked by the currency/period work).
+#   EQUITY_BELOW_CONTROL — a `transaction_value_basis` value. It names a derivation
+#     condition rather than a source field, and the control status it records is already
+#     carried by `transaction_value_basis`, `is_minority` and `pct_acquired`.
+#   SOLE_INVESTOR_AMOUNT — removed 2026-08-17. An investor's check is not the event's
+#     magnitude. Reporting a $50M check as a $100M round's size is wrong regardless of
+#     how many investors disclosed, so this was never a disclosure-threshold problem
+#     that a sole-investor restriction could solve. `investment_amount` is supplemental
+#     party-level detail; when the round total is undisclosed the honest magnitude is
+#     null. (It was previously reserved on the stated ground that no per-investor
+#     column existed — that was wrong: `staging_investor.investment_amount` does. The
+#     rung is removed on the semantics, not on availability.)
+TRANSACTION_SIZE_BASES = frozenset({
+    "TRANSACTION_VALUE",
+    "ROUND_SIZE",
+    "SPIN_SPLIT_CONSIDERATION_VALUE",  # reserved — no such source field exists
+})
+
+_MA_EVENT_TYPES = frozenset({"ACQUISITION", "MERGER", "REVERSE_MERGER"})
+_SPIN_SPLIT_EVENT_TYPES = frozenset({"SPIN_OFF", "SPLIT_OFF", "SPIN_SPLIT"})
+
+
+def _derive_transaction_size(
+    fv: dict,
+    transaction_value: float | None,
+) -> tuple[float | None, str | None]:
+    """The common transaction magnitude + the rung that supplied it (§2.4).
+
+    Derived in aggregation, **never extracted** — no extractor decides what belongs in
+    it. Keyed on event family, and the families are **disjoint**: a funding round never
+    falls through to a purchase price, and an M&A deal never falls through to a round
+    size. Ordering only has meaning within a family.
+
+      M&A        -> transaction_value              -> TRANSACTION_VALUE
+      Funding    -> round_size                     -> ROUND_SIZE
+      Spin/Split -> (reserved, no live rung)       -> None
+      otherwise  -> None
+
+    `transaction_size_basis` is returned alongside and is non-null whenever the size is,
+    because 600M via a purchase price and 600M via a round size are the same kind of
+    number only if you know which rung produced them. The caller must write both or
+    neither.
+
+    **The funding family is exactly the classifier's three funding types.** A PIPE or
+    other public-company primary raise is deliberately *not* forced into it
+    (`prompts/deal_type_classifier.md`), so it lands in `UNKNOWN` and receives a null
+    size. That is an accepted coverage decision, not an oversight: widening the family
+    here would silently reclassify deals through the size field.
+
+    No equity rung and no EV rung — see `TRANSACTION_SIZE_BASES` for why each is absent.
+
+    A funding round's `post_money_valuation` is never consulted. A valuation is not an
+    as-transacted magnitude, and the two are one word apart in a review sheet.
+    """
+    event = _event_type(fv)
+
+    if event in _FUNDING_EVENT_TYPES:
+        round_size = fv.get("round_size")
+        if round_size and round_size > 0:
+            return float(round_size), "ROUND_SIZE"
+        # No investor-check fallback. A check is one investor's contribution, not the
+        # size of the event, so a known $50M check against an undisclosed total yields
+        # a null magnitude — the round size is genuinely unknown. Summing checks is
+        # doubly wrong: per-investor disclosure runs ~30% for leads and under 5% for
+        # others, so a sum understates the round while presenting as one, and the
+        # shortfall is invisible.
+        return None, None
+
+    if event in _SPIN_SPLIT_EVENT_TYPES:
+        # SPIN_SPLIT_CONSIDERATION_VALUE would go here once the source field exists.
+        # Note that a pure pro-rata spin has no consideration at all — nothing changes
+        # hands for value — so null will remain correct for much of this family even
+        # then, and a zero would assert a fact the event does not contain.
+        return None, None
+
+    if event in _MA_EVENT_TYPES:
+        if transaction_value is not None and transaction_value > 0:
+            return float(transaction_value), "TRANSACTION_VALUE"
+        return None, None
+
+    return None, None
 
 
 def _derive_equity_value(
     fv: dict,
     per_share_price: float | None,
     sec_shares: float | None,
+    pct: float | None = None,
 ) -> tuple[float | None, str | None]:
     """Stake-level equity value + basis — the consideration for the stake actually
     acquired, never grossed up, uniform across control and non-control (§4.2).
 
       STATED             — source stated an equity figure (value_type=EQUITY_VALUE).
-      PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count.
+      PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count,
+                           permitted only at pct == 100 (see below).
 
     Post-money is NOT equity value: it belongs in post_money_valuation (and the
-    implied tier via _derive_implied_equity), never here. A primary-capital raise has
-    null value fields, so it yields None here and lives in investment_amount (bug #8).
+    implied tier via _derive_implied_equity), never here.
+
+    **Funding events derive no equity value**, enforced rather than assumed. A raise
+    buys no existing equity, so the field is categorically inapplicable. This was
+    previously left to upstream — "a primary-capital raise has null value fields, so it
+    yields None here" — which is true only of rows extracted after the funding path
+    split on 2026-08-07. Older rows carry the raise in `value_amount`, and without the
+    gate a stale `EQUITY_VALUE` there would gross up through `_derive_implied_equity`
+    into an implied tier and a multiple. The amount still reaches `investment_amount`
+    (bug #8), so nothing is lost by refusing here.
+
+    **Every writer here must be stake-level by construction**, because the field feeds
+    `_derive_implied_equity`, which divides by pct. A whole-company amount arriving
+    here is grossed up a second time: a 2.2B figure at pct 27 becomes 8.15B of implied
+    equity, and any multiple struck off that is manufactured. Decision "FINDING:
+    equity_value Conflates Stake-Level and 100%-Basis Scope" (2026-08-17).
+
+    Two guards enforce that, one here and one upstream:
+
+    - `MARKET_CAPITALIZATION` is its own value type as of HC prompt 0.18, so a market
+      cap no longer arrives typed `EQUITY_VALUE`. The `== "EQUITY_VALUE"` test below
+      is what excludes it; the fact itself is still retained in the observation ledger.
+    - `per_share_price x sec_shares` is 100%-basis unconditionally — `sec_shares` is
+      the target's *total* fully diluted count, so the product prices the whole company.
+      It is admitted only when `pct == 100`, the one case where whole-company and
+      stake-level coincide.
+
+    Below 100 the product is **not scaled** into a stake figure. We hold total shares,
+    never acquired shares, so `per_share x total_shares x pct` would manufacture an
+    amount no source stated. Unknown pct is refused for the same reason: unknown scope
+    is not a licence to claim the whole company. None is the correct answer.
     """
+    if _event_type(fv) in _FUNDING_EVENT_TYPES:
+        return None, None
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "EQUITY_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if per_share_price and per_share_price > 0 and sec_shares and sec_shares > 0:
+    if (
+        per_share_price and per_share_price > 0
+        and sec_shares and sec_shares > 0
+        and pct is not None and pct == 100
+    ):
         return round(per_share_price * sec_shares, 2), "PER_SHARE_X_SHARES"
     return None, None
 
@@ -613,30 +789,105 @@ def _derive_implied_equity(
     return equity_value
 
 
+def _currencies_usable(left: str | None, right: str | None) -> bool:
+    """True only when both currencies are known and equal.
+
+    The single gate for every calculation that mixes consideration with a
+    balance-sheet figure. Unknown on either side does not calculate, and
+    known-but-differing does not calculate; no FX conversion is attempted, because a
+    conversion needs an FX date this pipeline does not carry. Decision
+    "Debt and Cash Arithmetic Requires Known, Equal Currencies" (2026-08-17).
+    """
+    return bool(left and right and left == right)
+
+
+def _derive_net_debt(
+    reported_net_debt: float | None,
+    reported_net_debt_currency: str | None,
+    total_debt: float | None,
+    total_debt_currency: str | None,
+    total_debt_as_of: str | None,
+    cash_st: float | None,
+    cash_st_currency: str | None,
+    cash_st_as_of: str | None,
+) -> tuple[float | None, str | None, str | None, str | None]:
+    """Net debt for the implied tier: reported if present, else the components.
+
+    Returns (net_debt, currency, as_of_date, basis) where basis is one of
+    ``REPORTED``, ``CALCULATED_TOTAL_DEBT_MINUS_CASH_ST``, or None.
+
+    `total_debt` and `Cash_ST` are point-in-time balance-sheet items, so a derived
+    net debt requires them to describe the *same* balance sheet: one shared as-of
+    date and one shared currency, both known. Two figures from different dates are
+    not a balance sheet, and an unknown date is insufficient evidence rather than an
+    implied match. Missing cash is never treated as zero.
+
+    Reported/manual net debt stays preferred (decision "Debt and Cash Inputs"); it
+    is a single figure, so it carries no component-coherence requirement — only its
+    own currency, checked by the caller against the deal currency.
+    """
+    if reported_net_debt is not None:
+        return float(reported_net_debt), reported_net_debt_currency, None, "REPORTED"
+
+    if total_debt is None or cash_st is None:
+        return None, None, None, None
+    if not _currencies_usable(total_debt_currency, cash_st_currency):
+        return None, None, None, None
+    if not (total_debt_as_of and cash_st_as_of and total_debt_as_of == cash_st_as_of):
+        return None, None, None, None
+
+    return (
+        round(float(total_debt) - float(cash_st), 2),
+        total_debt_currency,
+        total_debt_as_of,
+        "CALCULATED_TOTAL_DEBT_MINUS_CASH_ST",
+    )
+
+
 def _derive_implied_enterprise_value(
     value_amount: float | None,
     value_type: str | None,
     implied_equity_value: float | None,
     net_debt: float | None,
-    total_debt: float | None,
-    cash_st: float | None,
+    *,
+    implied_equity_currency: str | None = None,
+    net_debt_currency: str | None = None,
+    net_debt_basis: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Canonical 100%-basis enterprise value + basis.
 
     STATED                                — source stated a whole-company EV.
-    IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT — implied_equity_value + source/manual net_debt.
-    IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT — implied_equity_value + total_debt - cash_st.
-    Returns (None, None) when neither path is satisfiable.
+    IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT — implied_equity_value + reported net_debt.
+    IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT — implied_equity_value + derived net_debt.
+
+    `net_debt` arrives already resolved by _derive_net_debt, which owns the
+    component-coherence rules; the basis suffix follows that resolution and is passed
+    by the caller via `net_debt_basis`. Returns (None, None) when no path is
+    satisfiable.
+
+    §2.10 item 1 — the calculated bases add consideration in deal currency to a
+    balance-sheet figure in the target's reporting currency. Both currencies must be
+    known and equal or the sum is refused: an unknown currency is insufficient
+    evidence, not a licence to assume agreement, and there is no plausible-range
+    backstop on this field to catch a wrong-currency result. No conversion is
+    attempted; that needs an FX date this pipeline does not carry.
+
+    A STATED enterprise value is a single source-stated figure rather than a sum, so
+    the guard does not apply to it.
     """
     if value_type == "ENTERPRISE_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if implied_equity_value is None:
+    if implied_equity_value is None or net_debt is None:
         return None, None
-    if net_debt is not None:
-        return round(implied_equity_value + net_debt, 2), "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT"
-    if total_debt is not None and cash_st is not None:
-        return round(implied_equity_value + total_debt - cash_st, 2), "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT"
-    return None, None
+    if not _currencies_usable(implied_equity_currency, net_debt_currency):
+        return None, None
+
+    suffix = (
+        "CALCULATED_NET_DEBT"
+        if net_debt_basis == "CALCULATED_TOTAL_DEBT_MINUS_CASH_ST"
+        else "REPORTED_NET_DEBT"
+    )
+    return round(implied_equity_value + net_debt, 2), f"IMPLIED_EQUITY_PLUS_{suffix}"
 
 
 def _source_key(obs: dict) -> tuple[Any, Any] | Any:
@@ -685,6 +936,211 @@ def _pick_value_amount_for_type(field_observations: dict[str, list[dict]], targe
     return None
 
 
+# Financial metrics and the qualifiers that are only meaningful alongside them.
+# `financials_currency` is deliberately absent: one column serves both metrics, so
+# it is resolved separately by unanimity over the anchoring sources actually used.
+# Balance-sheet amounts are as-of figures, not periods. This is the economic period
+# type of the amount, and the only legal value for it — there is no LTM/TTM/NTM
+# concept for a balance sheet, and filing frequency (annual/quarterly) is filing
+# context rather than the period of the amount.
+# The observation stage that marks a human correction of an extraction-layer
+# fact. It is admitted by the observation read path and supersedes extraction
+# observations for the same field.
+MANUAL_REMEDIATION_STAGE = "MANUAL_REMEDIATION"
+
+BALANCE_SHEET_PERIOD_TYPE = "POINT_IN_TIME"
+
+_METRIC_COMPANION_FIELDS: dict[str, tuple[str, ...]] = {
+    "target_revenue": (
+        "target_revenue_period_type",
+        "target_revenue_period_type_v2",
+        "target_revenue_period_end",
+    ),
+    "target_ebitda": (
+        "target_ebitda_period_type",
+        "target_ebitda_period_type_v2",
+        "target_ebitda_period_end",
+    ),
+}
+
+
+def _values_match(left: Any, right: Any) -> bool:
+    """Compare an observation value against a chosen canonical value."""
+    if left is None or right is None:
+        return False
+    try:
+        return float(left) == float(right)
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _anchor_source_keys(
+    field_observations: dict[str, list[dict]], anchor_field: str, anchor_value: Any
+) -> set:
+    """Source keys of the observations that supplied the chosen value for a field."""
+    return {
+        _source_key(obs)
+        for obs in field_observations.get(anchor_field, [])
+        if _values_match(obs.get("value"), anchor_value)
+    }
+
+
+def _companion_from_sources(
+    field_observations: dict[str, list[dict]], companion_field: str, source_keys: set
+) -> Any:
+    """Resolve a qualifier using only the sources that supplied the anchor amount.
+
+    Returns None when none of those sources stated it. That null is deliberate: a
+    qualifier borrowed from a different source silently re-labels an amount its own
+    source never described that way, which is worse than an acknowledged unknown.
+    """
+    if not source_keys:
+        return None
+    observations = [
+        obs
+        for obs in field_observations.get(companion_field, [])
+        if _source_key(obs) in source_keys and obs.get("value") is not None
+    ]
+    if not observations:
+        return None
+
+    field_type = _FIELD_TYPE.get(companion_field, "string")
+    chosen, needs_llm, conflict_obs = _pick_value(companion_field, field_type, observations)
+    if chosen is not None:
+        return chosen
+    if needs_llm and conflict_obs:
+        # Stay on the deterministic path, as _pick_value_amount_for_type does: rank
+        # by tier then confidence rather than opening a second aggregation prompt.
+        ranked = sorted(
+            conflict_obs,
+            key=lambda o: (
+                TIER_ORDER.index(o.get("tier")) if o.get("tier") in TIER_ORDER else len(TIER_ORDER),
+                _CONF_RANK.get(o.get("model_confidence") or "MEDIUM", 1),
+            ),
+        )
+        return ranked[0]["value"]
+    return None
+
+
+def _anchor_metric_qualifiers(
+    field_values: dict, field_observations: dict[str, list[dict]]
+) -> None:
+    """Re-resolve financial qualifiers against the source of their own amount (§2.10).
+
+    Mutates `field_values` in place. Every canonical field is otherwise selected
+    independently, so `target_revenue` can come from one source while
+    `target_revenue_period_end` and `financials_currency` come from another. The
+    period end is not cosmetic — the annual-as-trailing rule keys off it, so a
+    borrowed date can decide whether a multiple is computed at all.
+
+    `financials_currency` is shared by both metrics, so it cannot be anchored to one
+    of them. It resolves by unanimity over the currencies the anchoring sources
+    actually stated, and to null on disagreement — the same rule, and the same
+    "null is the signal" posture, as _derive_deal_value_currency.
+    """
+    anchored_currencies: list[str] = []
+    anchored_any_metric = False
+
+    for amount_field, companions in _METRIC_COMPANION_FIELDS.items():
+        amount = field_values.get(amount_field)
+        if amount is None:
+            continue
+        anchored_any_metric = True
+        source_keys = _anchor_source_keys(field_observations, amount_field, amount)
+        for companion in companions:
+            field_values[companion] = _companion_from_sources(
+                field_observations, companion, source_keys
+            )
+        currency = _companion_from_sources(
+            field_observations, "financials_currency", source_keys
+        )
+        if currency:
+            anchored_currencies.append(currency)
+
+    if not anchored_any_metric:
+        return
+
+    distinct = set(anchored_currencies)
+    field_values["financials_currency"] = next(iter(distinct)) if len(distinct) == 1 else None
+
+
+def _resolve_balance_sheet_inputs(
+    field_values: dict,
+    field_observations: dict[str, list[dict]],
+    existing: Any,
+) -> dict:
+    """Resolve the balance-sheet inputs with each qualifier anchored to its own source.
+
+    `total_debt` and `Cash_ST` are separate facts that may arrive from different
+    sources, so each takes its currency and its as-of date from the source that
+    supplied *it*. `balance_sheet_as_of_date` is one column serving both, so it is
+    resolved twice — once per anchor — rather than read once and shared, which is
+    exactly the cross-source borrowing this must prevent.
+
+    Extracted values take precedence over the preserved manual columns. Manual entry
+    was the interim mechanism and carries no qualifiers of its own beyond what a
+    researcher fills in; an extracted figure arrives with its currency and as-of date
+    attached, and must be able to update on re-aggregation rather than be pinned by
+    the value it wrote last time.
+
+    The persisted `balance_sheet_as_of_date` describes the figures actually stored:
+    the shared date when both components agree, the single component's date when only
+    one is present, and null when two present components disagree — in which case the
+    derived net debt is refused anyway.
+    """
+    def _extracted_or_manual(field: str):
+        value = field_values.get(field)
+        if value is not None:
+            return value
+        return existing[field] if existing is not None else None
+
+    total_debt = _extracted_or_manual("total_debt")
+    cash_st = _extracted_or_manual("cash_st")
+
+    total_debt_keys = _anchor_source_keys(field_observations, "total_debt", total_debt)
+    cash_st_keys = _anchor_source_keys(field_observations, "cash_st", cash_st)
+
+    total_debt_currency = _companion_from_sources(
+        field_observations, "total_debt_currency", total_debt_keys
+    ) or (existing["total_debt_currency"] if existing is not None else None)
+    cash_st_currency = _companion_from_sources(
+        field_observations, "cash_st_currency", cash_st_keys
+    ) or (existing["cash_st_currency"] if existing is not None else None)
+
+    total_debt_as_of = _companion_from_sources(
+        field_observations, "balance_sheet_as_of_date", total_debt_keys
+    )
+    cash_st_as_of = _companion_from_sources(
+        field_observations, "balance_sheet_as_of_date", cash_st_keys
+    )
+    manual_as_of = existing["balance_sheet_as_of_date"] if existing is not None else None
+    total_debt_as_of = total_debt_as_of or (manual_as_of if total_debt is not None else None)
+    cash_st_as_of = cash_st_as_of or (manual_as_of if cash_st is not None else None)
+
+    if total_debt is not None and cash_st is not None:
+        stored_as_of = total_debt_as_of if total_debt_as_of == cash_st_as_of else None
+    else:
+        stored_as_of = total_debt_as_of if total_debt is not None else cash_st_as_of
+
+    # Balance-sheet amounts are point-in-time by definition, so the period type is
+    # derived here rather than extracted — a constant the model never writes is a
+    # constant the model cannot mislabel as LTM/TTM/NTM. Null when no balance-sheet
+    # amount is present, so the marker never implies data that is not there.
+    has_balance_sheet_amount = total_debt is not None or cash_st is not None
+    period_type = BALANCE_SHEET_PERIOD_TYPE if has_balance_sheet_amount else None
+
+    return {
+        "total_debt": total_debt,
+        "total_debt_currency": total_debt_currency,
+        "total_debt_as_of": total_debt_as_of,
+        "cash_st": cash_st,
+        "cash_st_currency": cash_st_currency,
+        "cash_st_as_of": cash_st_as_of,
+        "balance_sheet_as_of_date": stored_as_of,
+        "balance_sheet_period_type": period_type,
+    }
+
+
 def _derive_enterprise_value(
     value_amount: float | None,
     value_type: str | None,
@@ -715,6 +1171,23 @@ def _pick_value(
     For booleans, any True (1) wins within each tier before cross-tier resolution.
     For JSON fields, comparison uses canonical serialization.
     """
+    # A human correction supersedes machine extraction for the same field.
+    #
+    # Without this, a remediation and the stale fact it corrects share a source and
+    # therefore a tier, so the tier-based selection below treats them as a disagreement
+    # between peers — resolved by confidence, or by asking the LLM. Both are wrong: the
+    # correction is not one more opinion, it is the answer. Restricting to remediations
+    # when any exist keeps the rest of the selection untouched for the ordinary case.
+    remediated = [
+        obs for obs in observations
+        if obs.get("observation_source_stage") == MANUAL_REMEDIATION_STAGE
+        and obs.get("value") is not None
+    ]
+    if remediated:
+        # Latest correction wins if a field is remediated more than once. Observation
+        # ids are monotonic, so the highest is the most recent.
+        return max(remediated, key=lambda o: o.get("observation_id") or 0)["value"], False, []
+
     # Group non-null observations by tier
     by_tier: dict[str, list[dict]] = defaultdict(list)
     for obs in observations:
@@ -1046,6 +1519,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
             tfo.field_name,
             tfo.field_value,
             tfo.field_value_numeric,
+            tfo.observation_source_stage,
             tfo.staging_extraction_id,
             tfo.source_raw_id,
             tfo.observation_fact_key,
@@ -1068,7 +1542,13 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
               'HC_EXTRACT',
               'FUNDING_HC_EXTRACT',
               'LC_EXTRACT',
-              'BACKFILL'
+              'BACKFILL',
+              -- A human correction of an extraction-layer fact. Omitting it meant a
+              -- remediation could be written to the ledger and then silently ignored
+              -- by the very derivation that exists to consume it. The allowlist is
+              -- still an allowlist: it admits producers of Stage 9 INPUTS and excludes
+              -- downstream stages whose observations Stage 9 does not own.
+              'MANUAL_REMEDIATION'
           )
         ORDER BY tfo.transaction_id, tfo.staging_extraction_id, tfo.observation_id
         """
@@ -1101,6 +1581,7 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
         bundle["field_observations"][field_name].append({
             "observation_id": row["observation_id"],
             "source_key": source_key,
+            "observation_source_stage": row["observation_source_stage"],
             "source_type": row["source_type"],
             "tier": row["source_tier"],
             "published_date": row["published_date"] or "",
@@ -1121,6 +1602,159 @@ def _load_aggregation_input(conn: sqlite3.Connection, read_source: str) -> dict[
 # Stage entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# transaction_record write ownership
+# ---------------------------------------------------------------------------
+#
+# The columns Stage 9 owns. Everything else on transaction_record belongs to a
+# later stage (Stage 10 sec_documents, Stage 11 agreement_extract) or to the row
+# itself (`notes`, `created_at`), and must survive re-aggregation untouched.
+#
+# This list is the single source of truth for the write: the placeholder count and
+# the conflict-update clause are both derived from it, so they cannot drift apart.
+# The params tuple at the call site must stay in this order.
+_STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
+    "transaction_id",
+    "deal_type",
+    "v2_event_type",
+    "event_history_type",
+    "spin_split_type",
+    "spin_split_type_v2",
+    "distribution_mechanism",
+    "recap_type",
+    "target_type",
+    "target_type_v2",
+    "event_type",
+    "transaction_status",
+    "target_status",
+    "target_name",
+    "target_domain",
+    "target_ticker",
+    "acquirer_name",
+    "acquirer_domain",
+    "acquirer_ticker",
+    "acquirer_type",
+    "acquirer_type_v2",
+    "parent_seller_name",
+    "parent_seller_ticker",
+    "target_description",
+    "acquirer_description",
+    "acquirer_sponsor_name",
+    "parent_seller_description",
+    "announced_date",
+    "announced_date_precision",
+    "closed_date",
+    "closed_date_precision",
+    "signing_date",
+    "signing_date_precision",
+    "rumor_date",
+    "value_amount",
+    "value_currency",
+    "value_type",
+    "per_share_price",
+    "pct_acquired",
+    "stake_transition_type",
+    "target_revenue",
+    "target_revenue_period_type",
+    "target_revenue_period_type_v2",
+    "target_revenue_period_end",
+    "target_ebitda",
+    "target_ebitda_period_type",
+    "target_ebitda_period_type_v2",
+    "target_ebitda_period_end",
+    "financials_currency",
+    "financials_disclosure_status",
+    "ev_to_revenue_ltm",
+    "ev_to_revenue_ntm",
+    "ev_to_ebitda_ltm",
+    "ev_to_ebitda_ntm",
+    "multiple_quality",
+    "consideration_type",
+    "consideration_components",
+    "includes_earnout",
+    "hostile",
+    "competing_bid",
+    "regulatory_approvals_required",
+    "has_go_shop",
+    "go_shop_period_days",
+    "target_fee_amount",
+    "target_fee_percentage",
+    "acquirer_fee_amount",
+    "acquirer_fee_percentage",
+    "is_take_private",
+    "is_minority",
+    "is_add_on",
+    "is_divestiture",
+    "is_de_spac",
+    "is_platform_investment",
+    "is_secondary_buyout",
+    "is_merger_of_equals",
+    "has_earnout",
+    "has_cvr",
+    "round_label",
+    "round_stage_category",
+    "round_size",
+    "pre_money_valuation",
+    "post_money_valuation",
+    "valuation_currency",
+    "round_currency",
+    "facility_size",
+    "total_raised_to_date",
+    "is_extension_round",
+    "is_down_round",
+    "is_bridge_round",
+    "use_of_proceeds",
+    "has_board_seat",
+    "board_seat_notes",
+    "is_current",
+    "aggregation_version",
+    "updated_at",
+    "net_debt",
+    "equity_value",
+    "equity_value_basis",
+    "implied_equity_value",
+    "implied_enterprise_value",
+    "implied_enterprise_value_basis",
+    "enterprise_value",
+    "enterprise_value_basis",
+    "investment_amount",
+    "transaction_size",
+    "transaction_size_basis",
+    "deal_value_currency",
+    "total_debt",
+    "cash_st",
+    "transaction_value",
+    "transaction_value_basis",
+    "pct_acquired_source",
+    "total_debt_currency",
+    "cash_st_currency",
+    "balance_sheet_as_of_date",
+    "balance_sheet_period_type",
+    "net_debt_currency",
+)
+
+# Upsert rather than INSERT OR REPLACE. REPLACE deletes the row and inserts a new
+# one, so every column absent from the list above was silently reset to NULL on each
+# re-aggregation — including Stage 10/11 output.
+#
+# The update assigns `excluded.<col>` directly, NOT COALESCE. That is deliberate: a
+# Stage-9-owned field whose newly aggregated evidence says NULL must actually become
+# NULL. COALESCE would turn each canonical field into a high-water mark that could
+# never be retracted, which is a worse defect than the one being fixed.
+_TRANSACTION_RECORD_UPSERT_SQL = (
+    "INSERT INTO transaction_record (\n    "
+    + ",\n    ".join(_STAGE9_OWNED_COLUMNS)
+    + "\n) VALUES (\n    "
+    + ",".join("?" * len(_STAGE9_OWNED_COLUMNS))
+    + "\n) ON CONFLICT(transaction_id) DO UPDATE SET\n    "
+    + ",\n    ".join(
+        f"{column}=excluded.{column}"
+        for column in _STAGE9_OWNED_COLUMNS
+        if column != "transaction_id"
+    )
+)
+
+
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     """Aggregate clustered extractions into canonical transaction records.
 
@@ -1131,7 +1765,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
               flagged_for_review, failed, transactions_created (run.py alias)
     """
     log = get_logger(_PROMPT_NAME, run_id, level=cfg.log_level)
-    read_source = getattr(cfg, "aggregation_read_source", "staging")
+    read_source = getattr(cfg, "aggregation_read_source", DEFAULT_AGGREGATION_READ_SOURCE)
 
     prompt = load_prompt_file(_PROMPT_NAME)
     register_prompt_version(conn, _PROMPT_NAME, _VERSION, prompt["file_hash"])
@@ -1188,6 +1822,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 if _ftype == "json" and isinstance(field_values.get(_fname), (list, dict)):
                     field_values[_fname] = json.dumps(field_values[_fname])
 
+            # §2.10 items 1-2 — re-anchor each financial qualifier to the source of
+            # its own amount, before anything reads or persists them.
+            _anchor_metric_qualifiers(field_values, bundle["field_observations"])
+
             # Derive additional fields
             field_values.update(sponsor_participant_context.get(cluster_id, {}))
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
@@ -1203,7 +1841,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Check for existing transaction_record to determine version and to
             # preserve the manual net_debt input across re-aggregation.
             existing = conn.execute(
-                "SELECT aggregation_version, net_debt, total_debt, cash_st FROM transaction_record WHERE transaction_id=?",
+                "SELECT aggregation_version, net_debt, total_debt, cash_st, "
+                "net_debt_currency, total_debt_currency, cash_st_currency, "
+                "balance_sheet_as_of_date FROM transaction_record WHERE transaction_id=?",
                 (cluster_id,),
             ).fetchone()
             agg_version = (existing["aggregation_version"] + 1) if existing else 1
@@ -1211,18 +1851,50 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Derive valuations (the deterministic job — LLM captured primitives only).
             # sec_shares comes from SEC enrichment once it runs; None on PR-only data.
             # net_debt, total_debt, and cash_st are manual collection inputs in
-            # the interim; keep any stored value.
+            # the interim; keep any stored value. Their currency and as-of anchors
+            # are manual alongside them and preserved the same way.
             sec_shares = None
-            net_debt = existing["net_debt"] if existing else None
-            total_debt = existing["total_debt"] if existing else None
-            cash_st = existing["cash_st"] if existing else None
+            net_debt_reported = existing["net_debt"] if existing else None
+            net_debt_currency = existing["net_debt_currency"] if existing else None
+            balance_sheet = _resolve_balance_sheet_inputs(
+                field_values, bundle["field_observations"], existing
+            )
+            total_debt = balance_sheet["total_debt"]
+            total_debt_currency = balance_sheet["total_debt_currency"]
+            cash_st = balance_sheet["cash_st"]
+            cash_st_currency = balance_sheet["cash_st_currency"]
+            balance_sheet_as_of_date = balance_sheet["balance_sheet_as_of_date"]
+            balance_sheet_period_type = balance_sheet["balance_sheet_period_type"]
+            net_debt, net_debt_resolved_currency, _net_debt_as_of, net_debt_basis = _derive_net_debt(
+                net_debt_reported,
+                net_debt_currency,
+                total_debt,
+                total_debt_currency,
+                balance_sheet["total_debt_as_of"],
+                cash_st,
+                cash_st_currency,
+                balance_sheet["cash_st_as_of"],
+            )
             pct_resolved, pct_acquired_source = _resolve_pct_acquired(
                 field_values, derived["is_minority"]
             )
+            # Each canonical value field consumes the best observation of its own
+            # semantic type; none of them may depend on which type happens to win
+            # the single legacy value_amount/value_type pair. Without this, a
+            # cluster stating both an equity figure and a whole-company EV loses
+            # whichever type loses that collapse.
+            typed_equity_value_amount = _pick_value_amount_for_type(
+                bundle["field_observations"], "EQUITY_VALUE"
+            )
+            equity_value_fields = dict(field_values)
+            if typed_equity_value_amount is not None:
+                equity_value_fields["value_amount"] = typed_equity_value_amount
+                equity_value_fields["value_type"] = "EQUITY_VALUE"
             equity_value, equity_value_basis = _derive_equity_value(
-                field_values,
+                equity_value_fields,
                 field_values.get("per_share_price"),
                 sec_shares,
+                pct_resolved,
             )
             implied_equity_value = _derive_implied_equity(equity_value, pct_resolved)
             investment_amount = _derive_investment_amount(field_values)
@@ -1236,12 +1908,19 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             if typed_transaction_value_amount is not None:
                 transaction_value_fields["value_amount"] = typed_transaction_value_amount
                 transaction_value_fields["value_type"] = "TRANSACTION_VALUE"
-            transaction_value, transaction_value_basis = _derive_transaction_value(
-                transaction_value_fields, equity_value, total_debt, pct_resolved
-            )
             # Currency companion for the derived value fields; null on a genuine
             # currency mismatch (§4.7 — the null is itself the queryable signal).
+            # Resolved before the debt-inclusive derivations, which need it to check
+            # the deal currency against the balance-sheet currency.
             deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
+            transaction_value, transaction_value_basis = _derive_transaction_value(
+                transaction_value_fields, equity_value, total_debt, pct_resolved,
+                equity_currency=deal_value_currency,
+                total_debt_currency=total_debt_currency,
+            )
+            transaction_size, transaction_size_basis = _derive_transaction_size(
+                field_values, transaction_value
+            )
             implied_enterprise_value_amount = (
                 typed_enterprise_value_amount
                 if typed_enterprise_value_amount is not None
@@ -1257,9 +1936,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 implied_enterprise_value_type,
                 implied_equity_value,
                 net_debt,
-                total_debt,
-                cash_st,
+                implied_equity_currency=deal_value_currency,
+                net_debt_currency=net_debt_resolved_currency,
+                net_debt_basis=net_debt_basis,
             )
+            if (
+                implied_equity_value is not None
+                and net_debt is not None
+                and implied_enterprise_value is None
+            ):
+                log.warning(
+                    "cluster=%s implied EV not derived — deal currency %r vs net-debt "
+                    "currency %r must both be known and equal (§2.10 item 1; no FX date "
+                    "available)",
+                    cluster_id, deal_value_currency, net_debt_resolved_currency,
+                )
             # Legacy compatibility columns mirror the canonical Tier-2 field until
             # downstream readers are moved.
             enterprise_value = implied_enterprise_value
@@ -1288,46 +1979,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
             # Upsert transaction_record
             conn.execute(
-                """
-                INSERT OR REPLACE INTO transaction_record (
-                    transaction_id, deal_type, v2_event_type, event_history_type,
-                    spin_split_type, spin_split_type_v2, distribution_mechanism, recap_type,
-                    target_type, target_type_v2, event_type, transaction_status, target_status,
-                    target_name, target_domain, target_ticker,
-                    acquirer_name, acquirer_domain, acquirer_ticker, acquirer_type, acquirer_type_v2,
-                    parent_seller_name, parent_seller_ticker,
-                    target_description, acquirer_description, acquirer_sponsor_name, parent_seller_description,
-                    announced_date, announced_date_precision, closed_date, closed_date_precision,
-                    signing_date, signing_date_precision, rumor_date,
-                    value_amount, value_currency, value_type, per_share_price, pct_acquired,
-                    stake_transition_type,
-                    target_revenue, target_revenue_period_type, target_revenue_period_type_v2, target_revenue_period_end,
-                    target_ebitda, target_ebitda_period_type, target_ebitda_period_type_v2, target_ebitda_period_end,
-                    financials_currency, financials_disclosure_status,
-                    ev_to_revenue_ltm, ev_to_revenue_ntm, ev_to_ebitda_ltm, ev_to_ebitda_ntm, multiple_quality,
-                    consideration_type, consideration_components,
-                    includes_earnout, hostile, competing_bid, regulatory_approvals_required,
-                    has_go_shop, go_shop_period_days,
-                    target_fee_amount, target_fee_percentage,
-                    acquirer_fee_amount, acquirer_fee_percentage,
-                    is_take_private, is_minority, is_add_on, is_divestiture, is_de_spac,
-                    is_platform_investment, is_secondary_buyout, is_merger_of_equals,
-                    has_earnout, has_cvr,
-                    round_label, round_stage_category, round_size,
-                    pre_money_valuation, post_money_valuation, valuation_currency, round_currency,
-                    facility_size, total_raised_to_date,
-                    is_extension_round, is_down_round, is_bridge_round,
-                    use_of_proceeds, has_board_seat, board_seat_notes,
-                    is_current, aggregation_version, updated_at,
-                    net_debt, equity_value, equity_value_basis,
-                    implied_equity_value, implied_enterprise_value, implied_enterprise_value_basis,
-                    enterprise_value, enterprise_value_basis,
-                    investment_amount, deal_value_currency,
-                    total_debt, cash_st, transaction_value, transaction_value_basis, pct_acquired_source
-                ) VALUES (
-                    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
-                )
-                """,
+                _TRANSACTION_RECORD_UPSERT_SQL,
                 (
                     cluster_id,
                     field_values.get("deal_type") or field_values.get("v2_event_type"),
@@ -1434,12 +2086,22 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     enterprise_value,
                     enterprise_value_basis,
                     investment_amount,
+                    transaction_size,
+                    transaction_size_basis,
                     deal_value_currency,
                     total_debt,
                     cash_st,
                     transaction_value,
                     transaction_value_basis,
                     pct_acquired_source,
+                    total_debt_currency,
+                    cash_st_currency,
+                    balance_sheet_as_of_date,
+                    balance_sheet_period_type,
+                    # Read from `existing` above and written back here: Stage 9 uses
+                    # INSERT OR REPLACE, so a manual input that is read but not
+                    # re-persisted survives exactly one pass and is then nulled.
+                    net_debt_currency,
                 ),
             )
 

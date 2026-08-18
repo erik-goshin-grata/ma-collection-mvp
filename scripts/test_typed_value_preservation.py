@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
-"""Regression guard for same-source typed deal-value preservation.
+"""Regression guard for typed deal-value preservation.
 
-No live model calls. The fixture mirrors Samsonite / BÉIS:
+No live model calls. Two scenarios, both mirroring Samsonite / BÉIS:
 - 85% acquired for $178.5M equity value
 - separately stated $210M enterprise value
 - separately stated 2025 net sales of $210M
+
+Scenario 1 (single source): one article carries both typed value facts. The
+legacy collapsed value_amount/value_type slot happens to hold the equity fact.
+
+Scenario 2 (multi source): the cluster spans two articles, and the legacy
+collapsed slot resolves to the *enterprise* fact. Every canonical value field
+must still be populated from its own semantic type. This is the general
+guardrail — independently typed facts must survive independently of whichever
+type wins the single legacy slot — and it is the shape the single-source
+scenario cannot exercise, because there the legacy winner is the equity fact
+by construction.
 """
 
 from __future__ import annotations
@@ -160,7 +171,12 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
         """,
         (source_raw_id, _value_observations_json(hc_result), TXN_ID),
     )
-    extraction_id = int(conn.execute("SELECT extraction_id FROM staging_extraction").fetchone()[0])
+    extraction_id = int(
+        conn.execute(
+            "SELECT extraction_id FROM staging_extraction WHERE source_raw_id = ?",
+            (source_raw_id,),
+        ).fetchone()[0]
+    )
     write_staging_observations_for_extraction(
         conn,
         extraction_id,
@@ -170,6 +186,133 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
     )
     conn.commit()
     return extraction_id
+
+
+def _insert_second_source_fixture(conn: sqlite3.Connection) -> int:
+    """A second independent article in the same cluster, stating only the $210M EV.
+
+    Non-value fields deliberately mirror the first source so the only contested
+    field group is the value pair — the scenario under test. The legacy
+    value_amount/value_type slot on this row carries ENTERPRISE_VALUE, so the
+    cluster's collapsed legacy winner is no longer the equity fact.
+    """
+    body = (
+        "Samsonite Group S.A.'s acquisition of BÉIS, LLC values the business at "
+        "a total enterprise value of approximately $210 million."
+    )
+    cur = conn.execute(
+        """
+        INSERT INTO source_raw (
+            source_type, source_tier, url, title, published_date, clean_text,
+            content_hash, source_status, fetched_at
+        ) VALUES (
+            'WEB_URL', 'T2', 'https://example.test/samsonite-beis-second',
+            'Samsonite values BÉIS at $210 million', '2026-08-13', ?,
+            'typed-value-preservation-fixture-2', 'RELEVANT', '2026-08-14T00:00:00Z'
+        )
+        """,
+        (body,),
+    )
+    source_raw_id = int(cur.lastrowid)
+
+    hc_result = {
+        "target": {"name": "BÉIS, LLC"},
+        "acquirer": {"name": "Samsonite Group S.A.", "type": "strategic_corporate"},
+        "parent_seller": {},
+        "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE"},
+        "dates": {"announced_date": "2026-08-12", "announced_date_precision": "exact"},
+        "value": {
+            "amount": 210_000_000,
+            "currency": "USD",
+            "type": "ENTERPRISE_VALUE",
+            "type_confidence": "HIGH",
+            "qualifier": None,
+            "per_share_price": None,
+        },
+        "value_observations": [
+            {
+                "amount": 210_000_000,
+                "currency": "USD",
+                "type": "ENTERPRISE_VALUE",
+                "basis": "STATED",
+                "qualifier": "approximately",
+                "evidence": "total enterprise value of approximately $210 million",
+            },
+        ],
+        "features": {
+            "is_platform_investment": None,
+            "is_secondary_buyout": None,
+            "is_merger_of_equals": None,
+        },
+        "financials_disclosure_status": "DISCLOSED",
+        "target_financials": {},
+        "model_confidence": "HIGH",
+    }
+    err = _validate(hc_result)
+    if err:
+        raise AssertionError(err)
+
+    conn.execute(
+        """
+        INSERT INTO staging_extraction (
+            source_raw_id, status, deal_type, v2_event_type, event_history_type,
+            target_status, target_type, target_type_v2,
+            target_name, acquirer_name, acquirer_type, acquirer_type_v2,
+            pct_acquired, stake_transition_type, announced_date, announced_date_precision,
+            value_amount, value_currency, value_type, value_type_confidence,
+            value_observations,
+            financials_disclosure_status,
+            model_confidence, dt_prompt_version, hc_prompt_version, transaction_cluster_id
+        ) VALUES (
+            ?, 'CLUSTERED', 'ACQUISITION', 'ACQUISITION', 'ANNOUNCED',
+            'PRIVATE', 'standalone_company', 'standalone_company',
+            'BÉIS, LLC', 'Samsonite Group S.A.', 'strategic_corporate', 'strategic_corporate',
+            85.0, 'NEW_MAJORITY_STAKE', '2026-08-12', 'exact',
+            210000000, 'USD', 'ENTERPRISE_VALUE', 'HIGH',
+            ?,
+            'DISCLOSED',
+            'HIGH', '0.7', '0.15', ?
+        )
+        """,
+        (source_raw_id, _value_observations_json(hc_result), TXN_ID),
+    )
+    extraction_id = int(
+        conn.execute(
+            "SELECT extraction_id FROM staging_extraction WHERE source_raw_id = ?",
+            (source_raw_id,),
+        ).fetchone()[0]
+    )
+    write_staging_observations_for_extraction(
+        conn,
+        extraction_id,
+        observation_source_stage="HC_EXTRACT",
+        include_stage3=True,
+        include_hc=True,
+    )
+    conn.commit()
+    return extraction_id
+
+
+def _enterprise_winner_conflict_stub(field_name, _field_type, _context, observations, *_args, **_kwargs):
+    """Legacy-slot conflict resolution that lands on the enterprise fact.
+
+    With two of the three typed value observations in the cluster stating
+    ENTERPRISE_VALUE, the collapsed legacy pair resolving to 210M/ENTERPRISE_VALUE
+    is a legitimate outcome. The canonical typed fields must not depend on it.
+    """
+    chosen = {"value_amount": 210_000_000.0, "value_type": "ENTERPRISE_VALUE"}
+    if field_name not in chosen:
+        raise AssertionError(f"unexpected aggregation conflict for {field_name}")
+    return {
+        "chosen_observation_id": observations[0]["observation_id"],
+        "chosen_value": chosen[field_name],
+        "aggregation_confidence": "HIGH",
+        "conflict_type": "SEMANTIC",
+        "flagged_for_review": False,
+        "reasoning": "two of three typed observations state enterprise value",
+        "notes": None,
+        "prompt_version": "test",
+    }
 
 
 def _legacy_conflict_stub(field_name, _field_type, _context, observations, *_args, **_kwargs):
@@ -198,8 +341,7 @@ def _legacy_conflict_stub(field_name, _field_type, _context, observations, *_arg
     raise AssertionError(f"unexpected aggregation conflict for {field_name}")
 
 
-def main() -> None:
-    failures: list[str] = []
+def _scenario_single_source(failures: list[str]) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         db_path = str(Path(tmp) / "typed_value_preservation.db")
         init_db(db_path)
@@ -284,11 +426,70 @@ def main() -> None:
         _assert_equal(failures, "is_minority", row["is_minority"], 0)
         conn.close()
 
+
+def _scenario_multi_source(failures: list[str]) -> None:
+    """Two articles, one cluster, legacy slot resolving to the enterprise fact.
+
+    Asserts the canonical value model is driven by the typed observations rather
+    than by whichever semantic type wins the single legacy value_amount/value_type
+    pair.
+    """
+    prefix = "multi-source"
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = str(Path(tmp) / "typed_value_preservation_multi.db")
+        init_db(db_path)
+        conn = get_connection(db_path)
+        _insert_fixture(conn)
+        _insert_second_source_fixture(conn)
+
+        original_call_agg_prompt = aggregate._call_agg_prompt
+        aggregate._call_agg_prompt = _enterprise_winner_conflict_stub
+        try:
+            cfg = SimpleNamespace(log_level="ERROR", aggregation_read_source="observation")
+            aggregate.run(conn, cfg, "typed_value_preservation_multi_test")
+        finally:
+            aggregate._call_agg_prompt = original_call_agg_prompt
+
+        row = conn.execute("SELECT * FROM transaction_record WHERE transaction_id = ?", (TXN_ID,)).fetchone()
+        if row is None:
+            failures.append(f"{prefix}: no transaction_record produced for {TXN_ID}")
+            conn.close()
+            return
+
+        # The legacy compatibility slot is expected to hold the enterprise fact here.
+        _assert_equal(failures, f"{prefix} legacy value_amount", row["value_amount"], 210_000_000.0)
+        _assert_equal(failures, f"{prefix} legacy value_type", row["value_type"], "ENTERPRISE_VALUE")
+
+        # Canonical typed fields must be unaffected by that collapse.
+        _assert_equal(failures, f"{prefix} equity_value", row["equity_value"], 178_500_000.0)
+        _assert_equal(failures, f"{prefix} equity_value_basis", row["equity_value_basis"], "STATED")
+        _assert_equal(failures, f"{prefix} transaction_value", row["transaction_value"], 178_500_000.0)
+        _assert_equal(
+            failures, f"{prefix} transaction_value_basis", row["transaction_value_basis"], "EQUITY_VALUE_ONLY"
+        )
+        _assert_equal(failures, f"{prefix} implied_equity_value", row["implied_equity_value"], 210_000_000.0)
+        _assert_equal(
+            failures, f"{prefix} implied_enterprise_value", row["implied_enterprise_value"], 210_000_000.0
+        )
+        _assert_equal(
+            failures, f"{prefix} implied_enterprise_value_basis", row["implied_enterprise_value_basis"], "STATED"
+        )
+        _assert_equal(failures, f"{prefix} target_revenue", row["target_revenue"], 210_000_000.0)
+        _assert_equal(failures, f"{prefix} ev_to_revenue_ltm", row["ev_to_revenue_ltm"], 1.0)
+        _assert_equal(failures, f"{prefix} pct_acquired", row["pct_acquired"], 85.0)
+        conn.close()
+
+
+def main() -> None:
+    failures: list[str] = []
+    _scenario_single_source(failures)
+    _scenario_multi_source(failures)
+
     if failures:
         for failure in failures:
             print("FAIL", failure)
         raise SystemExit(1)
-    print("PASS typed value preservation: Samsonite-style same-source facts survive")
+    print("PASS typed value preservation: single-source and multi-source typed facts survive")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from stages.aggregate import (
+    _derive_net_debt,
     _compute_multiples,
     _derive_equity_value,
     _derive_implied_enterprise_value,
@@ -24,6 +25,26 @@ from stages.aggregate import (
     _pick_value_amount_for_type,
 )
 
+
+
+_AS_OF = "2025-12-31"
+
+
+def _implied_ev_from_components(implied_equity, total_debt, cash_st):
+    """Component path: coherent net debt first, then the implied EV sum.
+
+    Mirrors how aggregation now composes these — _derive_net_debt owns the
+    component-coherence rules (one currency, one balance-sheet date) and
+    _derive_implied_enterprise_value consumes the resolved figure.
+    """
+    net_debt, net_debt_currency, _as_of, basis = _derive_net_debt(
+        None, None, total_debt, "USD", _AS_OF, cash_st, "USD", _AS_OF
+    )
+    return _derive_implied_enterprise_value(
+        None, None, implied_equity, net_debt,
+        implied_equity_currency="USD", net_debt_currency=net_debt_currency,
+        net_debt_basis=basis,
+    )
 
 def _assert_equal(failures: list[str], name: str, got, expected) -> None:
     if got != expected:
@@ -41,39 +62,42 @@ def main() -> None:
     _assert_equal(
         failures,
         "25pct_no_debt_cash_st_no_implied_ev",
-        _derive_implied_enterprise_value(None, None, implied_equity, None, None, None),
+        _derive_implied_enterprise_value(None, None, implied_equity, None),
         (None, None),
     )
     _assert_equal(
         failures,
         "25pct_total_debt_without_cash_st_no_zero_assumption",
-        _derive_implied_enterprise_value(None, None, implied_equity, None, 1_200_000_000.0, None),
-        (None, None),
+        _derive_net_debt(None, None, 1_200_000_000.0, "USD", _AS_OF, None, None, None),
+        (None, None, None, None),
     )
     _assert_equal(
         failures,
         "25pct_reported_net_debt_calculates_whole_company_ev",
-        _derive_implied_enterprise_value(None, None, implied_equity, 900_000_000.0, None, None),
-        (10_900_000_000.0, "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT"),
-    )
-    _assert_equal(
-        failures,
-        "25pct_with_total_debt_and_cash_st_calculates_net_debt_then_ev",
-        _derive_implied_enterprise_value(None, None, implied_equity, None, 1_200_000_000.0, 200_000_000.0),
-        (11_000_000_000.0, "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT"),
-    )
-    _assert_equal(
-        failures,
-        "reported_net_debt_preferred_over_calculated_net_debt",
         _derive_implied_enterprise_value(
-            None, None, implied_equity, 900_000_000.0, 1_200_000_000.0, 200_000_000.0
+            None, None, implied_equity, 900_000_000.0,
+            implied_equity_currency="USD", net_debt_currency="USD", net_debt_basis="REPORTED",
         ),
         (10_900_000_000.0, "IMPLIED_EQUITY_PLUS_REPORTED_NET_DEBT"),
     )
     _assert_equal(
         failures,
+        "25pct_with_total_debt_and_cash_st_calculates_net_debt_then_ev",
+        _implied_ev_from_components(implied_equity, 1_200_000_000.0, 200_000_000.0),
+        (11_000_000_000.0, "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT"),
+    )
+    _assert_equal(
+        failures,
+        "reported_net_debt_preferred_over_calculated_net_debt",
+        _derive_net_debt(
+            900_000_000.0, "USD", 1_200_000_000.0, "USD", _AS_OF, 200_000_000.0, "USD", _AS_OF
+        )[3],
+        "REPORTED",
+    )
+    _assert_equal(
+        failures,
         "source_stated_ev_populates_directly",
-        _derive_implied_enterprise_value(8_500_000_000.0, "ENTERPRISE_VALUE", None, None, None, None),
+        _derive_implied_enterprise_value(8_500_000_000.0, "ENTERPRISE_VALUE", None, None),
         (8_500_000_000.0, "STATED"),
     )
     mediaworks_observations = {
@@ -133,8 +157,6 @@ def main() -> None:
                 "ENTERPRISE_VALUE",
                 None,
                 None,
-                None,
-                None,
             ),
         ),
         ((130_000_000.0, "STATED"), (130_000_000.0, "STATED")),
@@ -142,26 +164,24 @@ def main() -> None:
     _assert_equal(
         failures,
         "stake_equity_not_used_as_ev_base",
-        _derive_implied_enterprise_value(None, None, None, None, 1_200_000_000.0, 200_000_000.0),
+        _implied_ev_from_components(None, 1_200_000_000.0, 200_000_000.0),
         (None, None),
     )
     _assert_equal(
         failures,
         "full_acquisition_stable_implied_ev",
-        _derive_implied_enterprise_value(
-            None,
-            None,
-            _derive_implied_equity(900_000_000.0, 100.0),
-            None,
-            150_000_000.0,
-            50_000_000.0,
+        _implied_ev_from_components(
+            _derive_implied_equity(900_000_000.0, 100.0), 150_000_000.0, 50_000_000.0
         ),
         (1_000_000_000.0, "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT"),
     )
     _assert_equal(
         failures,
         "full_acquisition_transaction_value_stable",
-        _derive_transaction_value({}, 900_000_000.0, 150_000_000.0, 100.0),
+        _derive_transaction_value(
+            {}, 900_000_000.0, 150_000_000.0, 100.0,
+            equity_currency="USD", total_debt_currency="USD",
+        ),
         (1_050_000_000.0, "EQUITY_PLUS_TOTAL_DEBT"),
     )
     equity_only_tv, equity_only_basis = _derive_transaction_value(
@@ -176,7 +196,7 @@ def main() -> None:
     _assert_equal(
         failures,
         "equity_only_transaction_value_does_not_imply_ev",
-        _derive_implied_enterprise_value(None, None, 210_000_000.0, None, None, None),
+        _derive_implied_enterprise_value(None, None, 210_000_000.0, None),
         (None, None),
     )
 

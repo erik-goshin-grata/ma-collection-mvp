@@ -25,6 +25,12 @@ class ConfigurationError(Exception):
     """Raised when a required env var is missing or a value is invalid."""
 
 
+# Stage 9's read path. Defined once and imported by the stage, so the config
+# default and the stage's own fallback cannot drift apart.
+AGGREGATION_READ_SOURCES = ("staging", "observation")
+DEFAULT_AGGREGATION_READ_SOURCE = "observation"
+
+
 @dataclass(frozen=True)
 class Config:
     # --- Required / provider-selected ---
@@ -154,7 +160,13 @@ def load_config() -> Config:
     db_path = _opt_str("DB_PATH", "data/ma_mvp.db")
     log_level = _opt_str("LOG_LEVEL", "INFO").upper()
     run_id_prefix = _opt_str("RUN_ID_PREFIX", "")
-    aggregation_read_source = _opt_str("AGGREGATION_READ_SOURCE", "staging").lower()
+    # Stage 9 reads the observation ledger by default. Only the observation path
+    # carries a per-fact source key, so it is the only read source that can keep
+    # multiple independently typed values from one source distinct. `staging`
+    # remains supported as an explicit rollback/debug path.
+    aggregation_read_source = _opt_str(
+        "AGGREGATION_READ_SOURCE", DEFAULT_AGGREGATION_READ_SOURCE
+    ).lower()
 
     opus_model = _opt_str("OPUS_MODEL", "claude-opus-4-7")
     sonnet_model = _opt_str("SONNET_MODEL", "claude-sonnet-4-6")
@@ -170,7 +182,7 @@ def load_config() -> Config:
         raise ConfigurationError(
             f"LOG_LEVEL must be one of {sorted(valid_levels)}, got: {log_level!r}"
         )
-    if aggregation_read_source not in {"staging", "observation"}:
+    if aggregation_read_source not in AGGREGATION_READ_SOURCES:
         raise ConfigurationError(
             "AGGREGATION_READ_SOURCE must be one of: 'staging', 'observation'. "
             f"Got: {aggregation_read_source!r}"

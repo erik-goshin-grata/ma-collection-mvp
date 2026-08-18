@@ -16,11 +16,11 @@ July 28, 2026.
 | Prompt | File | Current Version | Last Changed | V2 Enum Target | Notes |
 |---|---|---|---|---|---|
 | Deal Type Classifier | `prompts/deal_type_classifier.md` | 0.7 | 2026-08-12 | V2-2026-07-28 + harness minority cleanup | Removes `MINORITY_INVESTMENT` from core output vocabulary; routes minority transactions to underlying core event; public PIPE/primary issuance does not force Growth/VC |
-| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.14 | 2026-08-12 | V2-2026-07-28 + harness stake transition | 0.14: nullable `deal.stake_transition_type` when explicit. 0.13: capital-raised precondition + `round_size` capture |
+| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.18 | 2026-08-17 | V2-2026-07-28 + equity scope | 0.18: `EQUITY_VALUE` is stake-level consideration only; market capitalization split out as its own `MARKET_CAPITALIZATION` type, retained as a fact but never canonical consideration. 0.17: `total_debt`/`cash_st` with per-figure currency + `balance_sheet_as_of_date`, POINT_IN_TIME framing, source-stated-USD preference. 0.16: transaction feature flags. 0.15: platform/secondary/MOE. 0.14: nullable `deal.stake_transition_type` when explicit. 0.13: capital-raised precondition + `round_size` capture |
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section added; LTM/NTM non-interchangeable rule; period type semantic conflict example |
 | Deal Summary | `prompts/deal_summary.md` | 0.9 | 2026-07-28 | V2-2026-07-28 | Input fields updated to V2 names; RECAPITALIZATION framing added; NTM multiples in framing rule |
 | Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |
-| Funding HC Extraction | `prompts/funding_hc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT. Multi-investment source support. Sparse source handling. |
+| Funding HC Extraction | `prompts/funding_hc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | **Validated 2026-08-17: 8/8 on real-source fixtures; no change warranted.** New prompt — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT. Multi-investment source support. Sparse source handling. |
 
 ---
 
@@ -40,6 +40,8 @@ July 28, 2026.
 
 | Date | Prompts Changed | Versions | Change | Enum Target |
 |---|---|---|---|---|
+| 2026-08-17 | High Confidence Extraction | hc_extract 0.18 | `EQUITY_VALUE` narrowed to the equity purchase price for the stake actually acquired; market capitalization is no longer an `EQUITY_VALUE` and gets its own `MARKET_CAPITALIZATION` type, captured so the fact survives but never used as deal consideration | V2-2026-07-28 + equity scope |
+| 2026-08-17 | High Confidence Extraction | hc_extract 0.17 | Balance-sheet capture: `total_debt` and `cash_st` as point-in-time figures with their own currency and an exact `balance_sheet_as_of_date`; POINT_IN_TIME is the only period framing; prefer a source-stated USD figure and never self-convert | V2-2026-07-28 + balance-sheet capture |
 | 2026-08-12 | Deal Type Classifier, High Confidence Extraction | classifier 0.7, hc_extract 0.14 | Harness minority cleanup: minority is derived flag, not core event type; explicit `stake_transition_type` added for ownership step-ups including Lumina/TNQTech | V2-2026-07-28 + harness minority cleanup |
 | 2026-07-28 | All five | classifier 0.6, hc_extract 0.12, aggregation 0.4, deal_summary 0.9, strategic_rationale 0.5 | V2 vocabulary alignment — event type rename, lowercase acquirer_type and target_type, period_type enum enforcement, RECAPITALIZATION added, date precision fields, rumor_date, financials_disclosure_status, consideration_type interim field | V2-2026-07-28 |
 

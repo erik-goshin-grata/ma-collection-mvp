@@ -27,6 +27,7 @@ import trafilatura
 from adapters.csv_url import _BROWSER_UA, _build_notes, _read_csv, extract_page_date, insert_source_raw
 from config import ConfigurationError, get_config
 from db import get_connection, init_db
+from lib.body_quality import MIN_BODY_CHARS, body_rejection_reason
 from logger import get_logger
 from utils import content_hash as _content_hash
 
@@ -59,7 +60,7 @@ def _visible_text(page) -> str | None:
             text = page.locator(selector).first.inner_text(timeout=2_000).strip()
         except Exception:
             continue
-        if len(text) >= 100:
+        if len(text) >= MIN_BODY_CHARS:
             return text
     return None
 
@@ -80,12 +81,23 @@ def _render_and_extract(page, url: str, *, timeout_ms: int, wait_ms: int) -> tup
     except Exception as exc:
         return None, None, f"{type(exc).__name__}: {exc}"
 
+    # A rendered block/interstitial page yields plenty of extractable text, so a
+    # length-only check accepts it. Gate both the primary extraction and the
+    # visible-text fallback — the fallback reads the same DOM and would happily
+    # return the same block message.
     clean = trafilatura.extract(raw_html)
-    if not clean or len(clean) < 100:
-        clean = _visible_text(page)
-    if not clean or len(clean) < 100:
-        return raw_html, None, f"empty clean text; status={response_status}"
-    return raw_html, clean, None
+    reason = body_rejection_reason(clean, raw_html=raw_html)
+    if reason is None:
+        return raw_html, clean, None
+
+    fallback = _visible_text(page)
+    fallback_reason = body_rejection_reason(fallback, raw_html=raw_html)
+    if fallback_reason is None:
+        return raw_html, fallback, None
+
+    # A block verdict is more informative than a bare emptiness verdict.
+    final_reason = reason if reason.startswith("block_page") else fallback_reason
+    return raw_html, None, f"{final_reason}; status={response_status}"
 
 
 def _proxy_from_args_or_env(args: argparse.Namespace) -> dict | None:
@@ -243,6 +255,7 @@ def main() -> None:
         records = records[:args.limit]
 
     inserted = updated = skipped_existing = skipped_duplicate = empty_body = errors = 0
+    blocked_body = 0
     started = time.monotonic()
     try:
         with sync_playwright() as p:
@@ -283,7 +296,15 @@ def main() -> None:
                 pub_date = rec["published_date"] or extract_page_date(raw_html)
 
                 if clean is None:
-                    empty_body += 1
+                    # Recovery did NOT succeed. Never persist the rendered text and
+                    # never emit an Inserted/Updated line for it — a block page
+                    # logged as a successful body is exactly how an unusable row
+                    # comes to look recovered.
+                    is_blocked = bool(error) and error.startswith("block_page")
+                    if is_blocked:
+                        blocked_body += 1
+                    else:
+                        empty_body += 1
                     if raw_html is not None and not conn.execute("SELECT 1 FROM source_raw WHERE url = ?", (url,)).fetchone():
                         insert_source_raw(
                             conn,
@@ -293,10 +314,16 @@ def main() -> None:
                             raw_html=raw_html,
                             clean_text=None,
                             c_hash=None,
-                            notes=_build_notes(rec),
+                            notes=_build_notes(rec, rejection_reason=error),
                             fetched_at=fetched_at,
                         )
-                    log.warning("No usable body for %s (%s)", url, error)
+                    if is_blocked:
+                        log.warning(
+                            "Blocked/interstitial page — NOT recovered, body left unchanged for %s (%s)",
+                            url, error,
+                        )
+                    else:
+                        log.warning("No usable body for %s (%s)", url, error)
                     continue
 
                 c_hash = _content_hash(clean)
@@ -346,6 +373,7 @@ def main() -> None:
     print(f"  Skipped existing:   {skipped_existing}")
     print(f"  Skipped duplicate:  {skipped_duplicate}")
     print(f"  Empty body:         {empty_body}")
+    print(f"  Blocked body:       {blocked_body}")
     print(f"  Errors:             {errors}")
     print(f"  Runtime seconds:    {round(time.monotonic() - started, 1)}")
 

@@ -150,13 +150,20 @@ def _multiple(ltm: object, ntm: object) -> str:
 
 
 def _review_transaction_size(r: dict[str, object], tr_cols: set[str]) -> tuple[object, str]:
+    """Surface the canonical `transaction_size` and its basis. Never re-derive them.
+
+    This used to carry a two-rung shadow waterfall — round size for funding types, else
+    transaction value — because the canonical field did not exist yet. It does now
+    (`stages/aggregate.py:_derive_transaction_size`), and the shadow is retired rather
+    than kept as a backstop: two independent waterfalls drift, and the export is the
+    surface where a reviewer would be least able to tell which one produced a number.
+
+    A canonical null therefore shows as blank even where the shadow would have printed a
+    figure. That is the intended outcome — the canonical rules say the magnitude is
+    unsupported, and a blank states that honestly.
+    """
     if "transaction_size" in tr_cols and r.get("transaction_size") is not None:
         return r.get("transaction_size"), str(r.get("transaction_size_basis") or "")
-    event_type = r.get("v2_event_type") or r.get("deal_type") or r.get("event_type")
-    if event_type in {"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"} and r.get("round_size") is not None:
-        return r.get("round_size"), "ROUND_SIZE"
-    if r.get("transaction_value") is not None:
-        return r.get("transaction_value"), "TRANSACTION_VALUE"
     return "", ""
 
 

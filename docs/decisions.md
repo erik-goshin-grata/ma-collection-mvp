@@ -1153,3 +1153,1097 @@ Consequences:
 - Stale annual facts and future annual period ends do not auto-calculate.
 - P/E and P/B remain out of scope because this pipeline does not implement net-income/book-value
   denominator capture or equity-multiple calculation.
+
+## 2026-08-17 - Stage 9 Reads the Observation Ledger by Default
+
+Status: accepted.
+
+Decision:
+
+- `AGGREGATION_READ_SOURCE` defaults to `observation`. Stage 9 reads
+  `transaction_field_observation` unless told otherwise.
+- `staging` remains a supported, explicitly selectable value. It is the rollback
+  and debug path and is not deprecated or removed by this change.
+- The default is defined once, as `config.DEFAULT_AGGREGATION_READ_SOURCE`, and
+  imported by `stages/aggregate.py` for its own `getattr` fallback.
+
+Context:
+
+- The observation read is the only path whose source key is per fact
+  (`staging_extraction_id, source_raw_id, observation_fact_key`). The staging read
+  carries one collapsed `value_amount`/`value_type` pair per extraction.
+- Because of that, a source stating two independently typed values — a stake-level
+  equity figure and a whole-company enterprise value — can only keep both under the
+  observation read. Under staging the second fact has nowhere to live and is lost
+  structurally, not by a defect that could be fixed in the staging path.
+- Previously two defaults existed and now disagreed: `load_config` defaulted to
+  `staging`, and `stages/aggregate.py` separately defaulted its `getattr` fallback
+  to `staging`. Leaving the second in place would have let a config-less caller
+  silently take the legacy path.
+
+Consequences:
+
+- Runs that do not set `AGGREGATION_READ_SOURCE` change read path. This is a
+  behaviour change for any caller relying on the old implicit default.
+- Aggregation remains incremental: only `CLUSTERED` rows are derived. Existing
+  `AGGREGATED` rows keep whatever semantics produced them, so this default switch
+  does not retroactively re-derive any database. A deliberate
+  AGGREGATED→CLUSTERED reset is still required to apply it to existing rows.
+- `scripts/test_aggregation_read_default.py` guards the default at both levels:
+  the config value and the shared constant, and the behaviour that only the
+  observation read can produce (both typed facts surviving into their own
+  canonical fields).
+- `scripts/validate_331c_observation_read.py` remains the staging-vs-observation
+  parity check and still requires a live `--source-db`.
+
+## 2026-08-17 - Financial Qualifiers Anchor to the Source of Their Own Amount
+
+Status: accepted. Implements spec §2.10 items 1 and 2.
+
+Decision:
+
+- A financial qualifier — period type, period end, currency — is resolved from the
+  source that supplied the amount it qualifies, not independently across the cluster.
+- When the anchoring source stated no qualifier, the qualifier is null. It is never
+  borrowed from another source.
+- `financials_currency` is shared by revenue and EBITDA, so it cannot anchor to one
+  of them. It resolves by unanimity over the currencies the anchoring sources
+  actually stated, and to null on disagreement — the same rule as
+  `deal_value_currency`.
+- `implied_enterprise_value` is not derived from a calculated basis when the deal
+  currency and the balance-sheet currency are both known and differ. No conversion
+  is attempted; a conversion needs an FX date this pipeline does not carry.
+- The cross-currency guard requires both currencies to be known. An unknown
+  balance-sheet currency stays permissive.
+
+Context:
+
+- Aggregation resolves every canonical field independently. `target_revenue` could
+  be selected from one source while `target_revenue_period_end` and
+  `financials_currency` were selected from another, re-labelling an amount with a
+  qualifier its own source never stated.
+- This is not cosmetic. The annual-as-trailing rule keys off `period_end`, so a
+  borrowed date decides whether a multiple is computed at all. The regression
+  fixture shows a 5.0x EV/Revenue struck against a period the amount's source never
+  stated; after anchoring, the period is null and no multiple is produced.
+- It is the same defect class as the typed-value collapse fixed on 2026-08-17: a
+  per-fact qualifier resolved independently of the fact it qualifies.
+
+Consequences:
+
+- Some rows will lose a period end, a financials currency, or a multiple that was
+  previously populated from a borrowed qualifier. Those values were not supported by
+  the source of their own amount; the null is the correct answer, and it is
+  queryable.
+- Four nullable columns are added to `transaction_record`: `net_debt_currency`,
+  `total_debt_currency`, `cash_st_currency`, `balance_sheet_as_of_date`. They are
+  manual interim inputs alongside the amounts they qualify, preserved across
+  re-aggregation, and unpopulated until debt/cash extraction lands.
+- The cross-currency guard is dormant until those currency columns are populated.
+  That is deliberate: it is the precondition debt/cash extraction must satisfy, and
+  it exists now so the extraction has a defined place to write.
+- Aggregation remains incremental. Existing `AGGREGATED` rows keep their unanchored
+  qualifiers until a deliberate AGGREGATED→CLUSTERED reset re-derives them.
+- Period *coherence* between the balance-sheet as-of date and the multiple
+  denominator's period (§2.10 item 2's second half) is not yet enforced. The anchor
+  column exists; the tolerance rule is deliberately left undecided rather than
+  invented here, and is owed before debt/cash extraction.
+
+## 2026-08-17 - total_debt / Cash_ST Extraction and Debt-Inclusive Arithmetic
+
+Status: accepted. Implements the extraction deferred by "Debt and Cash Inputs" and
+closes spec §2.10 item 1.
+
+Decision:
+
+- `total_debt` and `Cash_ST` are extracted as point-in-time balance-sheet items in
+  `target_financials`, with `total_debt_currency`, `cash_st_currency` and an exact
+  `balance_sheet_as_of_date`.
+- Their economic period type is recorded as **`POINT_IN_TIME`**, in
+  `balance_sheet_period_type`. There is no LTM/TTM/NTM concept for a balance sheet —
+  it is a position on one date, not a period. The value is **derived by aggregation,
+  not extracted**: it is a constant, and a constant the model never writes is a
+  constant the model cannot mislabel. It is null when no balance-sheet amount is
+  present.
+- **No annual/quarterly field** is introduced. Filing frequency describes the filing
+  a figure came from, not the economic period of the amount; it can be added later
+  against a concrete downstream need.
+- A **derived** `net_debt` requires both components to share one currency and one
+  `balance_sheet_as_of_date`, both known. Reported/manual `net_debt` stays preferred
+  and carries no component-coherence requirement, only its own currency.
+- Arithmetic mixing consideration with debt or cash requires the relevant currencies
+  to be **known and equal**. This covers `implied_enterprise_value`'s calculated
+  bases and `transaction_value`'s `EQUITY_PLUS_TOTAL_DEBT`. Unknown on either side
+  does not calculate; known-and-differing does not calculate. No FX conversion.
+- A source-stated enterprise value is one figure, not a sum, so the guard does not
+  apply to `STATED`.
+- Extraction prefers a **source-stated** USD figure when the source states the same
+  amount in both a local currency and USD. It never performs its own conversion.
+- No announced-date tolerance, and no requirement that the balance-sheet date match
+  the revenue/EBITDA denominator period. Both deliberately unenforced; the as-of date
+  is preserved so corpus behaviour can be evaluated later.
+
+Context:
+
+- This supersedes the permissive-on-unknown-currency behaviour accepted on
+  2026-08-17 in "Financial Qualifiers Anchor to the Source of Their Own Amount".
+  That leniency was justified while `net_debt` was an unpopulated manual column, by
+  analogy to the currency *tagging* idiom. Extraction makes it live, and the analogy
+  does not carry: `handoff_currency_normalization.md` licenses the permissive
+  multiples guard by naming the plausible-range check as its backstop, and
+  `implied_enterprise_value` has no such backstop. A wrong-currency sum there looks
+  entirely plausible and becomes a multiple numerator.
+- `total_debt` and `Cash_ST` may arrive from different sources, so each takes its
+  currency and as-of date from the source that supplied it. `balance_sheet_as_of_date`
+  is one column serving both, so it is resolved once per anchor rather than read once
+  and shared.
+
+Consequences:
+
+- **Extracted values take precedence over the preserved manual columns.** Manual
+  entry was the interim mechanism; an extracted figure arrives with its qualifiers
+  attached and must be able to update on re-aggregation rather than be pinned by the
+  value it wrote last time. A manual-only row is unaffected.
+- `EQUITY_PLUS_TOTAL_DEBT` falls back to `EQUITY_VALUE_ONLY` when the currency guard
+  refuses, rather than nulling `transaction_value`. The known equity consideration is
+  still real, and `EQUITY_VALUE_ONLY` has never implied debt is zero.
+- Rows whose manual `net_debt` has no recorded currency now yield **no** calculated
+  `implied_enterprise_value`. This is the intended tightening. The population size is
+  unmeasured here — no live DB was available — and should be checked before the
+  owed re-aggregation.
+- `_derive_implied_enterprise_value` no longer takes `total_debt`/`cash_st`; net debt
+  is resolved by `_derive_net_debt` first. Tests encoding the previous signature and
+  the previous permissive rule were updated, not worked around.
+- Aggregation remains incremental. No corpus-wide AGGREGATED→CLUSTERED reset was
+  performed; the second owed re-aggregation is now unblocked but not discharged.
+- Review XLSX shape is unchanged.
+
+## 2026-08-17 - Path A Re-aggregation: Accepted
+
+Status: executed and accepted on `data/ma_mvp.db`.
+
+The §4.2-owed re-aggregation, run at `read_source=observation` against the live
+92-transaction corpus. Structural invariants held: 92 → 92 transaction records, 98
+AGGREGATED + 1 PROMPT_FAILED unchanged, 92 clusters, 92/92 upserted, 0 failed, 0 LLM
+conflicts. Stage 10/11 column census was 0/0/0/0 beforehand, so the
+INSERT OR REPLACE hazard documented in the runbook cost nothing on this corpus.
+
+Material changes, all accepted as supported:
+
+- `transaction_value` populated on 2 additional rows, both `EQUITY_VALUE_ONLY`
+  (Anysphere $60.0B, Payoneer $2.75B). `equity_value` already held the same amount on
+  both, so this is the typed-equity fix plus the observation read path recovering a
+  Tier-1 value that the collapsed legacy slot had been suppressing.
+- `ev_to_revenue_ltm` populated on 1 additional row (Dahl: EV €1.518B / revenue €2.0B
+  = 0.76x, ANNUAL period end 2025, EUR/EUR). Supported: same currency on both sides,
+  and the annual actual is inside the trailing-eligibility window.
+- No count change in `equity_value`, `implied_equity_value`, `enterprise_value`,
+  `target_revenue`, `target_revenue_period_end`, or `financials_currency`.
+
+Notably the anchoring change removed nothing. The predicted losses — a borrowed
+`period_end` or `financials_currency` being nulled — did not occur, so no row in this
+corpus was relying on a cross-source qualifier. That is a real result, not an absence
+of evidence: the fixture that motivated the fix reproduces the defect, and the corpus
+simply does not contain that shape today.
+
+The currency-gap quantifier reports zero at-risk rows before and after, consistent
+with the corpus having no `net_debt` at all.
+
+Consequence: the debt-inclusive paths remain unexercised on real data. Zero rows carry
+`net_debt`, zero carry a calculated enterprise value, zero carry
+`EQUITY_PLUS_TOTAL_DEBT`. Path A could not change that — see the Path B runbook.
+
+## 2026-08-17 - Stage 9 Writes Only the Columns It Owns
+
+Status: accepted.
+
+Decision:
+
+- Stage 9 writes `transaction_record` with
+  `INSERT ... ON CONFLICT(transaction_id) DO UPDATE SET ...` scoped to the 115
+  columns it owns, replacing `INSERT OR REPLACE`.
+- The 15 columns it does not own are preserved: Stage 10's `linked_filings_count`;
+  Stage 11's `acquirer_merger_sub_name`, `merger_structure`, `has_mac_clause`,
+  `requires_target_shareholder_vote`, `target_vote_threshold`,
+  `closing_conditions_summary`, `target_total_diluted_shares`,
+  `fully_diluted_calc_quality`, `agreement_extraction_status`,
+  `has_observation_changes`, `observation_changes_field_count`,
+  `observation_changes_summary`; plus `notes` and `created_at`.
+- The conflict clause assigns `excluded.<col>` directly, **not** COALESCE. A
+  Stage-9-owned field whose newly aggregated evidence says NULL must become NULL.
+- The owned-column list is the single source of truth: the placeholder count and the
+  conflict-update clause are both derived from it, so they cannot drift apart.
+
+Context:
+
+- `INSERT OR REPLACE` deletes the row and inserts a new one, so any column absent
+  from the INSERT list was reset to NULL on every re-aggregation — silently, and
+  including columns a later stage owns. Re-running Stage 9 alone destroyed Stage
+  10/11 output.
+- The obvious protection — COALESCE, or writing only non-null values — fixes the
+  preservation half and breaks the clearing half, turning every canonical field into
+  a high-water mark that can never be retracted. That is a worse defect than the
+  original: a value the evidence no longer supports would persist indefinitely.
+  `scripts/test_stage9_field_ownership.py` asserts both halves, and was verified to
+  fail against a COALESCE implementation.
+
+Consequences:
+
+- The re-aggregation runbook's snapshot-and-restore step is withdrawn; nothing needs
+  saving before a reset.
+- Ownership is defined by presence in the INSERT column list, which was already the
+  de-facto boundary. No column changed hands, so no existing value is reinterpreted.
+- Transaction identity and `transaction_source` rows are unaffected — asserted by the
+  regression, since REPLACE-then-insert had been re-creating the row each pass.
+
+## 2026-08-17 - FINDING: equity_value Conflates Stake-Level and 100%-Basis Scope
+
+Status: **accepted and FIXED 2026-08-17** (see the resolution entry below). Recorded
+here in full because the finding, its blast radius, and the live-data verdict remain
+the reasoning behind the fix.
+
+Finding:
+
+`equity_value` is defined as the consideration for the stake actually acquired
+(§4.2), but two writers can put a whole-company figure in it, and nothing
+downstream can tell the difference.
+
+1. **`STATED` — the HC prompt admits market capitalization.**
+   `prompts/high_confidence_extraction.md` defines `EQUITY_VALUE` as "equity
+   purchase price, a per-share x shares aggregate the source itself states, or
+   **market capitalization**". A market cap is whole-company.
+2. **`PER_SHARE_X_SHARES` is 100%-basis by construction.** It computes
+   `per_share_price x sec_shares`, where `sec_shares` is the target's TOTAL fully
+   diluted count. That is the price of 100% of the equity, not of the stake.
+
+Blast radius (`stages/aggregate.py`, the cluster loop):
+
+    equity_value -> _derive_implied_equity(pct) -> implied_equity_value
+                        -> implied_enterprise_value -> enterprise_value
+                                                    -> ev_to_revenue_ltm
+                                                    -> ev_to_ebitda_ltm
+                 -> _derive_transaction_value(pct) -> transaction_value (+ _basis)
+                        -> (future) transaction_size
+
+**The damage condition is uniform: `pct_resolved < 100`.** `_derive_implied_equity`
+divides by pct, so a figure already at 100% is grossed up a second time; a $2.2B
+market cap at pct 27 yields $8.15B implied equity. At `pct = 100` the conflation is
+inert, because stake-level and whole-company coincide. `pct` null yields None, so
+there is no leak through that door.
+
+Classification:
+
+- **`PER_SHARE_X_SHARES`: dormant code defect.** `sec_shares` is hardcoded `None`,
+  so the branch has never executed. Zero live rows, provably. It activates silently
+  when SEC share count is wired (spec §4 gap 5) unless gated first.
+- **Market cap: confirmed prompt/taxonomy defect; live-data status UNDETERMINED.**
+  The container carrying this analysis has no corpus DB. The permission has existed
+  since `97fe6b1` (2026-08-07) across every HC version that produced the corpus, so
+  exposure is plausible but not established. Determine by running the read-only
+  diagnostic before asserting either way; do not infer.
+
+Context:
+
+- "market capitalization" appears exactly once in the repo — that prompt line. It is
+  in no spec section, no decisions entry, and no dictionary row.
+- It predates the rule it contradicts. §4.2 made `equity_value` stake-level on
+  2026-08-10; the prompt was not revisited.
+- `value_observations` carries no scope discriminator: types are `EQUITY_VALUE` /
+  `TRANSACTION_VALUE` / `ENTERPRISE_VALUE` / `UNDISCLOSED`, and `basis` is `STATED`.
+- `_pick_value_amount_for_type` ranks candidates by source tier and model confidence
+  only. Two same-tier, same-confidence `EQUITY_VALUE` observations from one source —
+  a stake price and a market cap — tie-break positionally, so the picker can select
+  the market cap while the correct figure sits beside it.
+
+Minimum correction (proposed, not implemented):
+
+The invariant is that every writer into `equity_value` must be stake-level by
+construction. There are exactly two writers, so exactly two changes:
+
+- **Taxonomy.** Redefine `EQUITY_VALUE` as stake-level consideration only, and give
+  market capitalization its own observation type, retained as a fact rather than
+  routed into any canonical field. A market cap is a *market* valuation, not a
+  transaction-implied one, so it does not belong in `implied_equity_value` either.
+  This needs **no new scope column** — `value_type` is already the discriminator, it
+  is merely under-specified.
+- **Derivation.** Gate `PER_SHARE_X_SHARES` on `pct_resolved == 100`. Do not reroute
+  it to `implied_equity_value` (that would leave Tier 1 empty for the ordinary public
+  take-private) and do not scale it by pct (we hold total shares, not acquired
+  shares, so any scaling manufactures a figure no source stated).
+
+Consequences:
+
+- The two fixes are not equal in cost or effect. The derivation gate is code-only,
+  deterministic, and zero-risk on a dormant branch. The taxonomy fix needs a prompt
+  version bump and **only takes effect on re-extracted rows**, so it does not
+  retroactively clean the corpus — existing rows stay ambiguous until Path B, which
+  is deferred. Assessing them is a diagnostic-plus-human-review job, not a code fix.
+- `transaction_size` is not blocked by either. Having removed the direct equity rung,
+  it reads `transaction_value` only, so it inherits this defect without amplifying it.
+
+## 2026-08-17 - equity_value Is Stake-Level Only; Market Cap Is Its Own Type
+
+Status: accepted. Implemented; forward-looking. **No re-extraction** — Path B stays
+deferred, so existing rows are unchanged by this commit.
+
+Decision:
+
+- `EQUITY_VALUE` means the equity purchase price for the **stake actually acquired**,
+  or a per-share x shares aggregate the source itself states. It is consideration that
+  changed hands, not a valuation of the whole company.
+- **Market capitalization is no longer an `EQUITY_VALUE`.** It gets its own type,
+  `MARKET_CAPITALIZATION` (HC prompt 0.18), which is captured so the fact survives in
+  the observation ledger but never flows into canonical consideration — not into
+  `equity_value`, and not into `implied_equity_value` either.
+- `PER_SHARE_X_SHARES` may populate stake-level `equity_value` **only when
+  `pct_acquired == 100`**. Unknown pct is refused along with pct below 100.
+- **It is not scaled.** `per_share x total_shares x pct` is not derived below 100,
+  because the pipeline holds total shares and never acquired shares, so any scaling
+  manufactures a stake amount no source stated. None is the correct output.
+- `MARKET_CAPITALIZATION` is added to `_VALID_VALUE_TYPES`, without which a 0.18
+  extraction emitting it would be rejected wholesale rather than merely ignored.
+- A market cap is never the primary/legacy value fact. The primary is the most
+  transaction-specific one.
+
+Context:
+
+- The live diagnostic on `data/ma_mvp.db` found **no evidence of contamination**: 92
+  records, 7 with `equity_value`, 1 at `pct < 100` and therefore exposed, 0 rows at
+  `PER_SHARE_X_SHARES`, 0 confirmed market-cap candidates. Text matching is heuristic,
+  so this is *no evidence found*, **not proof of absence** — and the fix is therefore
+  framed as forward-looking rather than as a cleanup.
+- The one exposed row is where a contaminated extraction would land, which is why the
+  guard is worth having even on a clean corpus.
+- `_derive_implied_equity` divides by pct, so a whole-company amount reaching
+  `equity_value` is grossed up a second time: 2.2B at pct 27 yields 8.15B of implied
+  equity, and any multiple struck off it is manufactured.
+- `value_type` was already the natural scope discriminator; it was merely
+  under-specified. Splitting the type therefore needs **no new column**.
+
+Consequences:
+
+- Guarded by `scripts/test_equity_value_scope.py`, which was verified to fail against
+  both halves independently — the ungated per-share branch, and a prompt that still
+  admits market cap.
+- Its end-to-end fixture deliberately resolves the collapsed legacy value slot **to the
+  market cap**. `equity_value` must still be the stake consideration, because each
+  canonical field consumes its own semantic type rather than whichever fact wins the
+  legacy collapse. A stub picking the equity fact would let a scope-blind
+  implementation pass.
+- The taxonomy half only takes effect on rows extracted at 0.18 or later. It does not
+  retroactively clean the corpus, and no re-extraction is scheduled to make it do so.
+- The `PER_SHARE_X_SHARES` gate is inert today (`sec_shares` is hardcoded `None`) but
+  had to land **before** SEC share count is wired, which would otherwise have activated
+  the defect silently.
+
+## 2026-08-17 - transaction_size: Family-Keyed Waterfall, Two Rungs Reserved
+
+Status: accepted. Implemented.
+
+Decision:
+
+- `transaction_size` is derived in aggregation, **never extracted**. Keyed on event
+  family, and the families are **disjoint** — a funding round never falls through to a
+  purchase price, and an M&A deal never falls through to a round size. Ordering has
+  meaning only within a family.
+
+      M&A (ACQUISITION / MERGER / REVERSE_MERGER) -> transaction_value -> TRANSACTION_VALUE
+      Funding (VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT) -> round_size -> ROUND_SIZE
+      Spin/Split (SPIN_OFF / SPLIT_OFF)          -> reserved, no live rung
+      everything else                            -> null
+
+- `transaction_size_basis` is written whenever `transaction_size` is, and never
+  separately. Both are Stage-9-owned.
+- Two vocabulary values are **reserved but not live**: `SOLE_INVESTOR_AMOUNT` and
+  `SPIN_SPLIT_CONSIDERATION_VALUE`. Reserving them keeps the enum stable so a later
+  commit adds a branch rather than renaming stored data.
+- **No equity rung and no EV rung.** `EQUITY_BELOW_CONTROL` stays exclusively a
+  `transaction_value_basis` value.
+- The review export's shadow waterfall is **removed**, not kept as a backstop. The
+  XLSX shape stays at 67 columns.
+
+Context:
+
+- **Why no equity rung.** Every state where a stake-level equity figure can safely
+  stand for the magnitude already produces `transaction_value`. Tracing
+  `_derive_transaction_value`, the only states with `transaction_value` null and
+  `equity_value` known are those where `pct_acquired` is null — i.e. transaction scope
+  is unknown, so the figure could be the whole company. The genuinely safe case
+  (equity stated, pct merely unstated, control event) is already caught by the pct=100
+  "assumed" default and consumes the transaction-value rung. The rung's reachable set
+  was exactly the unsafe complement.
+- **Why no EV rung.** Below control an enterprise value is the grossed-up
+  whole-company figure and would report a 27%-for-$600M deal as $2.22B. Spec §2.10
+  item 3 stays parked; the currency and period work that landed on items 1-2 does not
+  bear on the gross-up.
+- **Why `EQUITY_BELOW_CONTROL` is not here.** Every value in this enum names the
+  *source field* that supplied the magnitude. `EQUITY_BELOW_CONTROL` names a
+  derivation condition, and the control status it records is already carried by
+  `transaction_value_basis`, `is_minority` and `pct_acquired`. Duplicating it would
+  make the field two-dimensional.
+- **Why `SOLE_INVESTOR_AMOUNT` is reserved rather than built.**
+  `transaction_participant` has no per-investor amount column — the funding prompt asks
+  for one, but there is nowhere to store it. `transaction_record.investment_amount` is
+  not a substitute: it is transaction-level and falls back to the legacy value slot, so
+  reading it would report a round, or a valuation, as one investor's check.
+- **Why a multi-investor round goes null.** Per-investor disclosure runs around 30% for
+  leads and under 5% for others, so summing whatever amounts exist understates the
+  round while presenting as one — worse than null, because the shortfall is invisible.
+- **PIPE coverage is deliberately out.** The funding family is exactly the classifier's
+  three types. A PIPE or public-company primary raise is not forced into them
+  (`prompts/deal_type_classifier.md`, guarded by
+  `scripts/test_minority_core_classification.py`), so it lands in `UNKNOWN` and gets a
+  null size. Widening the family inside the waterfall would silently reclassify deals
+  through the size field. Whether PIPEs deserve funding-size treatment is a separate
+  classifier/product decision.
+
+Consequences:
+
+- Guarded by `scripts/test_transaction_size.py`, verified to fail both when an equity
+  rung is re-added (the EV-only fixture then reports 2.22B) and when the export shadow
+  is restored.
+- **One waterfall, not two.** A canonical null now shows blank in the review sheet
+  where the shadow would have printed a figure. That is intended: the canonical rules
+  say the magnitude is unsupported, and a blank states it honestly. Reviewers will see
+  fewer populated size cells than before, and the ones remaining are attributable.
+- `transaction_size` must not be summed across bases — a control acquisition and a
+  round are different events. Enforce in the query layer. Note the basis alone does not
+  separate a below-control M&A from a control one (both stamp `TRANSACTION_VALUE`), so
+  a grouping key wanting that distinction needs `is_minority` or `pct_acquired` too.
+- Stage 9 now owns 117 columns, up from 115.
+
+## 2026-08-17 - Funding Events Derive No transaction_value or equity_value
+
+Status: accepted. Implemented. **Model-integrity guard, independent of the historical
+backfill** — it stops the class; it does not correct the ten existing rows.
+
+Decision:
+
+- `_derive_transaction_value` and `_derive_equity_value` return `(None, None)` for
+  `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`. A round is primary capital into the
+  company: there is no purchase price and no equity bought, so both fields are
+  **categorically inapplicable**, not merely usually absent.
+- **The gate is the funding family only.** `MINORITY_INVESTMENT` stays outside it — a
+  secondary purchase of a non-controlling stake is an ordinary acquisition whose
+  consideration is a real `EQUITY_VALUE`, and the classifier routes genuine secondaries
+  to `ACQUISITION` so that stays true.
+- The guard **refuses; it does not reclassify.** It never moves an amount into
+  `round_size`. That is source-supported remediation, not a derivation.
+
+Context:
+
+- Stage 9 previously relied on funding rows simply not having the M&A value fields
+  populated — an assumption about upstream, never an enforced rule. `_compute_multiples`
+  and `_derive_investment_amount` already gated on family; these two did not.
+- The assumption holds only for rows extracted after the funding path split on
+  2026-08-07. Before that, funding rows went through the M&A extractor, which had no
+  `round_size` write and no capital-raised precondition until prompt 0.13 (2026-08-11),
+  so a Series A had nowhere to land but `value_amount` typed `TRANSACTION_VALUE`.
+- The live corpus has **ten** such rows, **all at prompt 0.12** and **none at 0.13+**.
+  That is what makes this legacy-data remediation rather than evidence of a broken
+  current extraction path. Without the gate, every re-aggregation would faithfully
+  regenerate a canonical M&A `transaction_value` from each of them, indefinitely.
+- The stale `EQUITY_VALUE` path was the worse of the two: it would gross up through
+  `_derive_implied_equity` into an implied tier and then a multiple.
+
+Consequences:
+
+- Guarded by `scripts/test_funding_value_family_gate.py`, verified to fail against each
+  gate independently.
+- **Nothing is destroyed by refusing.** The amount remains in
+  `staging_extraction.value_amount`, in the observation ledger, and in the canonical
+  `investment_amount` — asserted by the regression, because the remediation depends on
+  those amounts staying visible.
+- Ten rows will show null `transaction_value` after the next re-aggregation. That is the
+  correct canonical state: the amount is not a purchase price, and no evidence yet
+  supports it as a round size either. **Null is the honest answer until a human
+  classifies each row against its source.**
+- This is a canonical-model correction for every consumer — DB, API, analytics, the
+  Grata model. It is not a review-sheet concern, and no part of it was shaped to
+  preserve the historical XLSX appearance.
+
+## 2026-08-17 - Funding Magnitude: round_size Is the Event, investment_amount Is a Check
+
+Status: accepted. Implemented. Supersedes the sole-investor rung in
+"transaction_size: Family-Keyed Waterfall, Two Rungs Reserved".
+
+Decision:
+
+- `round_size` is the **total amount raised in the financing event**. For Funding,
+  `round_size -> transaction_size` at `transaction_size_basis = ROUND_SIZE`. Funding
+  never falls back to `transaction_value`.
+- `investment_amount` means **one named investor's check**. It is supplemental
+  party-level detail, expected null for most deals. It must not populate
+  `transaction_size`, must not substitute for `round_size`, and must not be summed to
+  manufacture one.
+- **`SOLE_INVESTOR_AMOUNT` is removed** from the `transaction_size` waterfall, the basis
+  vocabulary, and the Grata recommendation.
+- `_derive_investment_amount` no longer derives anything at transaction level. It
+  previously returned `round_size or value_amount` for any non-control event.
+
+The settled contract, as a worked example — $100M round, Firm A invests $50M:
+
+    round_size            = 100M
+    transaction_size      = 100M
+    transaction_size_basis = ROUND_SIZE
+    Firm A investment_amount = 50M     (party-level)
+
+Nothing is added or rolled up. If only Firm A's $50M is known and the round total is
+undisclosed: `investment_amount = 50M`, `round_size = NULL`, `transaction_size = NULL`.
+
+Context:
+
+- **The original sole-investor argument was wrong in kind.** It framed the hazard as
+  disclosure coverage — summing sparse checks understates a round — and concluded that
+  restricting to a single disclosed investor made the rollup safe. It does not. A check
+  is not the event's magnitude *at any disclosure level*: reporting a $50M check as a
+  $100M round's size is wrong even when that check is the only one disclosed, and even
+  when there is only one investor. The disclosure statistics remain true and still rule
+  out summing; they were simply never the reason the rung had to go.
+- `_derive_investment_amount` broke the definition in both directions: it copied a round
+  *total* into a field meaning one investor's *check*, and where no round size existed it
+  fell back to a generic `value_amount` naming no investor at all. On the ten legacy
+  funding rows, that second fallback is how a misclassified raise acquired a canonical
+  home.
+- **Correcting an earlier claim in this log:** the sole-investor rung was first reserved
+  on the stated ground that no per-investor amount column existed. That was wrong —
+  `staging_investor.investment_amount` does exist and Stage 4b populates it. The rung is
+  removed on semantics, not on availability.
+
+Consequences:
+
+- Guarded by `scripts/test_transaction_size.py` (the basis vocabulary must not contain
+  `SOLE_INVESTOR_AMOUNT` or `SOLE_INVESTOR_CHECK`; a known investor check with an
+  undisclosed total yields a null size) and `scripts/test_funding_value_family_gate.py`
+  (neither a round total nor a generic funding amount may land in `investment_amount`).
+- Transaction-level `investment_amount` now derives to NULL for every row. This
+  discharges "legacy `investment_amount` equal to the generic funding amount should be
+  cleared" **without any data mutation** — the column is Stage-9-owned, so
+  re-aggregation clears it.
+- This changes an assertion made earlier in the family-gate work, that the legacy amount
+  was safely preserved in `investment_amount`. Under the settled model that was itself a
+  mis-mapping. The amount remains findable in `staging_extraction.value_amount` and in
+  the observation ledger, which is where the remediation reads it from.
+- The transaction-level column is now inert. Whether to drop it, or repurpose it as a
+  materialized view of a single party-level check, is an open schema question — not
+  decided here.
+
+## 2026-08-17 - Legacy Funding round_size Remediation: Nine Rows Applied
+
+Status: **applied and validated on the live corpus.** Stage 9 re-run on
+`read_source=observation` completed successfully.
+
+Outcome:
+
+| Measure | Value |
+|---|---|
+| `transaction_record` rows | 92 |
+| `transaction_size_basis = ROUND_SIZE` | 9 |
+| `transaction_size_basis = TRANSACTION_VALUE` | 13 |
+| `transaction_size_basis` null | 70 |
+
+**Model-integrity assertion PASSED:** of the 13 rows at
+`transaction_size_basis = TRANSACTION_VALUE`, **zero** are in the funding family.
+No funding row takes the M&A rung. Asserted by `scripts/review_funding_coverage.py`,
+whose check is itself verified against a planted violation so it cannot pass
+vacuously.
+
+The nine remediated rows — Ent, Hydra Host, Respond.io, Arcade.dev, Interchecks,
+Radical Numerics, Gray Swan, Rejoni, Kimba — now carry
+`round_size == transaction_size` at basis `ROUND_SIZE`, with the stale funding
+`transaction_value` and the generic `investment_amount` cleared.
+
+Context:
+
+- The remediation wrote **only** `staging_extraction.round_size` plus an appended
+  `MANUAL_REMEDIATION` observation. Every canonical field above was *derived* by Stage 9,
+  not written by hand, so the DB is in a state Stage 9 can reproduce.
+- The stale values cleared themselves: `transaction_value` and `equity_value` by the
+  funding family gate, `investment_amount` by the corrected derivation. No destructive
+  edit was needed for any of them.
+- History is intact. The original `value_amount` / `value_type` and their
+  `TRANSACTION_VALUE` observations were left in place as the record of what prompt 0.12
+  actually extracted.
+- **Cellares was not remediated** — its $50M has no identified supporting source
+  sentence, and it is carried into the coverage review rather than guessed.
+
+## 2026-08-17 - FINDING: No Qualifier Representation for Non-Exact Amounts
+
+Status: **finding recorded, not fixed.** Blocks canonicalizing any bounded or
+approximate funding amount.
+
+Finding:
+
+A source stating *"a minority growth equity investment of **over** $140 million"*
+(Chronograph) gives a **lower bound**, not a figure. The model has nowhere to record
+that distinction:
+
+- the funding prompt's `round` object has **no qualifier field** — `size` is a bare
+  number;
+- `staging_extraction` has **no `round_size_qualifier`**;
+- `transaction_record` has **no `*_qualifier` column at all**.
+
+`staging_extraction.value_qualifier` exists and reaches the observation ledger
+(`lib/observation_writer.py`), but it is **not aggregated onto `transaction_record`** —
+so even on the M&A side, "approximately $500 million" arrives at the canonical layer as
+a bare 500,000,000. The gap is wider than funding.
+
+Consequence, and the reason this is recorded rather than worked around: writing
+`round_size = 140000000` for Chronograph would assert an exactness the source withheld,
+and **nothing downstream could distinguish it from a stated $140M**. Null plus a flagged
+representation gap is the honest state until the model can carry the bound.
+
+Classes affected: `over` / `more than` / `in excess of` / `at least` (lower bounds),
+`approximately` / `about` / `nearly` (point estimates), `up to` (upper bounds), and
+explicit ranges. They are not interchangeable and a single `qualifier` string flattens
+them, which is a design question rather than a defect to patch quickly.
+
+Options, none adopted:
+
+- `round_size_qualifier TEXT` mirroring the existing `value_qualifier` — minimal and
+  consistent, but a free-text string is not queryable and does not order.
+- `round_size_min` / `round_size_max` bounds — queryable and orders correctly; a stated
+  exact figure sets both. Larger change.
+- Status quo — the amount survives only in the source text and the notes, and is absent
+  from every analytical surface.
+
+If the qualifier route is taken, fix `value_qualifier`'s missing propagation to
+`transaction_record` in the same pass; otherwise the two sides stay inconsistent.
+
+## 2026-08-17 - Funding Coverage Review: Binding, Not Proximity
+
+Status: accepted. Classifier rewritten; second remediation batch approved, not applied.
+
+Decision:
+
+- A money figure may only be read as `round_size` when it is **bound** to the target's
+  own financing event by an explicit construction — "raised `<AMT>`", "`<AMT>` in Series
+  B funding", "financing round of `<AMT>`", "investment of `<AMT>`". Co-occurrence in a
+  sentence is not evidence.
+- Each amount is judged on **its own span** — the text between the previous money figure
+  and the next — so a qualifier attached to one number cannot disqualify another.
+- Scope markers attached to an amount disqualify it outright, whatever financing
+  language sits nearby: investor/firm scope (AUM, fund size, portfolio, since
+  inception), cumulative/historical (to date, total raised, bringing total), and
+  valuation (post-money, pre-money, market cap, valued at).
+- **Second remediation batch approved: Aston Power $20M and AttoTude $52M only.** Not
+  applied.
+
+Context — the four confirmed false positives that forced this:
+
+| Row | Figure | What it actually measured |
+|---|---|---|
+| AIRS Medical | $65B | the investor firm's capital raised to date |
+| Elektrik | $9B | Lead Edge Capital's firm size / AUM |
+| Flutterwave | $3.2B | a post-money valuation |
+| Fortus | £400M / £1.1B | the investment firm's historical portfolio figures |
+
+Every one is a number belonging to a **different entity or a different concept** than
+the financing event. The first classifier asked only "does this sentence contain
+financing language and a number?" and took the first number — which is how a firm's AUM
+became a round size. Numeric proximity is not a signal.
+
+The per-amount span rule is what makes this precise rather than merely stricter: in
+*"raised $250 million at a $3.2 billion post-money valuation"*, a whole-sentence
+rejection would discard the raise along with the valuation. Both behaviours are pinned
+by regression, and reverting either one reproduces the exact live false positives.
+
+Confirmed classifications from the live review:
+
+- `ROUND_SIZE`: Aston Power $20M, AttoTude $52M — exact, bound to the event.
+- Correct nulls: Computomic, Emmecell, Elektrik — no amount disclosed. **Null is the
+  right canonical state, not a gap.**
+- `NOT_ROUND_*`: AIRS Medical, Flutterwave, Fortus, and the Elektrik $9B figure.
+- **Cellares — RESOLVED 2026-08-17 from the source, at $327M.** *"Prime Radiant Fund
+  ... has made a $50 million growth equity investment in the company's Series D
+  financing, bringing the total Series D to $327 million."* The $50M is Prime Radiant's
+  **check**; the event's magnitude is the **$327M Series D**. `round_size = 327,000,000`,
+  `transaction_size = 327,000,000`, basis `ROUND_SIZE`.
+
+  This is the strongest validation yet of the separation: **an investor's check and the
+  round size are different facts that can coexist in one sentence**, and only the round
+  is the event's magnitude. Both figures are real, both are bound to the financing, and
+  the $50M must never become `round_size`.
+
+  Two consequences followed:
+
+  1. **The planner needed to support divergent amounts.** Its changed-under-us guard
+     compares an approval against the row's *staged* figure. Cellares is the first case
+     where the staged figure ($50M) is not the canonical one ($327M), so an approval may
+     now carry both — the amount we expect to find, and the amount we mean to write.
+     Loosening the guard instead would have silently discarded the protection.
+  2. **The $50M is preserved as provenance, not promoted.** It stays in
+     `staging_extraction.value_amount` and in the observation ledger. It is deliberately
+     **not** written to transaction-level `investment_amount`, which is inert by design.
+     The supported per-investor path is `staging_investor.investment_amount`, keyed to
+     the investor that wrote the check — but this row is HC 0.12 legacy, so Stage 4b
+     never ran and no `staging_investor` row exists. Creating one is a separate decision
+     and is **not** part of this remediation.
+
+- **Chronograph — unresolved by representation, not by evidence.** The source supports a
+  funding magnitude of "over $140 million". That is a lower bound, and the model cannot
+  carry it (see "FINDING: No Qualifier Representation for Non-Exact Amounts"). Canonical
+  `round_size` stays NULL. It is listed in the planner's `UNRESOLVED` map so it can
+  never be planned by accident.
+(Cellares was previously listed here as unresolved by evidence; it is now resolved
+above and removed from `UNRESOLVED`.)
+
+Consequences:
+
+- `VENTURE_DEBT` remains out of scope throughout; `round_size` vs `facility_size` is a
+  separate decision.
+- Approvals are stored as **named batches** rather than one merged list, so the record of
+  what was approved when survives, and a batch cannot silently absorb rows approved
+  elsewhere. A regression asserts batch isolation and that no name appears in both an
+  approved batch and `UNRESOLVED`.
+- A heuristic classifier remains a triage aid. Every proposed row still requires a human
+  read against its source before remediation.
+
+## 2026-08-17 - FINDING: Word-Boundary Escapes Silently Disabled Eight Patterns
+
+Status: **found and fixed** in the same pass. Recorded because the failure mode is
+invisible and the tests still passed.
+
+Finding:
+
+Eight regex patterns in `scripts/review_funding_coverage.py` ended in a literal
+**backspace character** (`0x08`) rather than the word-boundary escape `\b`. A `\b`
+written inside a **non-raw** string is a backspace, so each affected pattern required a
+control character that no source text contains — and could never match.
+
+Three of them were in `_BINDING`, which decides whether an amount is tied to the
+financing event at all.
+
+Why it stayed hidden:
+
+- **The classifier produced the right answer for the wrong reason.** Cellares resolved
+  to the $327M round only because the disabled pattern left the $50M check unbound, so
+  the round was the sole candidate. The round-over-check ranking that was *supposed* to
+  produce that outcome was never exercised. Reverting the ranking changed nothing —
+  which is exactly what a passing-but-vacuous guard looks like.
+- **Stale bytecode masked the diagnosis.** `__pycache__` served a previously-reverted
+  module during verification, so two revert experiments reported results that did not
+  correspond to the file on disk. Any revert-to-confirm check on an imported module has
+  to clear the cache between runs, or it is measuring the wrong code.
+
+Consequences:
+
+- All eight repaired. With binding restored, both Cellares figures are genuinely bound
+  and the ranking is load-bearing — verified by reverting it and watching the test fail.
+- `scripts/test_review_funding_coverage.py` now asserts that **no compiled pattern
+  contains a control character**, across every pattern group. Verified by reintroducing
+  one backspace and confirming the guard names it.
+- General lesson worth keeping: a guard that cannot be made to fail is not evidence.
+  Every behavioural claim in this branch has been checked by reverting the mechanism;
+  this is the case that shows why, and why the check itself must be run against the code
+  actually on disk.
+
+## 2026-08-17 - Manual Remediations Are First-Class Observations
+
+Status: accepted. Implemented. Two defects in the observation read path, each fixed and
+each independently verified by reverting it.
+
+Decision:
+
+- `MANUAL_REMEDIATION` is admitted by the Stage 9 observation loader. The allowlist
+  remains an allowlist — it admits producers of Stage 9 *inputs* and excludes downstream
+  stages whose observations Stage 9 does not own — but a human correction of an
+  extraction-layer fact is an input.
+- **A remediation supersedes; it does not tie-break.** Where any observation for a field
+  is a remediation, selection is restricted to remediations and the latest wins. Tier and
+  confidence ranking are untouched for the ordinary case.
+
+The defects:
+
+1. **Admission.** The loader filtered on
+   `COALESCE(observation_source_stage, 'BACKFILL') IN (…)` and `MANUAL_REMEDIATION` was
+   not listed. A remediation could be written to the ledger, verified present at both
+   source layers, and then silently ignored by the derivation that exists to consume it.
+
+2. **Precedence.** Admission alone is not enough. A correction and the stale fact it
+   corrects share a source and therefore a **tier**, so `_pick_value` saw a same-tier
+   disagreement between peers. It resolved that by confidence — and a remediation
+   observation carries no `model_confidence`, defaulting to `MEDIUM`, while the
+   extraction it corrects is typically `HIGH`. **The stale value won deterministically.**
+
+Context — why this stayed hidden through nine successful remediations:
+
+Where a remediation's canonical value equals the staged one, the row still derives
+correctly, because a later observation regeneration re-reads
+`staging_extraction.round_size` and emits an `HC_EXTRACT` observation carrying the same
+number, which the allowlist admits. **The remediated fact reached the canonical layer by
+a route that had nothing to do with the remediation.** Given the code, no other admitted
+producer exists, so batch 1 must have derived through that path.
+
+Cellares is the first case where the staged figure ($50M, Prime Radiant's check) and the
+canonical figure ($327M, the Series D) **differ**. The accidental route could then only
+carry the wrong number or none at all, and the filter became visible. This is the third
+"right answer for the wrong reason" in this branch, and the pattern is now explicit:
+*a mechanism that is never exercised is not verified by the outcome being correct.*
+
+Ruled out during the trace, so they are not the cause:
+
+- `round_size` **is** in the eligible field set (`_FIELD_TYPE`, type `number`) and **is**
+  emitted by the observation writer.
+- Value parsing is sound: `_value_from_observation` prefers `field_value_numeric` and
+  falls back to `float(field_value)`, so `'327000000.0'` / `327000000.0` both resolve.
+- The legacy `TRANSACTION_VALUE` observation does not compete with `round_size` — they
+  are different `field_name`s. It is inert for funding rows regardless, by the family
+  gate.
+
+Consequences:
+
+- Guarded by `scripts/test_manual_remediation_observations.py`, whose fixture reproduces
+  the live sequence exactly: observations are written from staging **before** the
+  correction, so no `HC_EXTRACT` observation for `round_size` can exist and nothing but
+  the remediation can supply the value. A second fixture covers a correction competing
+  with a stale observation for the same field.
+- Both halves verified by reverting each independently: without admission the value is
+  NULL; without precedence the stale $80M beats the corrected $95M.
+- **The corpus needs a Stage 9 re-run for Cellares to derive.** No data is wrong today —
+  `round_size` and `transaction_size` are NULL, which understates rather than misstates.
+  Not run here.
+
+## 2026-08-17 - Funding HC Baseline: 8/8, and Three Corrections to My Own Findings
+
+Status: accepted. **No prompt or schema change.** The baseline is the permanent
+regression set.
+
+Result: 8 of 8 real-text fixtures produce the correct economic semantics. The prompt is
+substantially healthier than the legacy HC 0.12 corpus suggested — the corpus defects
+traced to extraction under a prompt that predated the funding path, not to
+`funding_hc_extraction` 0.1.
+
+### 1. Computomic — the model was right; my expectation was wrong
+
+The fixture expected `financials_disclosure_status = UNDISCLOSED`; the model returned
+`UNKNOWN`. **`UNKNOWN` is correct**, and both prompts define the pair identically:
+
+| Value | Definition (both `high_confidence_extraction` and `funding_hc_extraction`) |
+|---|---|
+| `DISCLOSED` | at least one financial value is stated |
+| `UNDISCLOSED` | source **explicitly states** terms are not disclosed |
+| `UNKNOWN` | source is **silent** on financials (neither states nor denies) |
+
+The Computomic release never mentions terms at all. Silence is `UNKNOWN`; only an
+explicit *"terms were not disclosed"* is `UNDISCLOSED`. **There is no inconsistency in
+the codebase** — the two prompts agree and both validators accept the same three values.
+The inconsistency was between the taxonomy and my fixture. Per the instruction to report
+rather than change the prompt where the taxonomy already defines the terms, the prompt is
+untouched and the fixture is corrected.
+
+The fixture regression now pins the *reason*, not just the value: it fails if the
+Computomic text ever gains an explicit non-disclosure phrase, because the correct answer
+would flip to `UNDISCLOSED` and the fixture would stop testing what it claims to.
+
+### 2. Chronograph — a representation issue, not a prompt failure
+
+The source states *"a minority growth equity investment of over $140 million"*. That
+**is** the funding-event magnitude — unlike the valuation and AUM traps, the figure is
+about this raise. The limitation is representational: `round.size` is a bare number with
+no qualifier field at any layer (the prompt's `round` object has none,
+`staging_extraction` has no `round_size_qualifier`, `transaction_record` has no
+`*_qualifier` column at all), so a lower bound and a stated figure become
+indistinguishable once written. Carried as reported-separately, never scored, never
+coerced. See also "FINDING: No Qualifier Representation for Non-Exact Amounts".
+
+> **SUPERSEDED 2026-08-18** by "Qualified Anchors: A Researcher-Normalization
+> Convention, Not Qualifier Infrastructure" below. The representational analysis above
+> still holds — nothing about the schema changed. What changed is the answer: rather
+> than build the missing qualifier, the anchor is recorded and the wording preserved.
+
+### 3. Investor/fund AUM is NOT a structural gap — retracting my own framing
+
+I recorded AUM having no schema field as a "structural gap". **That overstated it, and
+the baseline proves the opposite.** The Elektrik fixture — whose only figure is Lead Edge
+Capital's $9B firm size, in "About" boilerplate — produced no `round.size`. Discarding an
+investor's own size is the correct outcome for funding-magnitude extraction, and
+discarding needs no field.
+
+It would only be a gap if AUM were decided to belong in the data model as a fact worth
+keeping, which is a separate product question about investor profiles. Consequences of
+the corrected framing:
+
+- An AUM figure leaking into `round.size` would be a **prompt-wording** failure, not a
+  schema limitation. Adding a field would not prevent a contamination; a rule would — and
+  the baseline shows none is currently needed.
+- `SCHEMA_LIMITATION` in the harness now means "no field can hold the correct answer, and
+  the correct answer is not *discard*". Chronograph's lower bound was the only case that
+  qualified; as of 2026-08-18 the qualified-anchor convention resolved it and **no
+  fixture currently qualifies**. The branch is kept for the next such case.
+
+### Standing decisions
+
+- The eight real-text fixtures are the **permanent** regression set. They are not to be
+  replaced with synthetic paraphrases: an earlier classifier in this branch was validated
+  against language written to match its own patterns, reported clean, and broke on the
+  real articles. The regression asserts the source text itself.
+- No broad rewrite of `funding_hc_extraction`. The one open item is representational and
+  is recorded, not patched.
+
+## 2026-08-17 - Funding HC Validation Pass: CLOSED
+
+Status: **closed.** No `funding_hc_extraction` change was made or is warranted.
+
+### Verdict
+
+`funding_hc_extraction` 0.1 is **accepted as correct** on the eight real-source
+fixtures. The prompt already distinguishes, unaided:
+
+| Distinction | Fixture that proves it |
+|---|---|
+| investor check vs round total | Cellares — $50M check inside a $327M Series D |
+| current round vs cumulative funding | AttoTude — $52M Series C, $143M raised to date |
+| valuation vs raise | Flutterwave — $3.2B values the company; no round size stated |
+| investor boilerplate vs event magnitude | Elektrik — Lead Edge's $9B firm size discarded |
+| undisclosed amount vs invented one | Computomic — silent source, no figure produced |
+| unlabelled round | Aston Power — "the deal, totaling $20M in new funding" |
+
+**The legacy bad data was not evidence that this prompt is bad.** It traced to two
+separate causes: extraction under HC 0.12, which predated the funding path and had
+neither a `round_size` write nor a capital-raised precondition; and downstream
+aggregation defects — the missing family gate, the `investment_amount` fallback, and the
+`MANUAL_REMEDIATION` read-path filter. Diagnosing a prompt by the quality of data
+produced by an older, different prompt was the trap here, and the real-text benchmark is
+what separated the two.
+
+### Remediation — closed
+
+Both batches applied and re-aggregated on `read_source=observation`. Live-verified
+Cellares state: `round_size` 327,000,000, `transaction_size` 327,000,000, basis
+`ROUND_SIZE`, `transaction_value` NULL, `investment_amount` NULL. The $50M check remains
+as provenance in `staging_extraction.value_amount` and the observation ledger, and is
+absent from every canonical magnitude field — which is the whole point of separating an
+investor's contribution from the event's size.
+
+That row also validated the `MANUAL_REMEDIATION` fix end to end. It is the only case in
+the corpus where the staged figure and the canonical figure differ, so it is the only one
+that could have exposed either half of that defect — admission or precedence.
+
+### What remains, and why each is separate
+
+- **Chronograph** — a qualifier/representation issue *only*. The figure is correctly
+  recognised as the funding-event magnitude; the model cannot record that it is a lower
+  bound. Fixing it means adding qualifier representation, not changing this prompt.
+- **PIPE coverage** — a product/classifier decision about which events belong to the
+  funding family, upstream of anything this prompt does.
+
+### Standing
+
+- The eight real-text fixtures are the **permanent** regression set for this prompt.
+  Verbatim, never paraphrased: the anti-paraphrase guard in
+  `scripts/test_funding_hc_baseline_fixtures.py` asserts the source text itself.
+- Re-run the baseline before any future `funding_hc_extraction` change, and treat a
+  regression there as blocking.
+- **Do not tune this prompt against legacy corpus symptoms.** If a funding row looks
+  wrong, establish which prompt version extracted it before concluding anything about the
+  current one.
+
+
+---
+
+## Qualified Anchors: A Researcher-Normalization Convention, Not Qualifier Infrastructure
+
+**Decided 2026-08-18.** Supersedes the Chronograph representation gap.
+
+### The decision
+
+A source that states **one** figure under a lower-bound qualifier is recorded at that
+stated figure. Chronograph's *"a minority growth equity investment of over $140 million"*
+becomes:
+
+| field | value |
+| --- | --- |
+| `round_size` | 140,000,000 |
+| `transaction_size` | 140,000,000 |
+| `transaction_size_basis` | `ROUND_SIZE` |
+
+with the wording *"over $140 million"* preserved verbatim in `source_raw.clean_text` and
+quoted in the remediation note on the staging row.
+
+**This is a researcher-normalization convention. It is not a claim that the source stated
+exactly $140 million.** The distinction is not decorative: it is why the original wording
+has to survive in provenance. A reader who later needs to know whether the figure was
+stated or normalized can recover it from the source text and the note. A reader who only
+sees `140000000` cannot — which is precisely the objection the earlier analysis raised,
+and the reason the answer is "preserve the wording", not "the distinction does not
+matter".
+
+### Why not build the qualifier field
+
+The representational analysis stands unchanged: there is no qualifier for `round_size` at
+any layer. Building one means a prompt field, a staging column, a canonical column, a
+ledger convention, aggregation rules for combining bounded and exact values, and export
+semantics — for **one** live row. A convention costs a sentence and is reversible; the
+infrastructure is neither. If bounded figures later turn out to be common enough that the
+distinction drives a decision downstream, the infrastructure can be built then, and the
+preserved wording is what makes the back-fill possible.
+
+### The boundary, and why it is drawn where it is
+
+The convention covers a **single stated anchor** only. Three shapes are explicitly *not*
+covered and continue to leave `round_size` NULL:
+
+| shape | example | why it is not the same case |
+| --- | --- | --- |
+| range | "$120–150M" | two stated figures; there is no single anchor to take |
+| ceiling | "up to $100 million" | a maximum, not a floor — the true figure may sit far below it, so the anchor is not an estimate of the value |
+| rumoured | "reportedly raised over $75M" | the source does not assert the figure at all; this is a question about the claim's standing, not the number's shape |
+
+The approximation family — "approximately", "about", "roughly" — is also deferred,
+although it is the closest sibling of the lower-bound case and arguably the easiest to
+normalize (it *is* a point estimate). It is deferred for a method reason rather than a
+semantic one: **there is no live example.** The stated method for these cases is to decide
+each from a real source rather than in advance, and deciding the approximation family now
+would be deciding it from imagination. When one appears, it is a one-line change.
+
+Drawing the boundary explicitly is the load-bearing part. A convention that normalizes
+"over $140M" without stating what it does *not* cover reads, six months later, as "any
+qualified number is a number" — which is the generalization that was declined.
+
+### What changed in code
+
+- `scripts/review_funding_coverage.py` — the classifier splits the old `NON_EXACT_AMOUNT`
+  class in two. `LOWER_BOUND_NORMALIZED` proposes the anchor as a `round_size` candidate
+  and carries the source wording in its action text; `NON_EXACT_AMOUNT` keeps the
+  leave-NULL action and now names *which* deferred shape it hit. A new `normalization`
+  key (`"ANCHOR"` / `"DEFERRED"` / `None`) makes the verdict machine-readable, and
+  `exact` stays `False` for a normalized anchor — the convention normalizes the record,
+  it does not upgrade the source.
+- `scripts/plan_funding_round_size_remediation.py` — `batch3_qualified_anchor`, one row.
+  `UNRESOLVED` is now **empty**: Chronograph was its last entry and was never unresolved
+  on evidence, only on representation. The write path now emits a remediation note
+  whenever an approval carries one, instead of only when the staged and canonical amounts
+  diverge — keying it on divergence would have silently dropped the explanation in the
+  one case where the numbers agree and the reasoning is the entire content.
+- `scripts/funding_hc_baseline_fixtures.py` — `chronograph_lower_bound` expects
+  `round.size = 140_000_000`, and 140M is removed from its traps because it is now the
+  answer.
+
+### An honest caveat on the baseline
+
+The 8/8 baseline was recorded on 2026-08-17 while Chronograph was **unscored**. The new
+expectation has never been run against the live model. The next baseline run may report
+8/8 or 7/8, and either is information rather than a regression — if the model returns
+null for a bounded figure, that is a prompt-wording question about whether extraction
+should apply the convention, separate from whether the canonical record should hold the
+anchor (which is settled). The fixture and the harness both say so in place. This
+container has no API key, so the run could not be made here.
+
+### Regressions
+
+- `scripts/test_review_funding_coverage.py` asserts **both edges**: the anchor case is
+  normalized, reported non-exact, and never proposes NULL while carrying the source
+  wording; and each deferred shape — range, ceiling, approximation, rumoured — still
+  proposes NULL. Losing the first re-opens a resolved case; losing the second silently
+  generalizes the convention into the rule that was declined.
+- `scripts/test_plan_funding_round_size_remediation.py` pins batch 3 to exactly one row
+  and asserts its note quotes *"over $140 million"* — a note that loses the wording turns
+  a documented normalization back into a bare unexplained number.
+- `scripts/test_funding_hc_baseline_fixtures.py` requires the fixture's `why` to name the
+  convention, its excluded shapes, and its unverified status.
+
+Both mechanisms were revert-verified: neutralizing the anchor set drops Chronograph back
+to `NON_EXACT_AMOUNT`, and neutralizing the rumour guard promotes the rumoured fixture to
+`LOWER_BOUND_NORMALIZED`. (The first attempt at the second revert left two alternatives
+standing in the pattern and passed — a botched revert, not a weak mechanism.)

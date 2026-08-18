@@ -4,6 +4,14 @@
 **Scope:** Current Grata `enums.py` / `schemas.py` compared with the tested/accepted transaction harness model and the data-model decisions reviewed through 2026-08-13.  
 **Out of scope for redesign:** MergerLinks/Valu8 schema reconciliation, recap/IPO redesign, collection workflow redesign, historical migration/backfill design.
 
+> **Redlined 2026-08-17 — see `docs/grata_v2_reconciliation_2026_08_17.md`.**
+> That document reconciles this draft against what the harness has actually built and
+> proven, and separates implemented-and-validated from recommended, already-adequate, and
+> deferred. Four changes to *this* file are marked inline below (D2, D3 ×2, D1
+> `cash_and_equivalents`); the rest of v0.3 stands. The largest caveat it records: the
+> balance-sheet half of the value model — `total_debt`, `cash_and_equivalents`, both
+> calculated EV bases — is **fixture-validated only**, with zero live rows.
+
 ## 0. Review conclusions
 
 This v0.2 closes the main completeness gaps in v0.1.
@@ -303,6 +311,14 @@ This can be a dictionary/code mapping rather than a stored `metric_category` col
 
 Use the Grata field name. The economic definition should be explicit enough to align the net-debt bridge with the chosen comps convention; the harness used a broader cash + equivalents + short-term/marketable-investments bucket. Exact scope should be documented rather than creating a second cash field.
 
+**Redline 2026-08-17 — scope note closed.** Adopt the harness definition verbatim:
+*cash and cash equivalents plus short-term and marketable investments, as one combined
+figure, not split into components.* The harness column is named `cash_st`; treat it as the
+same concept under a local name, not a second field. Two rules belong on this row rather
+than only in D2, because both fail silently: **missing cash is never zero**, and its
+counterpart **`total_debt` is gross, never net** — a net figure entered as total debt
+corrupts every downstream derivation with no signal that anything went wrong.
+
 ## D2. Canonical EV rule
 
 Use one canonical whole-company EV: `implied_enterprise_value`.
@@ -312,6 +328,26 @@ Use one canonical whole-company EV: `implied_enterprise_value`.
 - reported `net_debt` is preferred
 - otherwise `net_debt = total_debt - cash_and_equivalents` only when both are available and period-coherent
 - missing debt/cash is never assumed to be zero
+
+**Redline 2026-08-17 — two rules are missing here.** Both are implemented and
+fixture-validated in the harness; see the reconciliation §3 items 10 and 12.
+
+- **Currency coherence, alongside period coherence.** Every calculation that mixes
+  consideration with a balance-sheet figure — `total_debt - cash_and_equivalents`,
+  `equity_value + total_debt`, `implied_equity_value + net_debt` — requires **both
+  currencies known and equal**. Unknown on either side does not calculate; known but
+  differing does not calculate. *An unknown currency is insufficient evidence, not
+  permission to assume agreement* — there is no plausible-range check on EV that would
+  catch a JPY balance sheet added to a USD purchase price. No conversion is attempted:
+  that needs an FX date the model does not carry. A `STATED` value is exempt, being one
+  source-stated figure rather than a sum.
+- **Never backsolve `net_debt` from `EV - equity_value`.** The schema makes this
+  available and plausible, and it is wrong twice: `EQUITY_VALUE` is stake-level while
+  `ENTERPRISE_VALUE` is whole-company (below control the difference is mostly the
+  un-acquired stake, not debt), and even at 100% the two figures typically come from
+  different sources and dates, so their difference is a residual of every inconsistency
+  between them. Once written, a backsolved net debt is indistinguishable from a reported
+  one.
 
 `MetricType.ENTERPRISE_VALUE` may remain temporarily as an input/compatibility observation type, but should not compete with `IMPLIED_ENTERPRISE_VALUE` as a canonical output.
 
@@ -323,6 +359,7 @@ Recommended examples:
 
 - `transaction_value_basis`
   - `STATED`
+  - `EQUITY_BELOW_CONTROL` — *added by redline 2026-08-17*
   - `EQUITY_VALUE_ONLY`
   - `EQUITY_VALUE_PLUS_TOTAL_DEBT`
 - `transaction_size_basis`
@@ -340,6 +377,29 @@ Recommended examples:
   - `IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT`
 
 These names are semantic recommendations; ENG may implement field-specific basis enums or a normalized generic basis model. A plain `is_calculated` flag is not enough to tell which derivation path fired.
+
+**Redline 2026-08-17 — three corrections (reconciliation §3 items 3 and 5).**
+
+1. **`EQUITY_BELOW_CONTROL` added above.** Below control there is no debt to add; the
+   figure is the stake consideration and nothing else. Folding that into
+   `EQUITY_VALUE_ONLY` merges "debt does not apply" with "debt applies but is unknown" —
+   the first is complete, the second is a research queue item.
+2. **Spelling to settle.** This document writes `EQUITY_VALUE_PLUS_TOTAL_DEBT`; the
+   harness writes `EQUITY_PLUS_TOTAL_DEBT`. Pick one.
+3. **`equity_value_basis` is missing entirely** from this list and from dictionary §7,
+   which carries bases for transaction value and implied equity but none for equity value.
+   Add it: `STATED` / `PER_SHARE_X_SHARES`.
+
+The `transaction_size_basis` vocabulary here also disagrees with
+`docs/handoff_transaction_size.md` on two rungs (`EQUITY_VALUE` vs `EQUITY_CONSIDERATION`,
+`SOLE_INVESTOR_AMOUNT` vs `SOLE_INVESTOR_CHECK`), and the handoff omits
+`SPIN_SPLIT_CONSIDERATION_VALUE`. Recommended resolution: **the Grata spellings win** —
+`transaction_size` is a Grata product concept — and the Spin/Split rung is added to the
+harness waterfall. Settle this **before** implementation starts; it is a rename now or a
+data migration later.
+
+The Tier 2 vocabularies (`implied_equity_value_basis`, `implied_enterprise_value_basis`)
+need no change: the harness implements them exactly as written here.
 
 ## D4. `transaction_size`
 

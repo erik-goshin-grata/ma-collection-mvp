@@ -62,6 +62,12 @@ HC_FIELDS = (
     "target_ebitda_period_type",
     "target_ebitda_period_end",
     "financials_currency",
+    # Point-in-time balance-sheet items and their per-source qualifiers.
+    "total_debt",
+    "total_debt_currency",
+    "cash_st",
+    "cash_st_currency",
+    "balance_sheet_as_of_date",
     # Observation coverage (2026-08-11): V2 + precision HC fields, present in
     # _FIELDS / staging read but never written as observations (all HC-stage).
     "acquirer_type_v2",

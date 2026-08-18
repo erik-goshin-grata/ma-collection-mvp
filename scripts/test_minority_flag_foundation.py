@@ -107,7 +107,7 @@ def _test_valuation_guards(failures: list[str]) -> None:
     _assert_equal(
         failures,
         "implied_enterprise_value_stated_preserved",
-        _derive_implied_enterprise_value(125.0, "ENTERPRISE_VALUE", None, None, None, None),
+        _derive_implied_enterprise_value(125.0, "ENTERPRISE_VALUE", None, None),
         (125.0, "STATED"),
     )
     _assert_equal(

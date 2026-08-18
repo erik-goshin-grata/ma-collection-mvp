@@ -333,6 +333,18 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # Separate from valuation_currency (pre/post-money). Decision:
         # "Round Currency Enters the Derived-Value Currency Tag".
         ("round_currency", "TEXT"),
+        # Balance-sheet extraction (2026-08-17). total_debt and Cash_ST are
+        # point-in-time items — no LTM/TTM concept and deliberately no period-type
+        # field, only an as-of date. They live here as extracted target_financials
+        # metrics (decision "Debt and Cash Inputs"), with currency and as-of date
+        # anchored per source so debt from one source cannot borrow cash's currency
+        # or balance-sheet date from another. total_debt is TOTAL debt, not net of
+        # cash. Cash_ST is cash + equivalents + short-term investments, one field.
+        ("total_debt", "REAL"),
+        ("total_debt_currency", "TEXT"),
+        ("cash_st", "REAL"),
+        ("cash_st_currency", "TEXT"),
+        ("balance_sheet_as_of_date", "TEXT"),
         # Nullable harness-only ownership transition enum. Populated only when
         # prior/current/resulting ownership evidence is explicit in the source.
         ("stake_transition_type", "TEXT"),
@@ -389,6 +401,12 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # bug #8 — funding/minority "amount invested" (round size / check), kept
         # distinct from equity_value so a check is never recorded as a valuation.
         ("investment_amount",                "REAL"),
+        # §2.4 — the one magnitude that spans transaction families, so a reviewer can
+        # rank deals without picking whichever figure looks largest. Derived, never
+        # extracted. The basis names which rung supplied it and is populated wherever
+        # transaction_size is; the pair must never be split.
+        ("transaction_size",                 "REAL"),
+        ("transaction_size_basis",           "TEXT"),
         # currency tag-and-defer — the currency the derived value fields
         # (equity_value/implied_equity_value/enterprise_value/investment_amount) are
         # expressed in. NOT converted to USD; downstream must not assume USD.
@@ -399,6 +417,25 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         # or total_debt - cash_st feeds implied_enterprise_value. pct_acquired_source stamps §2.6.
         ("total_debt",                       "REAL"),
         ("cash_st",                          "REAL"),
+        # §2.10 items 1-2 — currency and period anchors for the balance-sheet
+        # inputs. implied_enterprise_value adds consideration in deal currency to
+        # net debt in the target's reporting currency; without a recorded currency
+        # that sum cannot be checked. Manual interim inputs like the amounts they
+        # qualify, preserved across re-aggregation, and unpopulated until
+        # total_debt/Cash_ST extraction lands. balance_sheet_as_of_date is the
+        # period anchor those figures are stated as of, for coherence against the
+        # announced date and the multiple denominator's own period.
+        ("net_debt_currency",                "TEXT"),
+        ("total_debt_currency",              "TEXT"),
+        ("cash_st_currency",                 "TEXT"),
+        ("balance_sheet_as_of_date",         "TEXT"),
+        # Economic period type of the balance-sheet amounts: always POINT_IN_TIME,
+        # derived by aggregation rather than extracted. Recorded explicitly so a
+        # balance-sheet figure can never be read as a trailing or forward period the
+        # way an income-statement metric can. This is NOT a filing-frequency
+        # (annual/quarterly) marker — that is filing context, not the economic
+        # period of the amount, and is deliberately not modelled here.
+        ("balance_sheet_period_type",        "TEXT"),
         ("transaction_value",                "REAL"),
         ("transaction_value_basis",          "TEXT"),
         ("pct_acquired_source",              "TEXT"),

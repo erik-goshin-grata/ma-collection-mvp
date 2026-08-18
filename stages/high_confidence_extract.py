@@ -14,7 +14,8 @@ The "hc" key is only added when the model returns non-null notes.
 
 Schema validation enforced:
   - Required top-level keys must be present
-  - value.type must be in: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED
+  - value.type must be in: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE,
+    MARKET_CAPITALIZATION, UNDISCLOSED
 
 Spec references: prompts/high_confidence_extraction.md,
                  specs/pipeline.md §2 (Stage 4)
@@ -33,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.16"
+_VERSION = "0.17"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -49,7 +50,13 @@ _REQUIRED_KEYS = frozenset({
     "deal",
     "financials_disclosure_status",
 })
-_VALID_VALUE_TYPES = frozenset({"EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE", "UNDISCLOSED"})
+# MARKET_CAPITALIZATION (prompt 0.18) is a whole-company observation, deliberately
+# outside the stake-level consideration vocabulary. It must be listed here or a 0.18
+# extraction emitting it is rejected wholesale rather than merely ignored.
+_VALID_VALUE_TYPES = frozenset({
+    "EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE",
+    "MARKET_CAPITALIZATION", "UNDISCLOSED",
+})
 _VALID_ACQUIRER_TYPES_V2 = frozenset({
     "strategic_corporate", "private_equity", "pe_portfolio", "venture_capital",
     "growth_equity", "sovereign_wealth_fund", "pension_fund", "hedge_fund",
@@ -400,6 +407,13 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 ebitda_period_v2,                    # new: target_ebitda_period_type_v2
                 tf.get("ebitda_period_end"),
                 tf.get("currency"),
+                # Point-in-time balance-sheet items. No period_type companion by
+                # design — a balance sheet is a position on one date, not a period.
+                tf.get("total_debt"),
+                tf.get("total_debt_currency"),
+                tf.get("cash_st"),
+                tf.get("cash_st_currency"),
+                tf.get("balance_sheet_as_of_date"),
                 txn.get("financials_disclosure_status"),  # new
                 txn.get("consideration_type"),            # new (direct from prompt)
                 txn.get("model_confidence"), _VERSION, json.dumps(nd) if nd else None,
@@ -434,6 +448,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         target_ebitda_period_type = ?,  target_ebitda_period_type_v2 = ?,
                         target_ebitda_period_end = ?,
                         financials_currency = ?,
+                        total_debt = ?,  total_debt_currency = ?,
+                        cash_st = ?,  cash_st_currency = ?,
+                        balance_sheet_as_of_date = ?,
                         financials_disclosure_status = ?,
                         consideration_type = COALESCE(consideration_type, ?),
                         model_confidence = ?,  hc_prompt_version = ?,  notes = ?,
@@ -485,6 +502,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         target_ebitda_period_type, target_ebitda_period_type_v2,
                         target_ebitda_period_end,
                         financials_currency,
+                        total_debt, total_debt_currency,
+                        cash_st, cash_st_currency,
+                        balance_sheet_as_of_date,
                         financials_disclosure_status,
                         consideration_type,
                         model_confidence, hc_prompt_version, notes,
@@ -492,7 +512,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",
