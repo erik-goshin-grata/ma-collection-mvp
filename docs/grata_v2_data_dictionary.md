@@ -1,4 +1,4 @@
-# Grata V2 Transaction Data Dictionary — Revised Draft v0.4
+# Grata V2 Transaction Data Dictionary — Revised Draft v0.4.1
 
 **Status:** Engineering review incorporated  
 **Basis:** Current Grata schemas/enums plus accepted/tested transaction-model decisions through 2026-08-13.  
@@ -9,6 +9,13 @@
 > updated only where v0.3 entries would otherwise **contradict** it: the flag entries that
 > become typed dimensions or derivations (§2), the metric-row policy (§9), Spin/Split
 > placement (§11), and advisor specialty (§12/§13). Entries not touched below stand.
+
+> **v0.4.1, 2026-08-18 — MergerLinks vocabulary reconciled.** Full mapping in
+> `grata_v2_inventory_and_recommendations.md` **§Q**. The ML vocabulary was supplied as
+> **labels only** — no ML source model, definitions or examples were available — so
+> 10 of 40 labels are `UNRESOLVED` and several proposed fields below are **conditional on
+> a §Q7 answer**, marked as such. A conditional entry is a hypothesis awaiting a
+> definition, not a specification to build from.
 
 > **Redlined 2026-08-17 — see `docs/grata_v2_reconciliation_2026_08_17.md`.**
 > Inline redlines below touch §7 (canonical EV rule; missing `equity_value_basis`), §9
@@ -60,6 +67,9 @@
 | `management_participation` | Management's role in the buyout. | **TYPED DIMENSION** | Source / researcher | **v0.4.** `MBO` / `MBI` / `BIMBO` / `NULL`. Replaces `is_mbo` + `is_mbi`, which could express a buy-in management buy-out only as both-true. |
 | `sponsor_investment_role` | The investment's role in the sponsor's thesis. | **TYPED DIMENSION** | Source / researcher | **v0.4.** `PLATFORM` / `ADD_ON` / `NULL`. Mutually exclusive. Evidence discipline unchanged: populated only on explicit/qualified evidence. |
 | `is_secondary_buyout` | Sponsor-to-sponsor secondary buyout. | FLAG | Source / researcher | Implemented in current harness from explicit evidence or side-qualified buyer/seller sponsor parties. |
+| `offer_mechanism` | How control is acquired from shareholders. | **TYPED DIMENSION** | Source / researcher | **v0.4.1 ADD.** `TENDER_OFFER` / `MANDATORY_OFFER` / `SCHEME_OF_ARRANGEMENT` / `ONE_STEP_MERGER` / `NULL`. Orthogonal to `combination_structure`, which is the legal form of the combination — a two-step tender offer followed by a squeeze-out merger is both. A mandatory offer is regulatorily triggered by crossing a control threshold; collapsing it into tender offer loses why the offer exists. ML `Tender Offer` / `Mandatory Offer`. Inventory §Q5.1. |
+| `deal_attitude` | Target board's posture toward the approach. | **TYPED DIMENSION** | Source / researcher | **v0.4.1 ADD.** `FRIENDLY` / `HOSTILE` / `UNSOLICITED` / `NULL`. ML's `Natural` is **UNRESOLVED** and no value is proposed for it (§Q7.1). **Replaces the harness boolean `hostile`**, which Grata does not carry at all and which conflates three distinct facts — hostile, unsolicited, and proxy contest. Unsolicited is an approach, not an attitude; many unsolicited offers become recommended. `Initially Hostile` is **derived** from attitude history via `transaction_event_history`, never a stored enum value — storing a transition in a state field gives "was it hostile earlier?" two homes that can disagree. Inventory §Q5.2. |
+| `transaction_geography` | Cross-border vs domestic. | **DERIVED — not stored** | Derived | **v0.4.1.** A **typed dimension, never a boolean pair** — `is_cross_border` + `is_domestic` would repeat the up/down-round failure, with both-false conflating "same country" and "country unknown". `CROSS_BORDER` / `DOMESTIC` / `UNKNOWN`, from buyer and target country via `transaction_party.party_company_id`. **Both countries must be known**; one unknown yields `UNKNOWN`, never `DOMESTIC`. A same-country default would silently label every incompletely-resolved deal domestic, and the error is invisible because domestic is the common case. ML `Cross-Border` / `Domestic`. Inventory §Q5.9. |
 | `is_take_private`, `is_lbo`, `is_secondary_buyout` | Prior listing status, financing, seller identity. | FLAG | Source / derived / researcher | **v0.4: confirmed genuinely orthogonal.** One transaction can be all three; these are different axes and must not be collapsed. |
 | `is_divestiture` | Seller-side divestiture characteristic. | FLAG | Source / researcher | Existing. |
 | ~~`is_stock_for_stock`~~ | | | | **v0.4 REMOVE-DERIVABLE** — component forms ⊆ {`ACQUIRER_STOCK`} with no `CASH` component. **Conditional on `consideration_component` being populated**; until then the flag carries evidence no derivation can reach. Same for `has_earnout` / `has_cvr`. |
@@ -156,6 +166,29 @@ Component calculations:
 
 ---
 
+
+## v0.4.1 — MergerLinks candidates *(CONDITIONAL — definitions required)*
+
+**None of the entries in this sub-section is settled.** They were derived from ML labels
+with no accompanying definitions or examples (inventory §Q0), and each depends on a §Q7
+answer. They are recorded so the candidate shape is visible, **not** so it can be built.
+
+What is *not* conditional: `Cash`, `Ordinary Shares` and `Preference Shares` map into
+existing fields with no addition at all — the ordinary/preference distinction is carried by
+`acquirer_security_type` in §4.
+
+| Field / value | Definition | Notes |
+|---|---|---|
+| `consideration_form = ACQUIRER_DEBT_SECURITY` *(conditional — §Q7.5)* | Debt securities newly issued by the acquirer to sellers as consideration. | **Only needed if ML's `Loan Notes` means acquirer-issued paper.** If it means the target's existing or assumed notes, `DEBT_ASSUMED` already covers it and no form is required. The distinction matters: **not `DEBT_ASSUMED`** — Debt assumed is the *target's existing* liability; loan notes are *new acquirer paper*. Mapping one to the other puts a liability in a consideration slot. ML `Loan Notes`. |
+| `consideration_form = ASSET_EXCHANGE` *(conditional — §Q7.6)* | Consideration paid in assets or businesses rather than cash or securities. | **Only needed if ML's `Asset Swap` denotes consideration** rather than an exchange transaction type. Where both parties exchange businesses, whether that is one exchange or two transactions is the multi-event question — inventory §O6, not a consideration question. |
+| `consideration_form = TARGET_SPECIAL_DIVIDEND` *(conditional — §Q7.7)* | A pre-closing special dividend paid by the target to its own shareholders. | **Who pays it and when decides everything, and ML's label states neither.** If target-paid and pre-closing, it is **excluded from acquirer-paid consideration aggregation by default**, mirroring `DEBT_ASSUMED` in §C3. Economically part of what shareholders receive, but paid by the target from its own cash — summing it into stake-level `equity_value` double-counts whenever the headline price was struck net of it. ML `Special Dividend`. |
+| `payment_timing` *(conditional — §Q7.4)* | `AT_CLOSING` / `DEFERRED` / `CONTINGENT` / `NULL`. | **Only needed if ML's `Contingent Deferred Consideration` spans several mechanics.** If it means an earnout, `EARNOUT` already exists; if a CVR, `CVR` does. The gap is real only for a fixed amount payable later with no contingency. The label collapses two orthogonal axes — *is it contingent?* and *is it deferred?* Performance-contingent is `EARNOUT`; a security issued to holders is `CVR`; a fixed amount payable later with no contingency has no representation today. A typed attribute closes the gap without multiplying forms. |
+
+**Not added, deliberately:** `PREFERENCE_SHARES` and `PARTIAL_SHARE_ALTERNATIVE`.
+Ordinary-vs-preference is carried by `acquirer_security_type` (§4), and a Partial Share
+Alternative is `election` / `is_prorated` mechanics over ordinary `CASH` + `ACQUIRER_STOCK`
+components. Both would duplicate structure that already exists.
+
 # 6. Funding
 
 | Field / Concept | Definition | Shape | Population | Notes |
@@ -247,6 +280,26 @@ Three semantic classes, derived from `metric_type`:
   `transaction_size_basis`, always traceable to the row it was selected from.
 
 This distinction controls applicability: period metadata is essential for company financials; value-basis metadata is essential for deal values; a rollup needs neither but must never be aggregated. No stored `metric_category` is required if it is deterministically mapped from `metric_type`.
+
+## v0.4.1 — synergy metric types
+
+| Metric type | Definition | Notes |
+|---|---|---|
+| `REVENUE_SYNERGIES` | Reported or projected revenue synergies from the transaction. | ML `Reported Revenue Synergies`. |
+| `COST_SYNERGIES` | Reported or projected cost synergies. | ML `Cost Synergies`. |
+| `TOTAL_SYNERGIES` | A **stated** total. | **Never `REVENUE + COST`, in either direction.** Sources frequently state only the total or only one component, so reconstructing it by addition fabricates a figure; and a stated total often includes categories beyond revenue and cost — capex, tax, financing — so the parts do not sum to it even when all three are present. Never derive `TOTAL` from parts; never sum `TOTAL` with parts. |
+
+**Class: `SYNERGY`** — a fourth class alongside `DEAL_VALUE`, `COMPANY_FINANCIAL` and
+`DERIVED_ROLLUP`. Synergies are projected or realized *outcomes* of the transaction, never
+a value of it and never a company financial, and must not be aggregated into either. The
+estimate-vs-actual distinction is carried by the existing basis and `is_calculated`
+semantics (rule 7 below), not by more metric types.
+
+**`Date Synergies Achieved` is UNRESOLVED — ML definition or example required** — and is deliberately not placed here. Three
+readings, and they land in different places: a transaction-level realization date; an
+achievement date on an individual synergy metric; or a *target* date by which synergies are
+expected to be achieved — "Achieved" may describe the projection rather than an outcome.
+Inventory §Q4.
 
 ## Metric-row policy — applies to every row *(v0.4)*
 
@@ -410,8 +463,8 @@ Rules:
 | `is_new_investor` | Investor is new to the company/round context. | FLAG | Existing current field. |
 | `investment_amount_usd` | Converted investor check. | DATA POINT | Existing. |
 | `advisor_specialty` | Advisor service. | ENUM | **v0.4 expansion accepted**, enumerated from actual extraction vocabulary. Keep `financial_advisory`, `legal`, `fairness_opinion`, `accounting`. **Add** `tax`, `proxy_solicitation`, `information_agent` — each named explicitly in the LC extraction prompt's own `OTHER` definition, so the evidence exists in sources and is discarded at the enum. `regulatory` exists in Grata with **no extraction path** — VERIFY a source of population or accept as researcher-only. `restructuring` / `capital_markets` / `communications` DEFER: no extraction evidence, do not freeze on speculation. Inventory §H4. |
-| `advised_party` | Which participant the advisor served. | ENUM | Harness collects `TARGET` / `ACQUIRER` / `PARENT_SELLER` / `BOTH` / `UNKNOWN`. **`BOTH` has no Grata equivalent** — `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` are side-specific. Either add a both-sides representation or stop emitting it; mapping it to one side asserts a fact the source did not state. ENG DECISION. |
-| `advised_party` | Party/client receiving advisory service. | ENUM / relationship | Existing; may need more precise participant/body linkage. |
+| `bidder_role` | The bidder's role, or defense posture, in a contested situation. | ENUM | **v0.4.1 ADD — shape open.** Includes `WHITE_KNIGHT`. *Context, not an ML definition:* the term conventionally denotes a friendly counter-bidder invited by the target to defeat a hostile bid; ML's own definition was not available. Whether the right shape is a bidder role, a defense-posture attribute, or both is open. **A party property, not a transaction attitude:** a white knight is always friendly, so placing it in `deal_attitude` would make it mutually exclusive with `FRIENDLY`, which is exactly backwards. Presupposes a competing hostile bid; the harness already collects `competing_bid`, and linking the two bids is the related-transaction concept deferred in inventory §M. ML `White Knight`. Inventory §Q5.3. |
+| `advised_party` | Party/client receiving advisory service. | ENUM / relationship | Existing; may need finer granularity. **v0.4:** harness collects `TARGET` / `ACQUIRER` / `PARENT_SELLER` / `BOTH` / `UNKNOWN`. **`BOTH` has no Grata equivalent** — `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` are side-specific. Either add a both-sides representation or stop emitting it; mapping it to one side asserts a fact the source did not state. ENG DECISION. Inventory §H4. |
 | `advisor_person_name` | Advisor individual name. | DATA POINT | Current one-person field is insufficient; move to child relationship. |
 | `advisor_person_title` | Advisor individual title. | DATA POINT | Same. |
 | `lender_role` | Lender/financing-provider role. | ENUM | Existing. |

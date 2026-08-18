@@ -1,4 +1,4 @@
-# Grata V2 Transaction Data Model — Master Inventory & Recommendations v0.4
+# Grata V2 Transaction Data Model — Master Inventory & Recommendations v0.4.1
 
 **Status:** Engineering review incorporated  
 **Scope:** Current Grata `enums.py` / `schemas.py` compared with the tested/accepted transaction harness model and the data-model decisions reviewed through 2026-08-13.  
@@ -17,6 +17,16 @@
 > one dimension, others are confirmed as correctly orthogonal.
 >
 > **No schema changes are implemented by this document.** It is a specification.
+>
+> **v0.4.1, 2026-08-18 — MergerLinks vocabulary reconciled.** See **§Q**, and read **§Q0
+> first**: the ML vocabulary was supplied as **labels only**. No ML source model, field
+> definitions or example records were available, so no mapping below rests on one.
+> Verdicts are `DIRECT MAP` / `PROVISIONAL MAP` / `REINTERPRETED` / `ADD` / `UNRESOLVED`,
+> and **10 of the 40 labels are UNRESOLVED on purpose** rather than guessed.
+>
+> **§Q7 is the deliverable to action**: 14 definitions or examples needed from the source
+> system. **§Q5** lists candidate new requirements, with the ones that depend on a §Q7
+> answer marked conditional. §Q reopens none of the decisions in §A–§P.
 
 > **Redlined 2026-08-17 — see `docs/grata_v2_reconciliation_2026_08_17.md`.**
 > That document reconciles this draft against what the harness has actually built and
@@ -1417,9 +1427,252 @@ changed the prior recommendation. Fourteen rows changed; the rest of v0.3 stands
 | Period-coherence tolerance | DEFER | | Not resolvable without live cases; corpus has none. §O5 |
 | **Multiple economic events per source** | **ENG DECISION** | ✱ | **New.** From the PIPE/Ensysce finding. Two failure modes — loss and, worse, value contamination. Not a PIPE patch. §O6 |
 
+## MergerLinks vocabulary *(v0.4.1 — §Q)*
+
+**Labels only — no ML definitions were available (§Q0).** Δ marks rows where the labels
+exposed something the v0.4 model does not hold. Full tables and the 14 open questions are
+in §Q; this is the summary.
+
+| Area | Outcome | Δ v0.4 | Note |
+| --- | --- | :---: | --- |
+| ML `Deal Type` as a field | **do not reproduce** | | A flat field whose values come from nine dimensions. This follows from the value list itself and needs no ML definition. §Q1 |
+| Core events, combination structure, stake, management, geography | DIRECT MAP / DERIVED | | `Acquisition`, `JV`, `Spin Off`, `Merger`, `Reverse Takeover`, `De-Spac`, `Minority`, `Majority`, `MBO`, `Cross-Border`, `Domestic` all land in existing fields or derivations. |
+| Offer mechanics | **ADD** | ✱ | `offer_mechanism` — `Tender Offer` and `Mandatory Offer` have no home. §Q5.1 |
+| Attitude | **ADD** | ✱ | `deal_attitude` replaces the harness boolean `hostile`, which Grata lacks entirely and which conflates hostile / unsolicited / proxy contest. **That defect stands independent of ML.** §Q5.2 |
+| `White Knight` | REINTERPRETED + **ADD** | ✱ | A party role, not an attitude — whatever it means precisely, it describes a bidder. §Q5.3 |
+| Consideration instruments | **ADD** (conditional) | ✱ | `Loan Notes`, `Asset Swap` proposed as new forms **pending definition**; `Preference Shares` needs none — security type carries it. §Q5.4–5 |
+| Synergies | **ADD** | ✱ | Three metric types plus a `SYNERGY` class. **`TOTAL` is a stated rollup, never `REVENUE + COST`** — a rule that needs no ML definition. §Q5.8 |
+| `Natural`, `Partial Share Alt`, `Contingent Deferred Consideration`, `Special Dividend`, `Date Synergies Achieved`, `Public`/`Private`, `Infrastructure`/`Real Estate`, `Restructuring` | **UNRESOLVED** | ✱ | 10 labels whose semantics cannot be established from the label. **Not guessed.** §Q7 |
+| Absorption assessment | 16 DIRECT MAP · 6 PROVISIONAL · 2 REINTERPRETED · 6 ADD · 10 UNRESOLVED | | Counted from the §Q tables. **A measure of our model's coverage against the labels — not an ML validation result.** ~55% already expressible; the residue clusters in three places. §Q8 |
+
 ## What did not change
 
 Everything not marked ✱ carries its v0.3 recommendation forward. In particular ENG
 **accepted as-is**: consideration semantics and aggregation rules, transaction-size and
 transaction-value semantics, investor-level `investment_amount`, the multiples model, and
 the transaction-party recommendations.
+
+---
+
+# Q. MergerLinks vocabulary reconciliation *(v0.4.1)*
+
+**Documentation only.** This section maps ML's vocabulary into the model settled in §A–§P.
+It **reopens nothing** in §A–§P.
+
+## Q0. What this section is working from — read first
+
+**The ML vocabulary below is a list of user-supplied labels. Nothing more.**
+
+No ML source model, schema, field definitions or example records were available.
+`mergerlinks.com` is blocked by the container's egress proxy, and neither
+`ML_differences_2026_08_01.md` nor `qa_runbook_mergerlinks_2026_08_01.md` defines these
+vocabularies — both are outcome comparisons, not schema documents. **No ML definition was
+inspected, and no claim below rests on one.**
+
+That constraint sets the standard of proof used here, which is deliberately stricter than
+"what does this term usually mean in the market":
+
+| verdict | meaning |
+| --- | --- |
+| `DIRECT MAP` | The label is unambiguous **on its own**, and the target model already holds the concept. |
+| `PROVISIONAL MAP` | A mapping is likely and is recorded, but the label admits more than one reading. **Confirm before building.** |
+| `REINTERPRETED` | The concept belongs to a different dimension than ML files it under. The re-seating is a target-model decision, not a claim about ML. |
+| `ADD` | The target model has no home for it. |
+| `UNRESOLVED` | Semantics cannot be established safely from the label. **ML definition or example required.** |
+
+A `PROVISIONAL MAP` is a question with a proposed answer attached, not an answer. §Q7
+collects everything a source-system answer is still needed for.
+
+**Market convention is not evidence about ML.** Where a term has a standard industry
+meaning, that is noted as context — never as confirmation that ML uses it that way.
+
+## Q1. ML `Deal Type`
+
+The one finding that needs no ML definition, because it follows from the value list
+itself: **`Deal Type` is a flat field whose values come from at least nine different
+dimensions** — core event, combination structure, stake direction, management
+participation, offer mechanics, geography, listing status, capital/sponsor context, and
+sector/asset class. A deal can be `Acquisition`, `Cross-Border`, `Public`, `Majority`,
+`PE` and `Tender Offer` at once, so a single flat field must either force a choice or
+degenerate into an untyped bag. That is the structure not to reproduce, and it holds
+whatever the individual values turn out to mean.
+
+| ML label (verbatim) | Target field / value | Verdict | Note |
+| --- | --- | :---: | --- |
+| `Acquisition` | `event_type = ACQUISITION` | DIRECT MAP | |
+| `JV` | `event_type = JOINT_VENTURE` | DIRECT MAP | |
+| `Spin Off` | `event_type = SPIN_OFF` | DIRECT MAP | |
+| `Merger` | `combination_structure = MERGER` | REINTERPRETED | A structure within M&A rather than a peer event category — the §A1 decision. |
+| `Reverse Takeover` | `combination_structure = REVERSE_MERGER` | DIRECT MAP | Implies `MERGER` by the §A6 hierarchy. |
+| `De-Spac` | `combination_structure = DE_SPAC` | DIRECT MAP | Implies `REVERSE_MERGER` and `MERGER`. |
+| `Demerger` | `SPIN_OFF` or `SPLIT_OFF` by mechanics | PROVISIONAL MAP | Lands in the Spin/Split family, but **which member, and whether ML also files carve-out IPOs here, cannot be read off the label.** Discriminator once definitions exist: does consideration flow to the parent, and from whom? Pro-rata distribution to existing shareholders, no proceeds → spin/split. Subsidiary shares sold into public markets for cash → carve-out IPO. **Do not synonymize the two.** |
+| `Disposal` | `is_divestiture = true` on an `ACQUISITION` | PROVISIONAL MAP | Reads as the seller's perspective on an event the model already holds — but the label alone does not exclude asset disposals or wind-downs, which would sit differently. |
+| `Minority` | `is_minority = true` | DIRECT MAP | |
+| `Majority` | `stake_transition_type` / `pct_acquired` | DIRECT MAP → **DERIVED** | No `is_majority` field is needed: it is the complement, carried by `NEW_MAJORITY_STAKE`, `MINORITY_ACQUIRING_MAJORITY`, `FULL_ACQUISITION`, `MAJORITY_*`. **Precondition (§A7):** derivable only where stake evidence exists; absent evidence is `NULL`, never "minority by default". |
+| `MBO` | `management_participation = MBO` | DIRECT MAP | The v0.4 dimension also carries `MBI` and `BIMBO`, which ML's list does not. |
+| `Privatization` | `is_take_private = true` | PROVISIONAL MAP | **Two established and genuinely different meanings**, and the label does not choose: a listed company taken private, or a state-owned asset sold into private hands. If the latter, it is an ordinary `ACQUISITION` with a government seller (`PartyType` already covers it) and `is_take_private` only if the target was also listed. Confirm which ML means. |
+| `Tender Offer` | `offer_mechanism = TENDER_OFFER` | **ADD** | No equivalent exists in the model. §Q5.1 |
+| `Mandatory Offer` | `offer_mechanism = MANDATORY_OFFER` | **ADD** (PROVISIONAL value) | Recorded as distinct from a voluntary tender offer. *Context, not evidence:* in UK/EU takeover regimes a mandatory offer is triggered by crossing a control threshold. Whether ML uses it that way is unconfirmed; if it does not, the two may collapse. |
+| `Cross-Border` | `transaction_geography = CROSS_BORDER` | DIRECT MAP → **DERIVED** | A **typed dimension, not a boolean pair.** `is_cross_border` + `is_domestic` would repeat the §A6 group-3 failure exactly: two mutually exclusive booleans whose both-false state conflates "same country" with "we do not know either country". Derived from buyer and target country via `transaction_party.party_company_id`. **No stored field, no extraction.** |
+| `Domestic` | `transaction_geography = DOMESTIC` | DIRECT MAP → **DERIVED** | Same dimension, not a second boolean. **Precondition, and it is a trap:** derivable only when **both** countries are known. One unknown must yield `UNKNOWN`, never `DOMESTIC` — a same-country default would silently label every incompletely-resolved deal domestic, and the error is invisible because domestic is the common case. |
+| `Public` | — | **UNRESOLVED** | Could be the target's listing status, the buyer's, a market/transaction context, or something else entirely. `target_status = PUBLIC` is the obvious candidate **and is not asserted here.** Definition required. |
+| `Private` | — | **UNRESOLVED** | As above. Note the pairing with `PE` in the same enum makes "private" plausibly about capital source rather than listing — which is a third reading. |
+| `PE` | Buyer `PartyType = PRIVATE_EQUITY`, and/or `is_lbo` / `sponsor_investment_role` | PROVISIONAL MAP | The label names a *capital source*; whether ML files it as a party attribute or an event flavour is unconfirmed. |
+| `VC` | `event_type = VC_ROUND` **or** investor `PartyType = VENTURE_CAPITAL` | PROVISIONAL MAP | The label spans two different objects — the event is a venture round, versus a venture firm is a party — and the target model separates them. Which ML means determines the mapping. |
+| `Restructuring` | — | **UNRESOLVED** | `RECAPITALIZATION` is the closest existing event **if** ML means corporate/balance-sheet restructuring. If it also covers distressed or insolvency processes — administration, creditor schemes, Chapter 11 emergence — the model has no home for those and this becomes a gap rather than a mapping. The label does not distinguish. |
+| `Infrastructure` | — | **UNRESOLVED** | Sector, asset class, or target-type label — the label supports all three and they land in different places. **Not** mapped to `target_type`, which is structural (`standalone_company` / `business_unit` / `subsidiary` / `assets`) and stays so. §Q5.10 |
+| `Real Estate` | — | **UNRESOLVED** | As above. |
+
+## Q2. ML `Consideration Type`
+
+| ML label (verbatim) | Target representation | Verdict | Note |
+| --- | --- | :---: | --- |
+| `Cash` | `consideration_form = CASH` | DIRECT MAP | |
+| `Ordinary Shares` | `ACQUIRER_STOCK` + `acquirer_security_type = ORDINARY/COMMON` | DIRECT MAP | |
+| `Preference Shares` | `ACQUIRER_STOCK` + `acquirer_security_type = PREFERRED` | DIRECT MAP | The distinction is carried by the **security type**, not by a new consideration form — a `PREFERENCE_SHARES` form would duplicate the §B security model. |
+| `Loan Notes` | New form — acquirer-issued debt security | **ADD** (PROVISIONAL) | Recorded as newly issued acquirer paper given to sellers, which is **not** `DEBT_ASSUMED` (the target's existing liability). **The label does not exclude** assumed or refinanced notes, in which case no new form is needed. Confirm before building. §Q5.4 |
+| `Asset Swap` | New form — consideration paid in assets/businesses | **ADD** (PROVISIONAL) | Nothing existing covers non-monetary, non-security consideration. Whether ML treats a swap as one exchange or two transactions is unknown and touches §O6. §Q5.5 |
+| `Partial Share Alt` | — | **UNRESOLVED** | Reads as an abbreviation of "Partial Share Alternative", which would be an **election mechanic** rather than a consideration form — and §C2 already provides `election` / `is_prorated` for that. **That reading is not asserted.** The label is an abbreviation whose expansion is itself an inference, and if it is instead a component type the mapping is different. Definition or example required. |
+| `Contingent Deferred Consideration` | — | **UNRESOLVED** | Could be an earnout, a CVR, a fixed deferred payment, or a **broader bucket covering all three**. The distinction matters because the target model already holds `EARNOUT` and `CVR` as separate forms, while a fixed amount payable later with no contingency has no representation at all. **Which it is determines whether anything needs adding.** The conditional proposal, should ML confirm it spans multiple mechanics, is a `payment_timing` attribute rather than more forms — §Q5.6, contingent on the definition. |
+| `Special Dividend` | — | **UNRESOLVED** | Who pays it, and when, decides everything. A pre-closing dividend paid by the **target** from its own cash is not acquirer consideration and must not be summed into stake-level `equity_value` — the `DEBT_ASSUMED` precedent in §C3. A dividend paid by the acquirer, or one post-closing, sits differently. The label states none of this. §Q5.7 is conditional on the answer. |
+
+The rule that **multiple components coexist** is unchanged, and no flat `consideration_type`
+is recreated — §C3's derived summary remains the only rollup.
+
+## Q3. Attitude
+
+**Inspection result — the existing state differs from the premise on both sides.**
+
+| layer | state |
+| --- | --- |
+| harness `staging_extraction` / `transaction_record` | `hostile INTEGER` — a **boolean** |
+| harness LC extraction | *"hostile — boolean: true if the deal is described as hostile, unsolicited, or subject to a proxy contest"*; plus a separate `competing_bid` boolean |
+| Grata inventory / dictionary | **no attitude or hostile field at all** — absent from both |
+
+So an attitude field partly exists: the harness has one, Grata does not, and the harness's
+is a boolean that cannot carry five values.
+
+**Two defects, not one.** Independent of ML, the harness definition **conflates three
+distinct facts** — hostile, unsolicited, and proxy contest. An unsolicited approach is not
+hostile, and many become recommended offers; a proxy contest is a tactic available in
+either posture. Adding enum values to that boolean would not fix it; the concepts have to
+separate first. **This finding does not depend on ML at all** and stands on the harness
+definition quoted above.
+
+| ML label (verbatim) | Target representation | Verdict | Note |
+| --- | --- | :---: | --- |
+| `Friendly` | `deal_attitude = FRIENDLY` | **ADD** | §Q5.2 |
+| `Hostile` | `deal_attitude = HOSTILE` | **ADD** | |
+| *(no ML label)* | `deal_attitude = UNSOLICITED` | **ADD** | Split out of the harness boolean, not out of ML. |
+| `Initially Hostile` | attitude history | PROVISIONAL MAP → **DERIVED** | Reads as a *transition* rather than a state, which `transaction_event_history` already carries. Storing a transition in a state field gives "was it hostile earlier?" two homes that can disagree. Whether ML means a completed transition or a still-contested deal is unconfirmed. |
+| `Natural` | — | **UNRESOLVED — ML definition required** | **No inference is offered.** The value is recorded verbatim and left unmapped. |
+| `White Knight` | `transaction_party` bidder / defense role | REINTERPRETED + **ADD** | Placed as a **party** property rather than a transaction attitude. The reasoning is target-model-internal and does not depend on ML's definition: whatever a white knight is, it describes a *bidder* and its relationship to a defense, and an attitude enum would make it mutually exclusive with `FRIENDLY`. Whether the right shape is a bidder role, a defense-posture attribute, or both is open — the point here is only that it is not attitude. §Q5.3 |
+
+## Q4. Synergies
+
+| ML label (verbatim) | Target representation | Verdict | Note |
+| --- | --- | :---: | --- |
+| `Reported Revenue Synergies` | `metric_type = REVENUE_SYNERGIES` | DIRECT MAP → **ADD** | "Reported" is taken to qualify the figure's provenance, which §E4 rule 7 already carries as basis rather than as a separate metric type. |
+| `Cost Synergies` | `metric_type = COST_SYNERGIES` | DIRECT MAP → **ADD** | |
+| `Total Synergies` | `metric_type = TOTAL_SYNERGIES` | DIRECT MAP → **ADD** | **A stated rollup, never additive** — and this rule needs no ML definition. Sources frequently state only a total or only one component, so reconstructing it by addition fabricates a figure; and a stated total may include categories beyond revenue and cost, so the parts need not sum to it even when all three are present. Never derive `TOTAL` from parts; never sum `TOTAL` with parts. |
+| `Date Synergies Achieved` | — | **UNRESOLVED — ML definition or example required** | **Three readings, and they place the field differently:** (a) one transaction-level realization date → a scalar or `transaction_event_history` entry; (b) an achievement date on an *individual* synergy metric → an attribute on the metric row; (c) a **target** date by which synergies are expected to be achieved — "Achieved" may describe the projection rather than an outcome — which makes it forward-looking guidance, not a realization fact. |
+
+**Metric class.** Synergies are neither `DEAL_VALUE` nor `COMPANY_FINANCIAL`: they are
+projected or realized *outcomes* of the transaction, must never be aggregated into either,
+and are usually management estimates. Recommend a distinct **`SYNERGY`** class alongside
+`DEAL_VALUE`, `COMPANY_FINANCIAL` and `DERIVED_ROLLUP`, with estimate-vs-actual carried by
+existing basis semantics (§E4 rule 7) rather than by more metric types. §Q5.8
+
+## Q5. Candidate new schema requirements
+
+Separated from the mappings, as instructed. **Several are conditional on a Q7 answer** and
+are marked so — a requirement derived from an unresolved label is a hypothesis, not a
+requirement.
+
+| # | Requirement | Shape | Driven by | Status |
+| --- | --- | --- | --- | --- |
+| Q5.1 | `offer_mechanism` — `TENDER_OFFER` / `MANDATORY_OFFER` / `SCHEME_OF_ARRANGEMENT` / `ONE_STEP_MERGER` / `NULL` | typed dimension, transaction-level | `Tender Offer`, `Mandatory Offer` | **Firm** for `Tender Offer`; the `MANDATORY_OFFER` value is provisional |
+| Q5.2 | `deal_attitude` — `FRIENDLY` / `HOSTILE` / `UNSOLICITED` / `NULL` (+ `NEUTRAL` if Q7.3 resolves that way) | typed dimension, replaces the harness boolean `hostile` | ML Attitude **and** the harness conflation defect | **Firm** — justified by the harness defect independent of ML |
+| Q5.3 | Bidder / defense role incl. `WHITE_KNIGHT` | `transaction_party` role or attribute | `White Knight` | **Firm** that it is a party property, not attitude; whether the shape is a bidder role, a defense-posture attribute, or both is open |
+| Q5.4 | Consideration form for acquirer-issued debt securities | `consideration_form` value | `Loan Notes` | **Conditional on Q7.5** |
+| Q5.5 | Consideration form for asset exchange / swap | `consideration_form` value | `Asset Swap` | **Conditional on Q7.6** |
+| Q5.6 | `payment_timing` — `AT_CLOSING` / `DEFERRED` / `CONTINGENT` | component attribute | `Contingent Deferred Consideration` | **Conditional on Q7.4** |
+| Q5.7 | Consideration form for a target-paid special dividend, with a non-aggregation rule | `consideration_form` value + §C3 rule | `Special Dividend` | **Conditional on Q7.7** |
+| Q5.8 | `MetricType`: `REVENUE_SYNERGIES`, `COST_SYNERGIES`, `TOTAL_SYNERGIES`; plus a `SYNERGY` class | metric types + class mapping | ML Synergies | **Firm** |
+| Q5.9 | `transaction_geography` — `CROSS_BORDER` / `DOMESTIC` / `UNKNOWN` | **derived, not stored** | `Cross-Border`, `Domestic` | **Firm** — no schema change; a dictionary derivation with a strict unknown-not-domestic rule |
+| Q5.10 | `target_asset_class` for asset-type targets | — | `Infrastructure`, `Real Estate` | **Blocked on Q7.8** — not proposed until the labels are defined |
+
+**Not required, and worth stating**, because the instinct is to add them: no new event
+types, no `is_majority`, no `PREFERENCE_SHARES` form, no `target_type` values for
+Infrastructure or Real Estate, and no flat `Deal Type` field.
+
+## Q6. What the vocabulary shows without needing ML definitions
+
+Two observations follow from the **shape** of the supplied lists rather than from any
+value's meaning, so they survive the evidence limitation:
+
+- **A flat multi-label field cannot carry nine dimensions.** `Deal Type`'s values plainly
+  come from different axes — geography, listing status, stake direction, sponsor type,
+  offer mechanics — and no single field can express that a deal is several at once. This
+  is the case for typed dimensions, made by ML's own list.
+- **`De-Spac` and `Reverse Takeover` appear as unrelated peers.** Whatever ML means by
+  each, a flat list has no way to record that one might be a species of the other. That is
+  precisely the information the §A6 implication set exists to keep.
+
+Claims that ML *confirms* particular target-model designs have been **withdrawn** from this
+section. They rested on inferred meanings for `Partial Share Alt`, `Ordinary`/`Preference
+Shares` placement and others, and an inference cannot confirm anything.
+
+## Q7. ML definitions or examples still required
+
+The short list. Each blocks a specific decision above; nothing here is guesswork that can
+be closed by more thought.
+
+| # | Question | Blocks |
+| --- | --- | --- |
+| Q7.1 | What does `Natural` mean? Is the value literally `Natural`, or a transcription of another value? | Q3 attitude enum |
+| Q7.2 | Is `Date Synergies Achieved` transaction-level or per-synergy-metric — and is it a realization date or a target date? | Q4, Q5.8 shape |
+| Q7.3 | Do `Public` / `Private` describe the target's listing status, the buyer's, capital source, or transaction context? | Q1; whether `target_status` absorbs them |
+| Q7.4 | Does `Contingent Deferred Consideration` mean an earnout, a CVR, a fixed deferred payment, or a bucket spanning them? | Q2, Q5.6 |
+| Q7.5 | Are `Loan Notes` issued by the acquirer as consideration, or the target's existing/assumed notes? | Q2, Q5.4 |
+| Q7.6 | Does `Asset Swap` denote consideration paid in assets, or an exchange transaction type? | Q2, Q5.5 |
+| Q7.7 | Who pays the `Special Dividend`, and when — target or acquirer, pre- or post-closing? | Q2, Q5.7, §C3 aggregation |
+| Q7.8 | Are `Infrastructure` / `Real Estate` sector, asset class, or target-type labels? | Q1, Q5.10 |
+| Q7.9 | What is `Partial Share Alt` short for, and is it a consideration component or an election mechanic? | Q2 |
+| Q7.10 | Does `Restructuring` include distressed/insolvency processes? | Q1; whether this is a mapping or a genuine gap |
+| Q7.11 | Does `Privatization` mean take-private, or state-asset privatisation? | Q1 |
+| Q7.12 | Is `Mandatory Offer` regulatorily triggered, or a general offer category? | Q5.1 value set |
+| Q7.13 | Do `PE` / `VC` classify the event or a party? | Q1 |
+| Q7.14 | Does `Demerger` cover carve-out IPOs, or only distributions to existing shareholders? | Q1 spin/split vs carve-out boundary |
+
+## Q8. Absorption assessment
+
+**What this is, and what it is not.** These counts measure **how much of the supplied
+vocabulary our target model can already express**. They are an assessment of *our* model
+against a list of labels — not a validation of ML, not a measure of ML's quality, and not
+evidence that any particular mapping is correct. A `DIRECT MAP` here means *we have a field
+whose meaning matches the label as read*; if ML's definition turns out to differ, the
+count moves and the model has not changed at all.
+
+All **40** supplied labels appear verbatim in the tables above; counted from those tables,
+not estimated.
+
+| verdict | count | reading |
+| --- | ---: | --- |
+| `DIRECT MAP` | **16** | Absorbed by an existing field. 3 of these resolve to a *derivation* (`Majority`, `Cross-Border`, `Domestic`) and 3 to a new metric type (the synergy trio). |
+| `PROVISIONAL MAP` | **6** | A mapping is proposed and must be confirmed before anything is built on it. |
+| `REINTERPRETED` | **2** | `Merger` and `White Knight` — re-seated into a different dimension than ML files them under. |
+| `ADD` | **6** | No home exists. Concentrated in offer mechanics, attitude, and consideration instruments. |
+| `UNRESOLVED` | **10** | Semantics cannot be established from the label. §Q7. |
+
+**What this says about our model.** Roughly **55%** of the labels (22 of 40, counting
+DIRECT MAP plus REINTERPRETED) are already expressible in the target model as it stands,
+and a further 6 probably are. The model absorbs the bulk of the vocabulary without
+extension — which is a statement about the model's coverage, not about ML.
+
+The residue is not evenly spread, and that is the useful signal: **the 10 unresolved labels
+cluster in exactly three places** — the consideration instrument vocabulary (4), the
+sector/asset-class question (2), and single-value ambiguities in the deal-type field (4).
+The 6 genuine `ADD`s cluster in offer mechanics and attitude, neither of which the target
+model had considered at all before this review. Those are the two areas where ML is
+carrying something the model does not.
