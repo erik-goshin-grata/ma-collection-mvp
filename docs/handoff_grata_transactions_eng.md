@@ -10,6 +10,31 @@ This is the **front door**, not the specification. Every claim here is summarise
 detailed documents listed in §10; drill there for field-level detail and the evidence behind
 each decision.
 
+> ## ⚠️ **Transactions V3 is now the canonical target model.**
+> **`docs/grata_v2_inventory_and_recommendations.md` §T is authoritative** and supersedes
+> parts of §2, §4 and §5 below. V2/harness behaviour and the earlier Grata model are
+> **inputs** to V3, not authorities over it — a V2 field does not automatically belong in V3,
+> and there is no live Grata implementation whose behaviour must be preserved. Prompt
+> versions (`0.5 (V2 alignment)`, `v2_event_type`) describe the implementation generation a
+> prompt was built against, **not** the canonical model generation.
+>
+> V3 decisions recorded 2026-08-19: event taxonomy and the removal of canonical
+> `event_category` · `combination_structure` · `target_type` · removal of `is_divestiture` ·
+> party roles including `PARENT_ACQUIRER` / `SPONSOR_BUYER` / `SPONSOR_SELLER` · the advisor
+> model · `sponsor_transaction_role` · recap flags · `acquirer_type`. Six
+> implementation/migration consequences are recorded in `decisions.md`, **deliberately
+> unrepaired**.
+>
+> **Validation status.** **V3 is an evolution of an already developed pipeline and data
+> model, not a greenfield design.** Existing extraction, stages, schemas, tests and prior
+> validation remain relevant evidence and should be preserved where V3 semantics do not
+> change them. The **37/37** suite confirms the current regression suite remains green but
+> does **not** by itself validate the V3 changes, which are not yet implemented. Before
+> executable V3 changes land, each changed concept should have its **V2 → V3 path traced** —
+> prompt → stage → validation → storage/aggregation → canonical output — with regression and
+> real-transaction validation **added or rerun wherever the semantics or implementation path
+> change.** A validation gate, not a backlog item.
+
 ---
 
 ## 1. Executive summary
@@ -38,11 +63,11 @@ and reviewing them produced four further Product decisions (§5, R7–R10). The 
 rationale must distinguish **source-stated** from **inferred**, per rationale, and the three
 structure-derived defaults that silently produced inferred rationales are retired.
 
-**Where this leaves us.** No Product decisions are open. Seventeen items remain, none of them a
+**Where this leaves us.** No Product decisions are open. Twenty-three items remain, none of them a
 Product choice: six ENG implementation items (schedulable now), one prompt /
 legacy-compatibility review (a decision is owed before it can be scheduled), six recorded
-defects and follow-ups, two evidence-blocked items (cannot be scheduled), and two
-external-system asks.
+defects and follow-ups, **six V3 implementation/migration consequences**, two
+evidence-blocked items (cannot be scheduled), and two external-system asks.
 
 > **Read §5 before reviewing.** The Product decisions listed there are settled. They can be
 > revisited on new evidence, but they should not be reopened by default in an
@@ -248,6 +273,20 @@ than drift**. The decision owed: should downstream prompts describe the *emittin
 vocabulary or the *accepted* one — and if the latter, should legacy values be labelled as
 such in the prompt text? Prompt edits change live model contracts and need their own
 regression.
+
+### V3 implementation / migration consequences (6)
+
+Recorded 2026-08-19 alongside the V3 taxonomy decisions. **Deliberately unrepaired** — current
+V2 behaviour does not redefine V3 semantics. Full detail in `decisions.md`.
+
+| Consequence | Note |
+| --- | --- |
+| `target_type` casing defect | Stage 9 compares uppercase; Stage 3 writes the model's raw lowercase. Affects `is_take_private`. |
+| `acquirer_type` casing defect | Same pattern, wider: `is_add_on`, `is_de_spac`, and `is_take_private` (which needs **both** to match). |
+| `SELLER_SPONSOR` dead path | Queried for `is_secondary_buyout`, never written. **V3 terminology is `SPONSOR_SELLER`.** |
+| `parent_seller` conditioned on `target_type` | Cannot serve as independent seller-side evidence. |
+| `is_take_private` private-buyer proxy | Uses acquirer-type membership; four of those values leave the V3 enum, so a proper private-vs-listed input is needed. An MBO of a listed company *is* a take-private. |
+| `MANAGEMENT` removal sequencing | `management_participation` is decided but **not built**; it must land with or before the removal. |
 
 ### Recorded defects and follow-ups (6)
 

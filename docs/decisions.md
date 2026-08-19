@@ -2707,7 +2707,7 @@ required" (superseded by "preferred home"), and Silver parity item K1 (absorbed 
 
 ### What is left
 
-**Seventeen items, none of them a Product decision.** Grouped by who can move them, because the
+**Twenty-three items, none of them a Product decision.** Grouped by who can move them, because the
 groups have different unblocking conditions — ENG items are schedulable now, the prompt review
 needs a decision before it can be scheduled, recorded defects are known and deliberately
 unactioned, evidence-blocked items cannot be scheduled at all, and external asks depend on
@@ -2716,7 +2716,8 @@ another team answering.
 *Lineage of this count: seven until 2026-08-18, when the source-of-truth correction sweep
 added the prompt / legacy-compatibility item; sixteen from 2026-08-19, when the Summary and
 Strategic Rationale review added three ENG items and five recorded follow-ups; seventeen when
-scoping the bounded rationale cleanup surfaced the no-durable-state finding below.*
+scoping the bounded rationale cleanup surfaced the no-durable-state finding; twenty-three when
+the V3 taxonomy review added six implementation/migration consequences.*
 
 **ENG implementation (6)**
 
@@ -2745,6 +2746,20 @@ scoping the bounded rationale cleanup surfaced the no-durable-state finding belo
 | No behavioral coverage for Stages 12–13 | Neither stage is exercised by any test. |
 | `specs/pipeline.md` stage numbering | Pre-`sec_documents`/`agreement_extract` scheme; numbers export as 12 where `run.py` has 14. |
 | "Processed, no rationale found" has no durable state | Not idempotent for that outcome; an ENG/design consideration, not a patch. Inventory §S2.1. |
+
+**V3 implementation / migration consequences (6)** — recorded 2026-08-19, **not repaired**
+
+These are consequences of the V3 taxonomy decisions and of defects found while inspecting.
+**None of them redefines V3 semantics**, and none was fixed during the taxonomy review.
+
+| item | note |
+| --- | --- |
+| `target_type` casing defect | `aggregate.py` compares uppercase (`"STANDALONE_COMPANY"`, `"BUSINESS_UNIT"`, …) while the classifier writes the model's raw lowercase output to the legacy column. Affects `is_take_private`; also affected `is_divestiture`, which V3 removes. |
+| `acquirer_type` casing defect | Same dual-column pattern, **wider blast radius**: `is_add_on` (`"PE_PORTFOLIO"`), `is_de_spac` (`"SPAC"`), and `is_take_private` via `_PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES`. `is_take_private` depends on **both** mismatches. |
+| `SELLER_SPONSOR` dead path | Queried by `aggregate.py` for `is_secondary_buyout` but **never written** by any stage, so the side-qualified branch is unreachable. **V3 terminology is `SPONSOR_SELLER`** (§T5) — the rename and the dead path are one item. |
+| `parent_seller` extraction conditioned on `target_type` | The HC prompt populates `parent_seller` only "when `target_type` is subsidiary, business_unit, or assets", so it cannot serve as independent seller-side evidence. Recorded during the `is_divestiture` inspection; **still relevant to party/extraction semantics** even though V3 removes that flag. |
+| `is_take_private` uses acquirer-type membership as a private-buyer proxy | `_PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES` lists 12 values and treats membership as "buyer is private". Four leave the V3 enum (§T8), so **`is_take_private` needs a proper private-vs-listed input under V3.** Note an MBO of a listed company *is* a take-private, and `MANAGEMENT` is one of the removed values. |
+| `MANAGEMENT` removal must be sequenced | `acquirer_type = management` is live in V2; `management_participation` (MBO/MBI/BIMBO) is a decided V3 dimension that **is not built**. The destination must land with or before the removal, or MBO context is briefly unrepresentable. |
 
 **Evidence-blocked (2)** — cannot be scheduled; each needs a case that does not yet exist
 
@@ -2972,3 +2987,91 @@ rationale storage change, no new real-text benchmark, and no change to source se
 keyword/full-text policy. **The version-provenance fix (`2b04867`) is the only implementation
 change made in this whole workstream**, because it corrects objective prompt-version provenance
 without altering extraction behavior. Everything else here is documentation.
+
+---
+
+## Transactions V3 Becomes the Canonical Target Model (2026-08-19)
+
+A taxonomy review across event type, combination structure, target type, party roles,
+advisors, sponsor role and acquirer type. **Documentation only — no schema, prompt,
+extraction, aggregation, migration or code change was made.**
+
+### The framing, which changed how everything below is read
+
+**Transactions V3 is the canonical target.** The other representations are **inputs to it,
+not authorities over it**:
+
+| Layer | Standing |
+| --- | --- |
+| **V2 / harness** | Current and previous implementation and extraction behaviour. Tells us what exists, what we can collect, where defects and useful capabilities are. **A V2 field does not automatically belong in V3.** |
+| **Earlier Grata model** | The starting data-model/product baseline. Reused where it works, changed where this review found a better representation. **No live implementation whose behaviour must be preserved.** |
+| **Inventory / dictionary** | Working documents: the baseline plus our recommendations. **Later Product decisions supersede earlier recommendations.** |
+| **V3** | The canonical target being defined. |
+
+**Prompt version is not model generation.** `**Version:** 0.5 (V2 alignment)` and
+`v2_event_type` describe the implementation generation a prompt was built against — not a
+claim that those fields or enums are canonical V3.
+
+Engineering's simplification guidance still stands: collapse genuinely single dimensions,
+remove redundant or derivable storage, avoid unnecessary flags. It does **not** license
+collapsing independent facts, transaction roles, relationships, or useful
+Product/researcher/FE distinctions merely to reduce field count.
+
+### The decisions
+
+Full text is **inventory §T**, which is authoritative. In brief: `event_type` is the
+top-level taxonomy and canonical `event_category` is **removed** (no `acquisition_category`
+either); `combination_structure` keeps the `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER` hierarchy with
+`SHARE_PURCHASE` and `ASSET_PURCHASE` **removed** and detailed SEC merger mechanics left
+outside V3; `target_type` is the four structural values plus null with **`SPINCO` removed**;
+**`is_divestiture` is removed from V3** rather than repaired; `PartyRole` gains
+`PARENT_ACQUIRER`, `SPONSOR_BUYER` and `SPONSOR_SELLER`; advisors are `ADVISOR` plus a
+specific advised-party relationship plus specialty, with side derived;
+**`sponsor_transaction_role`** is `PLATFORM` / `ADD_ON` / `NULL` with specified evidence
+semantics; `recap_type` survives and **all four recap flags are removed**; Consortium stays
+removed; `acquirer_type` is **retained as extracted** with a purified vocabulary that drops
+`PE_PORTFOLIO`, `MANAGEMENT` and `EMPLOYEE_GROUP`; sponsor-backed context must remain
+representable **independently of `acquirer_type`**, with physical representation undecided;
+and **LBO remains a V3 concept** despite existing nowhere in V2.
+
+### The audit that produced three reversals
+
+Product asked whether Engineering's simplification guidance had been applied more broadly
+than intended. It had, in three places, and **all three trace to one sentence** in §H2 —
+*"Relationship is preferred because it scales to multiple buyers/sellers."* Applied to
+sponsors it removed side; applied to advisors it stopped at side and never reached the party.
+
+The distinguishing test, which cleanly separated the reversals from the collapses that were
+kept: **`MBO`/`MBI`/`BIMBO` and `UP`/`FLAT` each *added* a representable state; generic
+`SPONSOR` and `ADVISOR_*_SIDE` each *removed* one.** Collapsing a genuinely single dimension
+gains expressiveness; collapsing distinct roles loses it.
+
+**`PARENT_ACQUIRER` was not a collapse at all** — it was an inventory omission. The earlier
+Grata `PartyRole` had `PARENT_SELLER` and not `PARENT_ACQUIRER`; §H2 kept that list and
+mentioned the harness's richer roles only in a closing prose sentence, so it never reached
+the dictionary or §P despite being extracted, stored and tested in V2.
+
+### Two findings worth keeping
+
+**A field can be "not assessed for derivation" and already derived.** §A7 listed
+`is_divestiture` among flags with "no candidate derivation in the current model"; it was
+being computed from `target_type` in Stage 9 the whole time. Corrected in place.
+
+**Evidence discipline can be lost by merging.** The v0.4 `is_platform_investment` /
+`is_add_on` collapse fused a field the prompt gates on explicit evidence — *"do not infer
+merely because a PE sponsor is the buyer"* — with a derivation that **is** exactly that
+inference. Inspection also found the prompt's own Example 3 carries "Add-On Acquisition" in
+its title and records nothing, because no field existed to hold it. V3 keeps the collapse but
+specifies the evidence semantics rather than leaving them implicit.
+
+### What was deliberately not decided
+
+Physical representation of sponsor-backed status · SEC acquisition-vehicle / `MERGER_SUB`
+disposition · detailed merger legal structure · target asset-type enum and placement ·
+`target_status` cleanup · majority/minority representation · attitude/approach work ·
+offer-mechanism cleanup · Funding Round/Stage vocabulary · ML destination mapping.
+
+Recorded so a later reader does not mistake an inspection finding for a decision. The six
+implementation consequences are in the backlog above, **unrepaired by design** — current V2
+behaviour does not get to redefine V3 semantics.
+

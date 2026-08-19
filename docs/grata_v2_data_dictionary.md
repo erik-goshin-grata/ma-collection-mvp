@@ -4,6 +4,19 @@
 **Basis:** Current Grata schemas/enums plus accepted/tested transaction-model decisions through 2026-08-13.  
 **Important:** Physical storage/table placement remains an ENG decision unless cardinality requires a repeating child/relationship.
 
+> ## ⚠️ **Transactions V3 is the canonical target. `docs/grata_v2_inventory_and_recommendations.md` §T is authoritative.**
+>
+> This dictionary carries the earlier Grata baseline plus the v0.3/v0.4/v0.4.1
+> recommendations. **Where any entry here disagrees with inventory §T, §T wins.** Entries
+> superseded by V3 decisions are marked in place rather than rewritten, so the reasoning
+> stays auditable. V2/harness behaviour and the earlier Grata model are **inputs** to V3,
+> not authorities over it.
+>
+> Rows superseded on 2026-08-19: `event_category` (§T1) · `combination_structure` sibling
+> values (§T2) · `target_type` (§T3) · `is_divestiture` (§T4) · party/advisor roles
+> (§T5–T6) · `sponsor_investment_role` → `sponsor_transaction_role` (§T7) · `acquirer_type`
+> (§T8).
+
 > **v0.4, 2026-08-18 — Engineering review incorporated.** The authoritative record of the
 > review is `docs/grata_v2_inventory_and_recommendations.md` **§P**. This dictionary is
 > updated only where v0.3 entries would otherwise **contradict** it: the flag entries that
@@ -54,10 +67,10 @@
 |---|---|---|---|---|
 | `transaction_id` | Canonical transaction identifier. | ID | System | Required. |
 | `event_type` | Broad transaction event family/type. | ENUM | Source / researcher | Current enum; proposed cleanup removes minority core usage and may move merger to a flag. |
-| `event_category` | High-level product/event family derived from event type. | ENUM | Derived | Recommended: `ma`, `spin_split`, `investment_funding`, `recapitalization`, `exit_liquidity`. `divestiture` is a feature (`is_divestiture`), not a competing category. |
-| `target_type` | Structural type of target/object acquired. | ENUM | Source / researcher | Proposed: `STANDALONE_COMPANY`, `BUSINESS_UNIT`, `SUBSIDIARY`, `ASSETS`, `NULL`. |
-| `acquirer_type` | Economic buyer classification. | ENUM / entity attribute | Entity data / researcher | Prefer canonical entity profile when available; not necessarily stored on transaction record. |
-| `combination_structure` | Structure of the combination. **Hierarchical**, stored at the most specific supported value. | **HIERARCHICAL TYPED DIMENSION** | Source / researcher | **v0.4.** `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`, with `SHARE_PURCHASE` / `ASSET_PURCHASE` / `NULL` as non-chain siblings. **Not three mutually exclusive peers** — the implication set is what preserves the nested facts the flags carried. Store the most specific value; **query broader questions by implication, never by equality** (`is_merger` is `IN (MERGER, REVERSE_MERGER, DE_SPAC)`, not `= MERGER`). Ambiguity resolves **upward**: a reverse merger with no established SPAC shell stays `REVERSE_MERGER`. The implication set belongs in the dictionary, not in per-consumer application logic. Inventory §A6.1. |
+| ~~`event_category`~~ | **REMOVED from V3 — see inventory §T1.** Broad Product/FE families are derived from `event_type`; not an authored field. `divestiture` and `exit_liquidity` are not carried forward. *(v0.4 text retained below.)* High-level product/event family derived from event type. | ENUM | Derived | Recommended: `ma`, `spin_split`, `investment_funding`, `recapitalization`, `exit_liquidity`. `divestiture` is a feature (`is_divestiture`), not a competing category. |
+| `target_type` | Structural type of target/object acquired. | ENUM | Source / researcher | **V3 (§T3): `STANDALONE_COMPANY` · `SUBSIDIARY` · `BUSINESS_UNIT` · `ASSETS` · unknown-null.** `SPINCO` is **not** a V3 value — it is implied by `event_type = SPIN_OFF / SPLIT_OFF`, and no replacement flag is created. One canonical column, not legacy + V2. Asset sub-classification when `target_type = ASSETS` is **not decided** (§T10). |
+| `acquirer_type` | **Economic/entity type of the acquirer as established from the transaction source/context.** | ENUM | **Extracted at collection time** | **V3 (§T8) — retained as extracted; the v0.4 "prefer canonical entity profile" recommendation is superseded.** Vocabulary: `CORPORATION` · `PRIVATE_EQUITY` · `VENTURE_CAPITAL` · `GROWTH_EQUITY` · `HEDGE_FUND` · `FAMILY_OFFICE` · `PENSION_FUND` · `SOVEREIGN_WEALTH_FUND` · `OTHER_FINANCIAL_SPONSOR` · `INDIVIDUAL` · `SPAC` · `SEARCH_FUND` · `GOVERNMENT` · `UNKNOWN`. **Removed:** `PE_PORTFOLIO`, `MANAGEMENT`, `EMPLOYEE_GROUP`, `CONSORTIUM`. Definitions carry **no transaction-behaviour qualifiers** — `CORPORATION` is not "acquiring for strategic reasons"; `PRIVATE_EQUITY` is not "making a direct fund investment". Names not frozen until reconciled with Grata's Company vocabulary. |
+| `combination_structure` | Structure of the combination. **Hierarchical**, stored at the most specific supported value. | **HIERARCHICAL TYPED DIMENSION** | Source / researcher | **v0.4.** `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`, **V3 (§T2): `SHARE_PURCHASE` and `ASSET_PURCHASE` are REMOVED; only `NULL` remains as a non-chain value.** *(v0.4 text:)* with `SHARE_PURCHASE` / `ASSET_PURCHASE` / `NULL` as non-chain siblings. **Not three mutually exclusive peers** — the implication set is what preserves the nested facts the flags carried. Store the most specific value; **query broader questions by implication, never by equality** (`is_merger` is `IN (MERGER, REVERSE_MERGER, DE_SPAC)`, not `= MERGER`). Ambiguity resolves **upward**: a reverse merger with no established SPAC shell stays `REVERSE_MERGER`. The implication set belongs in the dictionary, not in per-consumer application logic. Inventory §A6.1. |
 | ~~`is_merger`~~ | | | | **v0.4 REMOVE-DERIVABLE** — `combination_structure IN (MERGER, REVERSE_MERGER, DE_SPAC)`. |
 | ~~`is_reverse_merger`~~ | | | | **v0.4 REMOVE-DERIVABLE** — `combination_structure IN (REVERSE_MERGER, DE_SPAC)`. |
 | ~~`is_de_spac`~~ | | | | **v0.4 REMOVE-DERIVABLE** — `combination_structure = DE_SPAC`. |
@@ -65,13 +78,13 @@
 | `is_take_private` | Public target is taken private. | FLAG | Source / derived / researcher | Existing. |
 | `is_lbo` | Leveraged-buyout characteristic. | FLAG | Source / derived / researcher | Existing. |
 | `management_participation` | Management's role in the buyout. | **TYPED DIMENSION** | Source / researcher | **v0.4.** `MBO` / `MBI` / `BIMBO` / `NULL`. Replaces `is_mbo` + `is_mbi`, which could express a buy-in management buy-out only as both-true. |
-| `sponsor_investment_role` | The investment's role in the sponsor's thesis. | **TYPED DIMENSION** | Source / researcher | **v0.4.** `PLATFORM` / `ADD_ON` / `NULL`. Mutually exclusive. Evidence discipline unchanged: populated only on explicit/qualified evidence. |
+| `sponsor_transaction_role` *(v0.4 name: `sponsor_investment_role`)* | The transaction's role in the sponsor's thesis. Separate from `PartyRole` and `acquirer_type`. | **TYPED DIMENSION** | Source / researcher | **V3 — see inventory §T7 for the full evidence semantics.** `PLATFORM` / `ADD_ON` / `NULL`, mutually exclusive. **`ADD_ON` does not require literal add-on/bolt-on/tuck-in wording** and **must never be inferred from `acquirer_type`**; established sponsor-backed portfolio-company status making the acquisition is sufficient, and the sponsor need not be named. `PLATFORM` carries a deliberately higher bar: a PE firm being the direct buyer does not establish it. Generic VC backing is insufficient. `is_secondary_buyout` stays orthogonal. |
 | `is_secondary_buyout` | Sponsor-to-sponsor secondary buyout. | FLAG | Source / researcher | Implemented in current harness from explicit evidence or side-qualified buyer/seller sponsor parties. |
 | `offer_mechanism` | How control is acquired from shareholders. | **TYPED DIMENSION** | Source / researcher | **v0.4.1 ADD.** `TENDER_OFFER` / `MANDATORY_OFFER` / `SCHEME_OF_ARRANGEMENT` / `ONE_STEP_MERGER` / `NULL`. Orthogonal to `combination_structure`, which is the legal form of the combination — a two-step tender offer followed by a squeeze-out merger is both. A mandatory offer is regulatorily triggered by crossing a control threshold; collapsing it into tender offer loses why the offer exists. ML `Tender Offer` / `Mandatory Offer`. Inventory §Q5.1. |
 | `deal_attitude` | Target board's posture toward the approach. | **TYPED DIMENSION** | Source / researcher | **v0.4.1 ADD.** `FRIENDLY` / `HOSTILE` / `UNSOLICITED` / `NULL`. ML's `Natural` is **UNRESOLVED** and no value is proposed for it (§Q7.1). **Replaces the harness boolean `hostile`**, which Grata does not carry at all and which conflates three distinct facts — hostile, unsolicited, and proxy contest. Unsolicited is an approach, not an attitude; many unsolicited offers become recommended. `Initially Hostile` is **derived** from attitude history via `transaction_event_history`, never a stored enum value — storing a transition in a state field gives "was it hostile earlier?" two homes that can disagree. Inventory §Q5.2. |
 | `transaction_geography` | Cross-border vs domestic. | **DERIVED — not stored** | Derived | **v0.4.1.** A **typed dimension, never a boolean pair** — `is_cross_border` + `is_domestic` would repeat the up/down-round failure, with both-false conflating "same country" and "country unknown". `CROSS_BORDER` / `DOMESTIC` / `UNKNOWN`, from buyer and target country via `transaction_party.party_company_id`. **Both countries must be known**; one unknown yields `UNKNOWN`, never `DOMESTIC`. A same-country default would silently label every incompletely-resolved deal domestic, and the error is invisible because domestic is the common case. ML `Cross-Border` / `Domestic`. Inventory §Q5.9. |
 | `is_take_private`, `is_lbo`, `is_secondary_buyout` | Prior listing status, financing, seller identity. | FLAG | Source / derived / researcher | **v0.4: confirmed genuinely orthogonal.** One transaction can be all three; these are different axes and must not be collapsed. |
-| `is_divestiture` | Seller-side divestiture characteristic. | FLAG | Source / researcher | Existing. |
+| ~~`is_divestiture`~~ | **REMOVED from V3 — see inventory §T4.** Not replaced by a flag and not repaired. Spin-Off/Split-Off are already explicit in `event_type`, and ordinary acquisitions of subsidiaries/business units/assets do not become a separate divestiture classification. A *Divestitures* grouping, if wanted, is derived from event types. | FLAG | — | *(v0.4: "Seller-side divestiture characteristic. Existing.")* |
 | ~~`is_stock_for_stock`~~ | | | | **v0.4 REMOVE-DERIVABLE** — component forms ⊆ {`ACQUIRER_STOCK`} with no `CASH` component. **Conditional on `consideration_component` being populated**; until then the flag carries evidence no derivation can reach. Same for `has_earnout` / `has_cvr`. |
 | `financials_disclosure_status` | Disclosure state for target/company financial metrics and balance-sheet data. | ENUM | Source / researcher | `DISCLOSED`, `UNDISCLOSED`, `PARTIALLY_DISCLOSED`, `UNKNOWN`. |
 | `transaction_terms_disclosure_status` | Disclosure state for deal economics, consideration and valuation terms. | ENUM | Source / researcher | Same vocabulary; independent of financials disclosure. |
@@ -464,18 +477,36 @@ Rules:
 | `investment_amount_usd` | Converted investor check. | DATA POINT | Existing. |
 | `advisor_specialty` | Advisor service. | ENUM | **v0.4 expansion accepted**, enumerated from actual extraction vocabulary. Keep `financial_advisory`, `legal`, `fairness_opinion`, `accounting`. **Add** `tax`, `proxy_solicitation`, `information_agent` — each named explicitly in the LC extraction prompt's own `OTHER` definition, so the evidence exists in sources and is discarded at the enum. `regulatory` exists in Grata with **no extraction path** — VERIFY a source of population or accept as researcher-only. `restructuring` / `capital_markets` / `communications` DEFER: no extraction evidence, do not freeze on speculation. Inventory §H4. |
 | `bidder_role` | The bidder's role, or defense posture, in a contested situation. | ENUM | **v0.4.1 ADD — shape open.** Includes `WHITE_KNIGHT`. *Context, not an ML definition:* the term conventionally denotes a friendly counter-bidder invited by the target to defeat a hostile bid; ML's own definition was not available. Whether the right shape is a bidder role, a defense-posture attribute, or both is open. **A party property, not a transaction attitude:** a white knight is always friendly, so placing it in `deal_attitude` would make it mutually exclusive with `FRIENDLY`, which is exactly backwards. Presupposes a competing hostile bid; the harness already collects `competing_bid`, and linking the two bids is the related-transaction concept deferred in inventory §M. ML `White Knight`. Inventory §Q5.3. |
-| `advised_party` | Party/client receiving advisory service. | ENUM / relationship | Existing; may need finer granularity. **v0.4:** harness collects `TARGET` / `ACQUIRER` / `PARENT_SELLER` / `BOTH` / `UNKNOWN`. **`BOTH` has no Grata equivalent** — `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` are side-specific. Either add a both-sides representation or stop emitting it; mapping it to one side asserts a fact the source did not state. ENG DECISION. Inventory §H4. |
+| `advised_party` | Party/client receiving advisory service. | **relationship** | **V3 (§T6): an advisor participation references the specific transaction party or parties advised; side is derived from that party's role. `BOTH` needs no special encoding — it is two party references.** Where a source establishes only side and not the party, preserve as partial evidence; do not manufacture a relationship. *(v0.4 text:)* Existing; may need finer granularity. **v0.4:** harness collects `TARGET` / `ACQUIRER` / `PARENT_SELLER` / `BOTH` / `UNKNOWN`. **`BOTH` has no Grata equivalent** — `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` are side-specific. Either add a both-sides representation or stop emitting it; mapping it to one side asserts a fact the source did not state. ENG DECISION. Inventory §H4. |
 | `advisor_person_name` | Advisor individual name. | DATA POINT | Current one-person field is insufficient; move to child relationship. |
 | `advisor_person_title` | Advisor individual title. | DATA POINT | Same. |
 | `lender_role` | Lender/financing-provider role. | ENUM | Existing. |
 | `party_source` | Party assertion provenance. | ENUM | Existing. |
 | `party_source_url` | Provenance URL. | URL | Existing. |
 
-Current `PartyRole` values:
-`TARGET`, `BUYER`, `SELLER`, `INVESTOR`, `SPONSOR`, `PARENT_SELLER`,
-`ADVISOR_BUY_SIDE`, `ADVISOR_SELL_SIDE`, `LENDER`, `JV_PARTNER`, `UNDERWRITER`.
+**V3 `PartyRole` (§T5) — decided 2026-08-19:**
 
-Current Grata does **not** distinguish `BUYER_SPONSOR` / `SELLER_SPONSOR`. Preferred unified treatment is generic `SPONSOR` plus a relationship to the sponsored transaction participant; flat side-specific roles remain an implementation alternative.
+`TARGET` · `BUYER` · `SELLER` · `INVESTOR` · `PARENT_ACQUIRER` · `PARENT_SELLER` ·
+`SPONSOR_BUYER` · `SPONSOR_SELLER` · `ADVISOR` · `LENDER` · `JV_PARTNER` · `UNDERWRITER`.
+
+- **`SPONSOR_BUYER` / `SPONSOR_SELLER` are explicit roles.** Sponsor side is meaningful
+  transaction-role information and is directly representable.
+- **`PARENT_ACQUIRER` is added** — its absence from the earlier baseline was an inventory
+  omission, not a modelling decision.
+- **`ADVISOR` replaces `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE`** (§T6). Side is derived from
+  the advised party's role.
+- **`MERGER_SUB`, `BUYER_PLATFORM`, `SELLER_PLATFORM` are deliberately not included** —
+  acquisition-vehicle concepts are considered separately (§T10).
+
+> **SUPERSEDED (2026-08-19).** *v0.4 text:* "Current `PartyRole` values: `TARGET`, `BUYER`,
+> `SELLER`, `INVESTOR`, `SPONSOR`, `PARENT_SELLER`, `ADVISOR_BUY_SIDE`, `ADVISOR_SELL_SIDE`,
+> `LENDER`, `JV_PARTNER`, `UNDERWRITER`. Current Grata does **not** distinguish
+> `BUYER_SPONSOR` / `SELLER_SPONSOR`. Preferred unified treatment is generic `SPONSOR` plus a
+> relationship to the sponsored transaction participant; flat side-specific roles remain an
+> implementation alternative."
+>
+> That preference is **reversed** by §T5. A relationship-only treatment loses side whenever
+> the sponsor party is unresolved — which is the common case.
 
 Current `AdvisorSpecialty`:
 `financial_advisory`, `legal`, `accounting`, `fairness_opinion`, `regulatory`.

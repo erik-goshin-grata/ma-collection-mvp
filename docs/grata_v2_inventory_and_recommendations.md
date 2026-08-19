@@ -18,6 +18,34 @@
 >
 > **No schema changes are implemented by this document.** It is a specification.
 >
+
+> ## ⚠️ READ FIRST — **§T is the canonical V3 target.** This document is now layered.
+>
+> **Transactions V3 is the canonical target data model.** Everything else is an *input* to
+> it, not an authority over it:
+>
+> | Layer | Standing |
+> | --- | --- |
+> | **V2 / harness** | The current and previous Transactions implementation and extraction behaviour. It tells us what exists, what we can collect, and where defects or useful capabilities are. **A V2 field does not automatically belong in V3.** |
+> | **Earlier Grata model** | The starting data-model/product baseline. Reused where it works, changed judiciously where this review found a better representation. **There is no live Grata implementation whose behaviour must be preserved.** |
+> | **This document (§0–§S)** | A working record: the earlier Grata baseline plus our v0.3/v0.4/v0.4.1 recommendations. **Later explicit Product decisions supersede earlier recommendations here.** |
+> | **§T** | **The V3 decisions. Authoritative.** Where §T and any earlier section disagree, §T wins. |
+>
+> Engineering's simplification guidance still stands — collapse genuinely single
+> dimensions, remove redundant or derivable storage, avoid unnecessary flags. It does
+> **not** license collapsing independent facts, transaction roles, relationships, or
+> useful Product/researcher/FE distinctions merely to reduce field count. A 2026-08-19
+> audit found the guidance had been over-applied in three places; §T records the
+> reversals.
+>
+> **Prompt version ≠ model generation.** Wording such as `**Version:** 0.5 (V2 alignment)`
+> and identifiers such as `v2_event_type` describe the implementation generation a prompt
+> was built against. They are not claims that the represented fields or enums are
+> canonical V3.
+>
+> *(The filenames still read `grata_v2_*`. Renaming them would break every cross-reference
+> in the decision record and the handoff; the layering above is the intended
+> disambiguation. A rename is an ENG/repo decision, not a modelling one.)*
 > **v0.4.1, 2026-08-18 — MergerLinks vocabulary reconciled.** See **§Q**, and read **§Q0
 > first**: the ML vocabulary was supplied as **labels only**. No ML source model, field
 > definitions or example records were available, so no mapping below rests on one.
@@ -95,7 +123,7 @@ Key corrections/additions:
 | `MERGER` | ENUM today | Exists | CHANGE | Move merger out of the top-level event taxonomy. **v0.4:** it becomes `combination_structure = MERGER`, not a flag — see §A6 group 1. |
 | `REVERSE_MERGER` | ENUM today | Exists | CHANGE | `event_type = ACQUISITION` plus `combination_structure = REVERSE_MERGER`. |
 | `SPAC_DE_SPAC` | ENUM today | Exists | CHANGE | `event_type = ACQUISITION` plus `combination_structure = DE_SPAC`. |
-| `combination_structure` | **HIERARCHICAL TYPED DIMENSION** | Missing | **ADD (v0.4)** | `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`, plus non-chain siblings `SHARE_PURCHASE` / `ASSET_PURCHASE` / `NULL`. Store the **most specific** value; query broader questions **by implication, never by equality**. Not three peer values — the hierarchy is what preserves the nested facts. §A6. |
+| `combination_structure` | **HIERARCHICAL TYPED DIMENSION** | Missing | **ADD (v0.4)** | `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`. **§T2 supersedes the sibling values: `SHARE_PURCHASE` and `ASSET_PURCHASE` are removed from V3** — the first was a named null, the second duplicated `target_type = ASSETS`. `NULL` remains. Store the **most specific** value; query broader questions **by implication, never by equality**. Not three peer values — the hierarchy is what preserves the nested facts. §A6. |
 | `is_merger`, `is_reverse_merger`, `is_de_spac` | FLAG | `is_de_spac` exists | **REMOVE-DERIVABLE (v0.4)** | All three roll up from `combination_structure`. **Changes v0.3**, which proposed adding the first two and keeping the third. §A7. |
 | `is_merger_of_equals` | FLAG | Implemented in current harness | KEEP / HARNESS IMPLEMENTED | Special merger characteristic; true only with explicit/qualified merger-of-equals evidence. |
 | `MINORITY_INVESTMENT` | ENUM today | Exists | CHANGE | Remove from core event usage; minority is a transaction feature. |
@@ -108,6 +136,11 @@ Key corrections/additions:
 | `CARVE_OUT_IPO`, `RECAPITALIZATION`, `IPO`, `DIRECT_LISTING` | ENUM | Exists | DEFER | Preserve current model; not redesigned in this phase. |
 
 ## A2. `event_category`
+
+> **SUPERSEDED by §T1 (2026-08-19).** Canonical `event_category` is **removed from V3** —
+> broad Product/FE families are derived from `event_type`, not independently authored.
+> `divestiture` and `exit_liquidity` are not carried forward. The analysis below is retained
+> as the reasoning that led there.
 
 Current enum values are `ma`, `divestiture`, `investment_funding`, `recapitalization`, `exit_liquidity`.
 
@@ -129,7 +162,7 @@ Physical enum migration is an ENG decision; the semantic recommendation is that 
 | Concept | Shape | Current Grata | Decision | Recommendation |
 |---|---|---|---:|---|
 | `target_type` | ENUM | **No direct equivalent in current Grata enums/schema** | ADD | Transaction-specific structural target classification: `STANDALONE_COMPANY`, `BUSINESS_UNIT`, `SUBSIDIARY`, `ASSETS`, or `NULL`. The current Grata `PartyType` classifies entities (PE firm, corporation, advisor, etc.) and is not equivalent. `target_type` preserves asset/business-unit/subsidiary granularity while keeping them in M&A `ACQUISITION`. |
-| `acquirer_type` | Derived entity classification | `PartyType` exists on `transaction_party` | CHANGE FROM SEPARATE ENUM IDEA | Prefer deriving the acquirer's economic type from the buyer party's existing/canonical company type. Amend `PartyType` only where actual buyer classifications are missing; do not create a duplicate transaction-level acquirer taxonomy unless product performance requires denormalization. |
+| `acquirer_type` | Derived entity classification | `PartyType` exists on `transaction_party` | **SUPERSEDED — see §T8** | Prefer deriving the acquirer's economic type from the buyer party's existing/canonical company type. Amend `PartyType` only where actual buyer classifications are missing; do not create a duplicate transaction-level acquirer taxonomy unless product performance requires denormalization. |
 
 Current `PartyType` covers PE, VC, growth equity firm, corporation, individual, fund, family office, sovereign wealth fund, pension fund, lender, advisor, SPAC, search fund, government and unknown. Potential missing buyer archetypes should be reconciled against the canonical company model before adding them.
 
@@ -260,10 +293,16 @@ naming convention:
 
 Values **outside** the merger chain, siblings of `MERGER` rather than members of it:
 
+> **SUPERSEDED by §T2 (2026-08-19).** ~~`SHARE_PURCHASE`~~ and ~~`ASSET_PURCHASE`~~ are
+> **removed from V3**. `ASSET_PURCHASE` duplicated the live `target_type = ASSETS`, which is
+> also the deriving input elsewhere; `SHARE_PURCHASE` carried no fact —
+> `event_type = ACQUISITION` with `combination_structure = NULL` already says it. Only
+> `NULL` survives as a non-chain value.
+
 | value | meaning |
 | --- | --- |
-| `SHARE_PURCHASE` | ordinary purchase of shares; not a statutory combination |
-| `ASSET_PURCHASE` | ordinary purchase of assets; not a statutory combination |
+| ~~`SHARE_PURCHASE`~~ | *removed — see §T2* |
+| ~~`ASSET_PURCHASE`~~ | *removed — see §T2* |
 | `NULL` | structure not established from the source |
 
 **Storage and query rules:**
@@ -361,7 +400,15 @@ Forcing them into one enum would require picking one and discarding three.
 **`is_take_private`, `is_lbo`, `is_secondary_buyout`: KEEP as flags.** This confirms v0.3.
 
 **`is_platform_investment` / `is_add_on`: CHANGE to one dimension** —
-`sponsor_investment_role` ∈ `PLATFORM` | `ADD_ON` | `NULL`. A sponsor investment is either
+`sponsor_investment_role` ∈ `PLATFORM` | `ADD_ON` | `NULL`.
+
+> **SUPERSEDED IN PART by §T7 (2026-08-19).** The collapse is kept; the **name changes to
+> `sponsor_transaction_role`**, and the evidence semantics are specified rather than left as
+> "explicit evidence". Critically, **`ADD_ON` does not require literal add-on wording** and
+> **must not be inferred from `acquirer_type = PE_PORTFOLIO`** — the v0.4 pair fused a
+> source-stated fact with an unconditioned inference from the buyer's entity class.
+
+The v0.4 text follows. A sponsor investment is either
 the platform for a thesis or an add-on to an existing one; it is not both, and both-true is
 meaningless rather than merely rare.
 
@@ -415,9 +462,16 @@ is a property of the *data*, not of the *definition*.
 
 ### Not assessed
 
-`is_minority`, `is_divestiture`, `is_take_private`, `is_lbo`, `is_secondary_buyout`,
+`is_minority`, ~~`is_divestiture`~~, `is_take_private`, `is_lbo`, `is_secondary_buyout`,
 `is_merger_of_equals`, `has_go_shop`, `has_mac_clause` — each is a primary transaction fact
 with no candidate derivation in the current model. They remain stored flags.
+
+> **CORRECTED and SUPERSEDED (2026-08-19).** Two errors in the line above.
+> **(1) `is_divestiture` was already derived in code** — `stages/aggregate.py` computes it
+> from `target_type`, so "no candidate derivation" was wrong on inspection.
+> **(2) `is_divestiture` is removed from V3 entirely** (§T4) — not repaired, not replaced by
+> a flag. `is_minority` is deferred to a later majority/minority review (§T10); `is_lbo`
+> **remains a V3 concept** (§T9) though it exists in no harness code, schema or prompt.
 
 ---
 
@@ -1010,6 +1064,20 @@ Keep:
 
 Need:
 - Current Grata has generic `SPONSOR` but **does not have `SELLER_SPONSOR` / `BUYER_SPONSOR` roles**. Preserve side/participant granularity either through a `sponsored_party_id` / relationship or, if ENG prefers flat roles, explicit side-specific sponsor roles. Relationship is preferred because it scales to multiple buyers/sellers.
+
+> **REVERSED by §T5 (2026-08-19).** The preference for a generic `SPONSOR` plus a
+> relationship is **not** the V3 decision. **`SPONSOR_BUYER` and `SPONSOR_SELLER` are
+> explicit V3 roles** — side is meaningful transaction-role information and must be directly
+> representable, not reconstructed through a join that fails whenever the sponsor party is
+> unresolved. A 2026-08-19 audit identified this sentence as the source of two
+> over-applications of the simplification guidance: this one, and the advisor roles below.
+> **`PARENT_ACQUIRER` is also added** (§T5) — its absence here was an inventory omission,
+> not a collapse. **`MERGER_SUB` / `BUYER_PLATFORM` / `SELLER_PLATFORM` are deliberately NOT
+> added**; see §T10.
+>
+> **Advisor roles:** `ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` in the Keep list above are
+> **not retained** in V3. The canonical role is **`ADVISOR`**, referencing the specific party
+> advised, with side derived from that party's role — see §T6.
 - Legal acquisition vehicles / merger subs must be representable as transaction-context participants without contaminating `acquirer_type`.
 
 The harness already uses richer transaction-context roles such as buyer/seller sponsor, buyer/seller platform, parent acquirer/seller and merger sub. Exact Grata representation is an ENG decision; the semantic relationships should not be lost.
@@ -1120,6 +1188,12 @@ empty — the same trap flagged for `round_price_direction` in §A6.
 obtaining it are different participations.
 
 ### Advised-party granularity
+
+> **SUPERSEDED by §T6 (2026-08-19).** The V3 model resolves this: the canonical role is
+> **`ADVISOR`**, and an advisor participation **references the specific party or parties
+> advised**. Side is derived from the advised party's role, so `BOTH` needs no special
+> encoding — it is two party references. Where a source establishes only side and not the
+> specific party, **preserve that as partial evidence; do not manufacture a relationship.**
 
 `advised_party = BOTH` has **no Grata equivalent** — `ADVISOR_BUY_SIDE` and
 `ADVISOR_SELL_SIDE` are side-specific and cannot express one advisor serving both. Either
@@ -1425,6 +1499,15 @@ This remains an incremental extension and semantic cleanup of Grata V2, not a wh
 ---
 
 # P. v0.4 recommendation table *(post-Engineering review)*
+
+> **§T supersedes this table where they disagree (2026-08-19).** §P records the v0.4/v0.4.1
+> recommendations. Rows changed by V3 decisions: `event_category` (removed — §T1);
+> `combination_structure` sibling values (`SHARE_PURCHASE` / `ASSET_PURCHASE` removed — §T2);
+> `target_type` (`SPINCO` removed — §T3); `is_divestiture` (removed from V3, not repaired —
+> §T4); party roles and sponsor side (§T5); advisor roles (§T6);
+> `sponsor_investment_role` → **`sponsor_transaction_role`** with specified evidence
+> semantics (§T7); `acquirer_type` (retained as extracted, vocabulary purified — §T8).
+> Unmarked rows carry forward.
 
 Verdicts: **KEEP** · **CHANGE** · **ADD** · **REMOVE-DERIVABLE** · **DEFER** · **ENG DECISION**.
 
@@ -2064,3 +2147,270 @@ migration**, because `rationale_tag` rows are already optional and both consumer
 Not implemented in this pass. No extraction-quality problem with prompt 0.5 has been
 demonstrated, and the isolated-source review that prompted the question turned out to be a poor
 basis for judging Stage 13 without normal relevancy and source-resolution context.
+
+---
+
+# T. V3 canonical target model — decided *(2026-08-19)*
+
+**Authoritative.** Where §T and any earlier section of this document disagree, §T wins.
+Everything here is a **Product decision**, not a recommendation. Implementation
+consequences are kept separate in §T9 so they cannot be mistaken for semantics.
+
+Sections §0–§S remain as the working record — the earlier Grata baseline plus the
+v0.3/v0.4/v0.4.1 recommendations that led here. They are marked where superseded rather
+than rewritten, so the reasoning stays auditable.
+
+> ### Validation status — read before scheduling implementation
+>
+> **V3 is an evolution of an already developed Transactions pipeline and data model, not a
+> greenfield design.** Existing extraction, stages, schemas, tests and prior validation
+> remain **relevant evidence** and should be **preserved where V3 semantics do not change
+> them**.
+>
+> The **37/37** repository suite confirms the current regression suite remains green. It does
+> **not** by itself validate the V3 changes, which are not yet implemented — a green suite is
+> a regression check on the current codebase, not evidence of V3.
+>
+> **Before executable V3 changes land**, each changed concept should have its **V2 → V3 path
+> traced** — prompt → stage → validation → storage/aggregation → canonical output — with
+> **regression and real-transaction validation added or rerun wherever the semantics or the
+> implementation path change.** This is a validation gate, not a backlog item.
+
+## T1. Event taxonomy
+
+- **`event_type` is the canonical top-level answer to "what happened?"** Nothing else
+  competes for that role.
+- **Canonical `event_category` is removed** from V3 — REMOVE-DERIVABLE. Broad Product/FE
+  families (M&A, Funding, Spin/Split, Recapitalization) **may be derived from `event_type`**;
+  they are not independently authored transaction facts. Supersedes §A2.
+- **No `acquisition_category`.** Not introduced under any name.
+- **`exit_liquidity` is not carried forward.** It existed in the earlier Grata enum; it
+  requires a concrete Product use and definition before it gets another home.
+- **`JOINT_VENTURE`, `PIPE`, `UNKNOWN` and legacy `MINORITY_INVESTMENT` do not need
+  category values** merely to make an old enum exhaustive.
+
+## T2. `combination_structure`
+
+**`MERGER` / `REVERSE_MERGER` / `DE_SPAC` / `NULL`**, hierarchical, `DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`.
+The §A6.1 storage and query rules stand in full: store the most specific supported value;
+**query by implication, never equality**; ambiguity resolves **upward**; the implication set
+lives in the dictionary, not per-consumer logic.
+
+- **`SHARE_PURCHASE` and `ASSET_PURCHASE` are removed.** `ASSET_PURCHASE` duplicated
+  `target_type = ASSETS`; `SHARE_PURCHASE` was a named null — `event_type = ACQUISITION`
+  with `combination_structure = NULL` already says it. Supersedes §A1 and §A6.1.
+- **Detailed SEC/agreement merger mechanics stay outside this decision.** Direct /
+  forward-triangular / reverse-triangular are a separate concept, not needed in V3 now.
+  They may be added later if a Product or filtering case warrants it; the existing
+  agreement-extraction capability can be revisited at that point.
+- **`TENDER_OFFER` belongs under offer mechanics**, not detailed merger structure.
+- **Do not expand `combination_structure` with other legal mechanics in this pass.**
+
+## T3. `target_type`
+
+**`STANDALONE_COMPANY` / `SUBSIDIARY` / `BUSINESS_UNIT` / `ASSETS` / unknown-null.**
+A single structural dimension answering *what structural thing was transacted?*
+
+- **`SPINCO` is removed.** It is an event/role concept, already implied deterministically by
+  `event_type = SPIN_OFF / SPLIT_OFF`. **Do not create a replacement SpinCo flag.**
+- **One canonical `target_type`** — not permanent legacy + V2 columns. Physical migration
+  and casing are ENG implementation.
+- Asset classification remains a possible **subordinate** classification of the acquired
+  object when `target_type = ASSETS`. **Enum and placement are not decided here.**
+
+## T4. `is_divestiture` — removed from V3
+
+**Removed. Not replaced by a flag, and not repaired.**
+
+Spin-Off and Split-Off are already represented explicitly by `event_type`. There is no
+additional independent divestiture fact to store. Ordinary acquisitions of subsidiaries,
+business units or assets do **not** become a separate divestiture classification, and
+**Spin/Split does not automatically imply divestiture**.
+
+If Product/FE later wants a *Divestitures* grouping, **derive it from the applicable event
+types**. The V2 Stage 9 derivation from `target_type` is therefore obsolete under V3 and
+should be **removed** in the eventual coordinated cleanup rather than fixed. Supersedes the
+§A7 "Not assessed" listing, which recorded `is_divestiture` as a stored flag with no
+candidate derivation — it was in fact already derived in code.
+
+## T5. Party roles
+
+V3 `PartyRole` directly supports: **`TARGET` · `BUYER` · `SELLER` · `INVESTOR` ·
+`PARENT_ACQUIRER` · `PARENT_SELLER` · `SPONSOR_BUYER` · `SPONSOR_SELLER` · `ADVISOR`**,
+plus independently valid roles already required — **`LENDER` · `JV_PARTNER` · `UNDERWRITER`**.
+
+- **Sponsor side is directly representable.** This **reverses** §H2's preference for a
+  generic `SPONSOR` plus `sponsored_party_id` relationship. Side is meaningful
+  transaction-role information, not metadata to be reconstructed through a join.
+- **`PARENT_ACQUIRER` is added.** It was an **inventory omission**, not a collapse: the
+  earlier Grata `PartyRole` had `PARENT_SELLER` and not `PARENT_ACQUIRER`, and §H2 kept that
+  list while mentioning the harness's richer roles only in prose.
+- **`MERGER_SUB`, `BUYER_PLATFORM` and `SELLER_PLATFORM` are NOT added** merely because
+  they exist in the harness. SEC/agreement-derived acquisition-vehicle concepts are being
+  considered separately and are **not part of this decision**.
+
+## T6. Advisors
+
+**Canonical `PartyRole` is simply `ADVISOR`.**
+
+- An advisor participation **references the specific transaction party or parties advised**,
+  where established.
+- **`advisor_specialty` separately describes the service provided.**
+- **`ADVISOR_BUY_SIDE` / `ADVISOR_SELL_SIDE` are not retained** as canonical roles.
+  Buy/sell/target side is **derivable from the role of the advised party**. Supersedes §H2
+  and §H4.
+- **Worked example:** Morgan Stanley → `ADVISOR` → advised BioMarin (`BUYER`) →
+  `FINANCIAL_ADVISORY`; J.P. Morgan → `ADVISOR` → advised Alesta (`TARGET`) →
+  `FINANCIAL_ADVISORY`; Goodwin → `ADVISOR` → advised Alesta (`TARGET`) → `LEGAL`.
+- If a source establishes **only** advisor side and not the specific advised party,
+  **preserve that as partial source evidence — do not manufacture a party relationship.**
+
+## T7. `sponsor_transaction_role`
+
+**`PLATFORM` / `ADD_ON` / `NULL`.** A transaction classification, **separate from
+`PartyRole` and from `acquirer_type`**. Replaces the v0.4 `is_platform_investment` /
+`is_add_on` pair and the v0.4 name `sponsor_investment_role`.
+
+**`PLATFORM`** — the transaction establishes or acquires the company as a **new** sponsor/PE
+platform investment. Evidence may be explicit ("new platform", "platform investment") or
+otherwise sufficiently established by transaction/source context. **A PE firm being the
+direct buyer does not itself establish `PLATFORM`** — the context must establish that the
+transaction creates the acquired company as a new platform. **Intentionally a higher
+evidence bar than `ADD_ON`.**
+
+**`ADD_ON`** — an existing sponsor/PE-backed portfolio company or platform is making the
+acquisition. **Literal "add-on" / "bolt-on" / "tuck-in" wording is not required.**
+Establishable through:
+
+1. explicit transaction language (add-on / bolt-on / tuck-in);
+2. the transaction source establishing the acquirer is an existing sponsor/PE portfolio
+   company or platform;
+3. company description/context establishing that status, combined with the current
+   acquisition;
+4. *eventually* an established company↔sponsor relationship in company/entity data, **if
+   reliable and current**. No such relationship data exists today.
+
+**If the evidence establishes that the acquirer is an existing PE/sponsor-backed portfolio
+company and that company is making the acquisition, classify `ADD_ON`** — including ordinary
+wording such as *"X, a portfolio company of Y Capital, acquired Z"* and *"X, a
+private-equity-backed company, acquired Z"* where current PE/sponsor backing is genuinely
+established. **The sponsor does not have to be named.**
+
+**Boundaries:**
+
+- Generic investor/**VC** backing is **insufficient** — the relevant context is PE/sponsor
+  ownership of an existing operating/portfolio company. *(Trusted Health / ShiftOS → NULL.)*
+- A company **description** may supply the portfolio/platform context; it need not be
+  repeated in the transaction sentence.
+- The generic word "platform" describing a company, product or technology is
+  **insufficient** — it must refer to the sponsor investment/platform relationship.
+- **Complete sponsor-party resolution is not required** to retain an otherwise established
+  classification.
+
+**Worked boundaries:** Blackford / IES → `ADD_ON` (explicit "second add-on acquisition for
+… Platform"). Aventia / BHA → `ADD_ON` (Bernhard Capital portfolio company making the
+acquisition; no add-on wording). HarperLove / ChromaScape → `ADD_ON` ("a portfolio company
+of HBM Holdings"). Trusted Health / ShiftOS → `NULL` (VC-backed).
+
+**`is_secondary_buyout` remains separate and orthogonal.** A sponsor-to-sponsor deal may
+legitimately be **both** `sponsor_transaction_role = PLATFORM` **and**
+`is_secondary_buyout = true`.
+
+**The V2 derivation `is_add_on := acquirer_type == PE_PORTFOLIO` is not carried forward.**
+The defect is not that portfolio-company status can never support `ADD_ON` — it can — but
+that an overloaded enum value was used as an **unconditional proxy with no evidence
+contract**. **Do not hard-wire the V3 rule to the `acquirer_type` representation**; the
+semantic input is established sponsor-backed portfolio-company status, however represented.
+
+## T8. `acquirer_type`
+
+**Retained as an extracted V3 transaction-context classification** answering: *what
+economic/entity type is the acquirer?* — established from transaction/source context. Useful
+at collection time, **before entity reconciliation is necessarily complete**. It should later
+map to Grata's Company/PartyType definitions where possible, but **that mapping does not
+eliminate the extraction requirement**. Supersedes §A3's "prefer deriving from the buyer
+party's canonical company type."
+
+**Starting V3 vocabulary** — names not frozen until reconciled against Grata's Company
+vocabulary; the **semantic axis is decided**:
+
+`CORPORATION` · `PRIVATE_EQUITY` · `VENTURE_CAPITAL` · `GROWTH_EQUITY` · `HEDGE_FUND` ·
+`FAMILY_OFFICE` · `PENSION_FUND` · `SOVEREIGN_WEALTH_FUND` · `OTHER_FINANCIAL_SPONSOR` ·
+`INDIVIDUAL` · `SPAC` · `SEARCH_FUND` · `GOVERNMENT` · `UNKNOWN`
+
+**Removed:** `PE_PORTFOLIO`, `MANAGEMENT`, `EMPLOYEE_GROUP`, `CONSORTIUM` *(already removed)*.
+
+**Transaction-behaviour qualifiers are removed from the definitions:**
+
+- **`CORPORATION`** means a corporation/corporate entity — **not** "a corporation acquiring
+  for strategic reasons." The v0.4 definition could not represent a corporation acquiring
+  for non-strategic reasons; removing the clause is a widening.
+- **`PRIVATE_EQUITY`** means a private-equity acquirer — **not** "a PE firm making a direct
+  fund investment."
+
+**Why each removal:**
+
+- **`PE_PORTFOLIO` is not an entity type.** A portfolio company retains its underlying
+  economic type — generally `CORPORATION` — while its sponsor-backed context is represented
+  separately. *Aventia / BHA:* acquirer Aventia, `acquirer_type = CORPORATION`,
+  sponsor-backed context established, sponsor Bernhard Capital where resolved,
+  `sponsor_transaction_role = ADD_ON`. *Direct PE platform buy:* `acquirer_type =
+  PRIVATE_EQUITY`, `sponsor_transaction_role = PLATFORM` when established.
+- **`MANAGEMENT`** describes people/participation, not an entity type. It belongs in
+  `management_participation` (`MBO`/`MBI`/`BIMBO`) and in the people/participant model.
+- **`EMPLOYEE_GROUP`** — a participant/group concept, and **no demonstrated Product or
+  corpus use** was found: zero examples, tests, gold-set rows or documented instances. It
+  was added speculatively in the 0.12 bulk expansion alongside `CONSORTIUM`. **Do not create
+  a replacement to preserve it.** If employee-led acquisition participation is later needed,
+  it belongs in participant/transaction semantics.
+
+**Kept deliberately:** `SPAC` — a vehicle class, but a meaningful Product classification of
+the acquiring entity, aligned with the earlier Grata vocabulary. `SEARCH_FUND` and
+`GOVERNMENT` — legitimate acquirer types already recognised in the earlier Grata model.
+`HEDGE_FUND` and `OTHER_FINANCIAL_SPONSOR` — **not** collapsed into a generic `FUND`; if the
+earlier Grata Company vocabulary lacks those distinctions that is a mapping/amendment
+question, **not a reason to weaken V3**.
+
+**Not added:** `SUBSIDIARY`, `BUSINESS_UNIT`, `ASSETS`. Those belong to `target_type` and
+answer a different question. A subsidiary can itself be a corporation; the concepts are not
+mutually exclusive.
+
+### T8.1 Sponsor-backed / portfolio-company context — required, representation undecided
+
+**Product requirement.** Collection must be able to retain evidence that an acquirer is an
+existing sponsor-backed/portfolio company, **including when the specific sponsor identity or
+the canonical Company↔Sponsor relationship has not yet been resolved.**
+
+Conceptually this is **company/ownership context rather than `acquirer_type`**, and it may
+have a **validity period**. **The physical representation is deliberately not decided in this
+pass.** It may later reconcile into Grata's Company/ownership model.
+
+**This does not block `sponsor_transaction_role = ADD_ON`** (§T7): where the source or
+company description establishes the sponsor-backed context, `ADD_ON` may be classified
+before canonical relationship resolution.
+
+## T9. Other decisions carried into V3
+
+- **Recapitalization:** keep `recap_type`; **remove all four recap flags**, including
+  `is_sponsor_recap`. Sponsor involvement belongs in party/context information rather than
+  in recap type. No further review needed.
+- **Consortium:** remains removed. Not reopened.
+- **LBO:** **remains a V3 concept** despite not being implemented in V2 — `is_lbo` exists in
+  no harness code, schema or prompt. Its absence from the implementation is not evidence
+  against the concept.
+- **Accepted v0.4 collapses, confirmed:** `management_participation` (MBO/MBI/BIMBO);
+  `round_price_direction` (UP/DOWN/FLAT/NULL); the merger hierarchy (§T2); geography as a
+  **derived** `transaction_geography` with the strict unknown-not-domestic rule;
+  transaction-size rollups; `is_unicorn_round` kept as a stored flag; take-private / LBO /
+  secondary-buyout confirmed **orthogonal**; stock-for-stock / earnout / CVR derivations
+  **where the consideration-component population precondition is satisfied**.
+
+## T10. Explicitly NOT decided in this pass
+
+Recorded so later readers do not mistake inspection findings for decisions:
+
+physical representation of sponsor-backed status (§T8.1) · SEC acquisition-vehicle /
+`MERGER_SUB` disposition · detailed merger legal structure · target asset-type enum and
+placement · `target_status` cleanup · majority/minority representation · attitude/approach
+work · offer-mechanism cleanup · Funding Round/Stage vocabulary · ML destination mapping.
+
