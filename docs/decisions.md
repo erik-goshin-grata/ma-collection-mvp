@@ -2707,7 +2707,7 @@ required" (superseded by "preferred home"), and Silver parity item K1 (absorbed 
 
 ### What is left
 
-**Sixteen items, none of them a Product decision.** Grouped by who can move them, because the
+**Seventeen items, none of them a Product decision.** Grouped by who can move them, because the
 groups have different unblocking conditions — ENG items are schedulable now, the prompt review
 needs a decision before it can be scheduled, recorded defects are known and deliberately
 unactioned, evidence-blocked items cannot be scheduled at all, and external asks depend on
@@ -2715,7 +2715,8 @@ another team answering.
 
 *Lineage of this count: seven until 2026-08-18, when the source-of-truth correction sweep
 added the prompt / legacy-compatibility item; sixteen from 2026-08-19, when the Summary and
-Strategic Rationale review added three ENG items and five recorded follow-ups.*
+Strategic Rationale review added three ENG items and five recorded follow-ups; seventeen when
+scoping the bounded rationale cleanup surfaced the no-durable-state finding below.*
 
 **ENG implementation (6)**
 
@@ -2734,7 +2735,7 @@ Strategic Rationale review added three ENG items and five recorded follow-ups.*
 | --- | --- |
 | Downstream prompts still enumerate `MINORITY_INVESTMENT` as a V2 event type | `prompts/strategic_rationale.md`, `prompts/aggregation.md`, `prompts/deal_summary.md`. **Not** treated as a stale-documentation fix — see the finding recorded below. |
 
-**Recorded defects / follow-ups (5)** — known, deliberately unactioned; none blocks the above
+**Recorded defects / follow-ups (6)** — known, deliberately unactioned; none blocks the above
 
 | item | note |
 | --- | --- |
@@ -2743,6 +2744,7 @@ Strategic Rationale review added three ENG items and five recorded follow-ups.*
 | `summary.word_count` unenforced | Stored, never validated. |
 | No behavioral coverage for Stages 12–13 | Neither stage is exercised by any test. |
 | `specs/pipeline.md` stage numbering | Pre-`sec_documents`/`agreement_extract` scheme; numbers export as 12 where `run.py` has 14. |
+| "Processed, no rationale found" has no durable state | Not idempotent for that outcome; an ENG/design consideration, not a patch. Inventory §S2.1. |
 
 **Evidence-blocked (2)** — cannot be scheduled; each needs a case that does not yet exist
 
@@ -2916,5 +2918,57 @@ that did, and any "which prompt produced this row?" query returns a confident wr
 
 Not a Product question. The bounded fix — align the five constants, add generic bidirectional
 prompt↔stage parity coverage with an explicit reason-bearing orphan allowlist, correct the two
-stale stage-number docstrings — is approved and lands separately. **Forward-only: historical
-`prompt_version` values are not backfilled.**
+stale stage-number docstrings — **landed 2026-08-19 as `2b04867`**, guarded by
+`scripts/test_prompt_stage_version_parity.py`. **Forward-only: historical `prompt_version`
+values are not backfilled.**
+
+---
+
+## Strategic Rationale Cleanup: Scoped, Not Implemented (2026-08-19)
+
+**Scope correction.** This workstream was cleanup of a capability that has historically been
+working, not a redesign or revalidation from first principles. **No extraction-quality problem
+with `prompts/strategic_rationale.md` 0.5 was demonstrated.** The design work is retained as a
+recorded implementation option; the immediate objective is the completed structure /
+data-definition / Engineering handoff.
+
+A methodological finding stands behind that correction. A review of 143 verbatim PredictLeads
+articles was used to propose a real-text baseline, and reclassifying the candidates showed that
+several proposed "rationale" cases were **upstream relevancy, classification or
+source-resolution failures** — an executive-appointment article, an acquisition whose acquirer
+is never named in the source, a quarter-aggregate of disposals presented as one transaction, a
+non-binding unsolicited approach, and a data-asset purchase of uncertain scope. Expecting
+"Stage 13 returns nothing" from records that should never reach Stage 13 would have produced a
+baseline that passes while proving nothing. **Isolated source rows are not a sound basis for
+judging Stage 13 without normal relevancy and source-resolution context.** Those A/B/C findings
+are kept as notes for later relevancy/source testing, not as Strategic Rationale blockers.
+
+### Additional semantic finding — §R8
+
+**A pass that finds no new rationale evidence must not supersede an existing source-supported
+rationale merely because that pass found nothing.** Absence of evidence in one run is not
+evidence that earlier evidence was wrong. A changed prompt, a changed passage-selection
+mechanism, or a momentarily unavailable source must not silently erase a rationale a source did
+state. Superseding needs a positive reason — better evidence, a corrected classification, or an
+explicit re-adjudication.
+
+### Implementation implication — §S2.1
+
+Scoping the cleanup surfaced a state the current design cannot hold: **"successfully processed;
+no rationale found" has no durable representation.** `rationale_tag.primary_rationale` is
+`NOT NULL`, so such a transaction writes no row, and the stage's re-run gate keys on the absence
+of a current row — so it is re-processed every run. The stage is not idempotent for that
+outcome. Retiring the §R7 defaults would widen this rather than cause it, since the defaults
+were guaranteeing a row for exactly the deals that state nothing.
+
+Recorded as an **Engineering/design consideration**. Writing `OTHER` is not the answer — that is
+the missing-information bucket §R9 forbids — and no table redesign is proposed now. The only
+requirement is that *not yet processed* and *processed, none found* be distinguishable.
+
+### What was deliberately not done
+
+No change to prompt 0.5, no `supporting_excerpt_text` column, no Stage 13 regression, no
+rationale storage change, no new real-text benchmark, and no change to source selection or the
+keyword/full-text policy. **The version-provenance fix (`2b04867`) is the only implementation
+change made in this whole workstream**, because it corrects objective prompt-version provenance
+without altering extraction behavior. Everything else here is documentation.

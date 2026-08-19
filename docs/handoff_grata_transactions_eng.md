@@ -38,9 +38,9 @@ and reviewing them produced four further Product decisions (§5, R7–R10). The 
 rationale must distinguish **source-stated** from **inferred**, per rationale, and the three
 structure-derived defaults that silently produced inferred rationales are retired.
 
-**Where this leaves us.** No Product decisions are open. Sixteen items remain, none of them a
+**Where this leaves us.** No Product decisions are open. Seventeen items remain, none of them a
 Product choice: six ENG implementation items (schedulable now), one prompt /
-legacy-compatibility review (a decision is owed before it can be scheduled), five recorded
+legacy-compatibility review (a decision is owed before it can be scheduled), six recorded
 defects and follow-ups, two evidence-blocked items (cannot be scheduled), and two
 external-system asks.
 
@@ -249,7 +249,7 @@ vocabulary or the *accepted* one — and if the latter, should legacy values be 
 such in the prompt text? Prompt edits change live model contracts and need their own
 regression.
 
-### Recorded defects and follow-ups (5)
+### Recorded defects and follow-ups (6)
 
 Known, deliberately not actioned in this pass. None blocks the items above.
 
@@ -260,6 +260,7 @@ Known, deliberately not actioned in this pass. None blocks the items above.
 | `summary.word_count` unenforced | Stored, never validated against the prompt's 80–150 word contract. |
 | No behavioral regression coverage for Stages 12–13 | Neither `summarize.py` nor `rationale_tag.py` is exercised by any test. |
 | `specs/pipeline.md` stage numbering | Still uses a pre-`sec_documents`/`agreement_extract` scheme — it numbers export as Stage 12 where `run.py` has 14. |
+| **"Processed, no rationale found" has no durable state** | `rationale_tag.primary_rationale` is `NOT NULL`, so a transaction processed with no source-supported rationale writes no row — and the stage's re-run gate keys on the absence of a current row, so it is re-processed every run. **Not idempotent for that outcome.** An ENG/design consideration, not a defect to patch: writing `OTHER` is forbidden by R9, and no table redesign is proposed. The requirement is only that *not yet processed* and *processed, none found* be distinguishable. Inventory §S2.1. |
 
 ---
 

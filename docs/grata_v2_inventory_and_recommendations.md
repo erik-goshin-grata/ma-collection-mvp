@@ -1940,6 +1940,14 @@ An inferred rationale must **never** be represented as though source evidence su
 - `INFERRED` must be **explicitly marked inferred** and must **not** be given synthetic
   source evidence.
 
+**A pass that finds no new rationale evidence must not supersede an existing source-supported
+rationale merely because that pass found nothing.** Absence of evidence in one processing run
+is not evidence that the earlier evidence was wrong. Re-running with a changed prompt, a
+changed passage-selection mechanism, or a source that happens to be unavailable must not
+silently erase a rationale that a source did state. Superseding requires a positive reason —
+better evidence, a corrected classification, or an explicit re-adjudication — never the mere
+fact that a later run produced nothing.
+
 Physical schema placement is **not** prescribed here. What is required is that basis and
 evidence be recoverable per rationale.
 
@@ -2023,3 +2031,36 @@ afterwards at all.
 **Consequence to expect.** Retiring the defaults will move gold-set scores in `eval/score.py`,
 which grades `primary_rationale` as a flat enum with no notion of basis. That is a correct
 consequence of the semantics changing, not a regression.
+
+### S2.1 "Processed, no rationale found" has no durable state
+
+Discovered while scoping the bounded cleanup, and recorded as an **Engineering/design
+consideration** rather than a defect to fix now.
+
+Under the current table and re-run gate, a transaction that is successfully processed but
+yields no source-supported rationale writes **no row at all** — `rationale_tag.primary_rationale`
+is `NOT NULL`, so there is nowhere to record the outcome. The stage's gate is
+`NOT EXISTS (… rationale_tag … is_current = 1)`, so such a transaction is **re-processed on
+every subsequent run**, paying the model cost again indefinitely. The stage is therefore not
+idempotent for the no-rationale outcome.
+
+Retiring the structure-derived defaults (§R7) widens this rather than causing it: the defaults
+were previously guaranteeing a row for exactly the deals that state no rationale.
+
+**This is not a reason to write `OTHER`** — that is precisely the missing-information bucket
+§R9 forbids — **and not a reason to redesign the table now.** How the state is represented is
+an Engineering choice: a durable "processed, none found" marker, a nullable rationale, or a
+separate processing-state record are all open. The requirement is only that the distinction
+between *not yet processed* and *processed, none found* be representable.
+
+### S2.2 Bounded cleanup design — recorded, not implemented
+
+A minimal change set was scoped and is retained as an **implementation option**, not a plan:
+remove Summary as both gate and evidentiary input; retire the three structure-derived defaults;
+apply the §R9 `OTHER`/null semantics; keep the eight categories. It touches two files —
+`prompts/strategic_rationale.md` and `stages/rationale_tag.py` — and needs **no schema
+migration**, because `rationale_tag` rows are already optional and both consumers `LEFT JOIN`.
+
+Not implemented in this pass. No extraction-quality problem with prompt 0.5 has been
+demonstrated, and the isolated-source review that prompted the question turned out to be a poor
+basis for judging Stage 13 without normal relevancy and source-resolution context.
