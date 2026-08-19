@@ -1,5 +1,5 @@
 """
-Stage 11: rationale_tag
+Stage 13: rationale_tag
 
 Classifies the primary strategic rationale for each transaction_record with a
 current summary. Scans contributing source texts for rationale keywords,
@@ -8,7 +8,7 @@ extracts up to 3 short excerpts, and calls the Opus strategic_rationale prompt.
 Inserts a new row into rationale_tag with is_current = 1; prior rows for the
 same transaction_id are flipped to is_current = 0.
 
-Spec references: prompts/strategic_rationale.md, specs/pipeline.md §2 (Stage 11)
+Spec references: prompts/strategic_rationale.md, specs/pipeline.md §2
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "strategic_rationale"
-_VERSION = "0.4"
+_VERSION = "0.5"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({
     "rationale", "secondary_rationales", "supporting_excerpt_index",

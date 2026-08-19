@@ -1,5 +1,5 @@
 """
-Stage 10: summarize
+Stage 12: summarize
 
 Generates an 80–150 word natural-language summary for each transaction_record
 row where is_current = 1 and no current summary exists. Calls the Opus deal
@@ -8,7 +8,7 @@ summary prompt with the full aggregated transaction context.
 Inserts a new row into summary with is_current = 1; any prior summary rows
 for the same transaction_id are flipped to is_current = 0.
 
-Spec references: prompts/deal_summary.md, specs/pipeline.md §2 (Stage 10)
+Spec references: prompts/deal_summary.md, specs/pipeline.md §2
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.8"
+_VERSION = "0.9"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0
