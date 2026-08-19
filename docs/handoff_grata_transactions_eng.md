@@ -33,10 +33,16 @@ express by accident. Eleven flags were additionally identified as **derivable an
 storing**, under a precondition that matters: a flag is only safely removed if its deriving
 input is present whenever the flag would have been set.
 
-**Where this leaves us.** No Product decisions are open. Eight items remain, none of them a
-Product choice: three ENG implementation items (schedulable now), one prompt /
-legacy-compatibility review (a decision is owed before it can be scheduled), two
-evidence-blocked items (cannot be scheduled), and two external-system asks.
+**Two domains were found missing after the first pass** — Summary and Strategic Rationale —
+and reviewing them produced four further Product decisions (§5, R7–R10). The substantive one:
+rationale must distinguish **source-stated** from **inferred**, per rationale, and the three
+structure-derived defaults that silently produced inferred rationales are retired.
+
+**Where this leaves us.** No Product decisions are open. Sixteen items remain, none of them a
+Product choice: six ENG implementation items (schedulable now), one prompt /
+legacy-compatibility review (a decision is owed before it can be scheduled), five recorded
+defects and follow-ups, two evidence-blocked items (cannot be scheduled), and two
+external-system asks.
 
 > **Read §5 before reviewing.** The Product decisions listed there are settled. They can be
 > revisited on new evidence, but they should not be reopened by default in an
@@ -61,6 +67,7 @@ Field-level detail is in the inventory (§A–§N) and dictionary. Summary only:
 | **Advisors and people** | Materially different. Grata holds one advisor person per party row; many are needed. Specialty vocabulary is coarser in collection than in Grata, and fails in **both** directions. |
 | **Observations / provenance** | Partly aligned. Per-fact provenance (source attribution + fact key) is needed on metric rows to distinguish corroboration from multiplicity. The harness ledger has this; Grata's `financial_metric` does not show it. |
 | **Lifecycle** | Aligned, with one semantic now explicit: a later `CLOSE` or `TERMINATION` is a **related event, not a fact update**. |
+| **Narrative / rationale** | **Omitted from the first pass; added 2026-08-19.** No Grata counterpart found for either. Summary is a derived narrative and is **not authoritative** for structured facts. Strategic Rationale needs a per-rationale **basis** (`SOURCE_STATED` / `INFERRED`) and durable evidence; three structure-derived defaults are retired. §4, §5, inventory §S. |
 | **MergerLinks vocabulary** | Assessed as labels only — no ML definitions were available. Of 40 labels, ~55% map into the target model as it stands; 10 are unresolved pending definitions. |
 
 ---
@@ -149,6 +156,11 @@ Material items only. Full per-concept table with change markers is inventory **�
 | Offer mechanics | Absent | `offer_mechanism` (tender / mandatory / scheme) | **ADD** | ENG |
 | Deal attitude | Absent in Grata; boolean in harness | `deal_attitude` typed dimension | **ADD** | ENG |
 | Synergy metrics | Absent | 3 metric types + `SYNERGY` class; `TOTAL` is a stated rollup | **ADD** | ENG |
+| Summary (narrative artifact) | Absent from Grata and from the first pass | Adopt as a derived artifact; **never authoritative** for structured facts | **ADD** | ENG |
+| `rationale_basis` per rationale | Absent — basis indistinguishable | `SOURCE_STATED` / `INFERRED` on primary **and every** secondary | **ADD** | ENG — placement not prescribed |
+| Rationale evidence attribution | `supporting_excerpt_index` into an unpersisted list | Durable source reference | **CHANGE / REPLACE** | ENG — not derivable; capture at classification time |
+| Structure-derived rationale defaults | PE · Spin/Split · Recap → `FINANCIAL_OR_ARBITRAGE` | Retire all three | **REMOVE** | ENG — prompt change + regression |
+| `OTHER` rationale | Doubles as a missing-information bucket | Source-supported residual only; absence is NULL | **CHANGE** | ENG |
 | Recap domain redesign, IPO/direct listing, P/TBV enrichment, related-transaction linkage | Various | Preserve, do not redesign this phase | **DEFER** | — |
 | Silver/Gold placement | Open | Satisfy the §R6 invariants; layer not prescribed | **ENG DECISION** | ENG |
 | Supersession key | Partly built | Semantics settled; key and implementation open | **ENG DECISION** | ENG |
@@ -168,6 +180,10 @@ reopen them by default:
 | **R4** | Period coherence stays **exact**. Revisit only on a real case where a legitimate pair is rejected. |
 | **R5** | Source ≠ transaction; one source may evidence several. |
 | **R6** | Nine invariants define the system-of-record contract; Engineering chooses the layer. |
+| **R7** | No approved structure-derived rationale inference. The PE, Spin/Split and Recap defaults are retired — unsupported inference or derivable restatements of structured facts. `INFERRED` survives as a basis value; nothing currently populates it. |
+| **R8** | Rationale basis is carried **per rationale**, primary and every secondary. `SOURCE_STATED` requires durable evidence; `INFERRED` must be marked inferred and never given synthetic evidence. |
+| **R9** | `OTHER` means a source-supported rationale exists but fits no named category. No determinable rationale is **NULL**, not `OTHER`. |
+| **R10** | Summary is not an authoritative source of structured facts. No structured field may be populated or corrected solely by parsing it. |
 
 **Standing decisions from earlier passes**, also settled: `EQUITY_VALUE_ONLY` records *debt
 unknown*, never debt = 0; stake-level values are never multiple numerators; the funding
@@ -179,7 +195,12 @@ stated figure with the original wording preserved in provenance.
 
 ## 6. Engineering decisions / actionable work
 
-Four items. Product has deliberately not prescribed implementation for any of them.
+Two groups, kept separate because they unblock differently. **Six items are schedulable
+Engineering implementation.** One is a prompt / legacy-compatibility review that is **not**
+schedulable implementation — a decision is owed before any edit. Product has deliberately not
+prescribed implementation for any of them.
+
+### Schedulable Engineering implementation (6)
 
 1. **Reconciliation / supersession key and implementation.** Semantics settled by R1. The
    key is unlikely to be single-valued: a filed document is immutable once filed, a web
@@ -192,21 +213,53 @@ Four items. Product has deliberately not prescribed implementation for any of th
    `stages/aggregate.py` hard-codes `sec_shares = None`. The rung is disconnected from data
    already collected in a richer form than a bare count. **Two caveats:** live population
    was not verified, and coverage is limited to agreement-bearing deals.
-4. **Downstream prompts still enumerate `MINORITY_INVESTMENT` as a V2 event type** —
-   `prompts/strategic_rationale.md` (which states it as a *current* V2 enum value, and is
-   the strongest case), `prompts/aggregation.md` and `prompts/deal_summary.md`. **A decision
-   is owed before any edit, and this is not a stale-documentation fix.** Two questions are
-   being conflated by surface similarity: *what the classifier may emit* is settled —
-   classifier 0.7 removed the value, minority is a derived flag, and
-   `scripts/test_minority_core_classification.py` pins the rejection — while *what
-   downstream stages must still accept* is not. Legacy rows carrying the value remain in the
-   corpus and are handled deliberately (`stages/aggregate.py` `_NON_CONTROL_TYPES`, pinned
-   by `scripts/test_funding_value_family_gate.py`). These three files consume
-   already-classified rows, so naming the value may be **correct legacy tolerance rather
-   than drift**. The decision owed: should downstream prompts describe the *emitting*
-   vocabulary or the *accepted* one — and if the latter, should legacy values be labelled as
-   such in the prompt text? Prompt edits change live model contracts and need their own
-   regression.
+4. **`rationale_basis` — schema and placement.** Semantics settled by R8: basis is carried
+   per rationale, on the primary and on **every** secondary. `secondary_rationales` is a bare
+   JSON array of enum values today, so it cannot carry per-item attribution at all — whether
+   that becomes a child relation, parallel arrays, or something else is ENG's call. Product
+   requires only that basis be recoverable per rationale.
+5. **Durable rationale evidence attribution.** Replaces `supporting_excerpt_index`, which
+   indexes a prompt-time excerpt list that is never persisted. **This is a replacement, not a
+   removal**: the value is not derivable from anything stored, so the evidence reference has to
+   be captured at classification time or it cannot be reconstructed later at all.
+6. **Retire the three structure-derived rationale defaults** from
+   `prompts/strategic_rationale.md`. Unlike items 1–5 this changes a live model contract, so it
+   needs its own regression. Expect gold-set movement in `eval/score.py`, which grades
+   `primary_rationale` as a flat enum with no notion of basis — a correct consequence of the
+   semantics changing, not a regression.
+
+### Prompt / legacy-compatibility review (1)
+
+**Not schedulable Engineering implementation.** It lands on ENG eventually, but a Product/data
+decision is owed first, so it cannot be estimated or sequenced alongside the six above.
+
+**Downstream prompts still enumerate `MINORITY_INVESTMENT` as a V2 event type** —
+`prompts/strategic_rationale.md` (which states it as a *current* V2 enum value, and is
+the strongest case), `prompts/aggregation.md` and `prompts/deal_summary.md`. **A decision
+is owed before any edit, and this is not a stale-documentation fix.** Two questions are
+being conflated by surface similarity: *what the classifier may emit* is settled —
+classifier 0.7 removed the value, minority is a derived flag, and
+`scripts/test_minority_core_classification.py` pins the rejection — while *what
+downstream stages must still accept* is not. Legacy rows carrying the value remain in the
+corpus and are handled deliberately (`stages/aggregate.py` `_NON_CONTROL_TYPES`, pinned
+by `scripts/test_funding_value_family_gate.py`). These three files consume
+already-classified rows, so naming the value may be **correct legacy tolerance rather
+than drift**. The decision owed: should downstream prompts describe the *emitting*
+vocabulary or the *accepted* one — and if the latter, should legacy values be labelled as
+such in the prompt text? Prompt edits change live model contracts and need their own
+regression.
+
+### Recorded defects and follow-ups (5)
+
+Known, deliberately not actioned in this pass. None blocks the items above.
+
+| Follow-up | Note |
+| --- | --- |
+| **Summary gates and feeds Strategic Rationale** | `rationale_tag` joins `summary … is_current = 1`, so no summary means no rationale row, and `summary_text` is passed in as evidentiary input. A narrative generated without source text is load-bearing evidence for a classification R8 requires to be source-grounded. Independent of item 5 — fixing evidence attribution does not remove the dependency. |
+| **Summary prompt-contract mismatch** | The prompt asks for "the source PR's own framing"; the stage supplies no PR text. Recorded, not redesigned. |
+| `summary.word_count` unenforced | Stored, never validated against the prompt's 80–150 word contract. |
+| No behavioral regression coverage for Stages 12–13 | Neither `summarize.py` nor `rationale_tag.py` is exercised by any test. |
+| `specs/pipeline.md` stage numbering | Still uses a pre-`sec_documents`/`agreement_extract` scheme — it numbers export as Stage 12 where `run.py` has 14. |
 
 ---
 

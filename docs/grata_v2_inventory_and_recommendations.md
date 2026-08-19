@@ -1529,6 +1529,21 @@ in §Q; this is the summary.
 | `Natural`, `Partial Share Alt`, `Contingent Deferred Consideration`, `Special Dividend`, `Date Synergies Achieved`, `Public`/`Private`, `Infrastructure`/`Real Estate`, `Restructuring` | **UNRESOLVED** | ✱ | 10 labels whose semantics cannot be established from the label. **Not guessed.** §Q7 |
 | Absorption assessment | 16 DIRECT MAP · 6 PROVISIONAL · 2 REINTERPRETED · 6 ADD · 10 UNRESOLVED | | Counted from the §Q tables. **A measure of our model's coverage against the labels — not an ML validation result.** ~55% already expressible; the residue clusters in three places. §Q8 |
 
+## Narrative and rationale artifacts *(2026-08-19 — §S)*
+
+Two domains omitted from v0.3 and v0.4 entirely. Every row is new, so Δ marks the whole
+block rather than distinguishing within it.
+
+| Concept | Verdict | Δ v0.3 | Note |
+| --- | --- | :---: | --- |
+| `summary` — derived narrative artifact | **ADD** | ✱ | Inventory omission. Generated from the canonical record plus an advisor rollup; **no source text on the path**. §S1 |
+| Summary is not an authoritative source of structured facts | **ADD** | ✱ | Invariant, not a field: no structured field may be populated or corrected solely by parsing Summary. §R10 |
+| `rationale_basis` — per rationale | **ADD** | ✱ | `SOURCE_STATED` / `INFERRED` or equivalent, on the primary **and every** secondary. A representation that cannot carry basis per rationale is insufficient. Physical placement not prescribed. §R8 |
+| Durable rationale evidence attribution | **ADD** | ✱ | Required whenever basis is `SOURCE_STATED`. §R8, §S2 |
+| `supporting_excerpt_index` | **CHANGE / REPLACE** | ✱ | An ephemeral prompt-time index replaced by a durable evidence reference. **Not derivable** — the referent is simply never persisted, so there is nothing to derive it from. §S2 |
+| Structure-derived rationale defaults (PE · Spin/Split · Recap) | **REMOVE** | ✱ | Retired. Unsupported inference or derivable restatements of structured facts. `INFERRED` survives as a basis value; no approved inference method currently populates it. §R7 |
+| `OTHER` as a missing-information bucket | **CHANGE** | ✱ | Redefined as a source-supported residual. Absence of a determinable rationale is NULL. §R9 |
+
 ## What did not change
 
 Everything not marked ✱ carries its v0.3 recommendation forward. In particular ENG
@@ -1877,3 +1892,134 @@ architecture — Silver, Gold, or both — must be capable of:
 
 **Engineering decides whether these are satisfied in Silver, in Gold, or across both.**
 Product does not prescribe the layer, and this document does not redesign either.
+
+## R7. No approved structure-derived rationale inference
+
+The three structure-derived defaults in `prompts/strategic_rationale.md` 0.5 are **retired**:
+
+| Retired default | Why |
+| --- | --- |
+| PE acquirer on `ACQUISITION` → `FINANCIAL_OR_ARBITRAGE` | **Unsupported inference.** Sponsor deals routinely carry genuine strategic logic, a distinction the target model is separately adding as `sponsor_investment_role` (`PLATFORM`/`ADD_ON`, §A6.5). Labelling every sponsor deal "financial" contradicts a dimension we are introducing. |
+| `SPIN_OFF` / `SPLIT_OFF` → `FINANCIAL_OR_ARBITRAGE` | **Derivable restatement.** The category's own definition reads "spin-off for value realization", so the label is computable from `v2_event_type` with certainty and adds nothing. It also *destroys* information, flattening genuinely distinct stated rationales — regulatory mandate, activist pressure, separation enabling a merger of the retained business — into one bucket. |
+| `RECAPITALIZATION` → `FINANCIAL_OR_ARBITRAGE` | **Lossy derivable restatement.** `recap_type` (`DIVIDEND`/`EQUITY`/`LEVERAGED`/`SPONSOR`) already carries strictly more information. |
+
+**The principle is the one already settled in §A7.** Each default is computable at read time
+from fields already stored. Storing the derived label consumes the one slot that should hold
+source-stated fact: a consumer wanting "structurally financial" can compute it, but a consumer
+wanting "the source said financial" can never recover it once a default has overwritten the
+slot. Rationale fields represent **why the transaction occurred**, not what shape it had.
+
+`INFERRED` **remains a legitimate basis value** for future approved inference methods. There
+are currently **no approved structure-derived inference defaults** — the basis exists, nothing
+populates it.
+
+Two further defects found in the same reading, both moot once the defaults are retired:
+
+- The PE rule conditions on `acquirer_type`, which **the stage never supplies**. The user
+  template sends only `v2_event_type`, `target_name`, `acquirer_name`, `summary_text` and
+  `source_excerpts_formatted`, so the rule fires on a guess from the acquirer's name.
+- Precedence between "generic language → `OTHER`" and the defaults is unspecified; the
+  prompt's Example 3 resolves it one way and Example 4 the other.
+
+**There is no take-private default rule.** Take-private appears only as Example 3 — an
+illustration of the PE rule — and `is_take_private` is never passed to this stage, so it
+reaches the classifier only if the generated summary happens to mention it.
+
+## R8. Rationale basis is per rationale, and evidence must be durable
+
+Every rationale classification carries a **basis** distinguishing `SOURCE_STATED` from
+`INFERRED` (or equivalent semantics). This applies to the primary rationale **and to every
+secondary individually** — `secondary_rationales` is currently a bare JSON array of enum
+values with no per-item attribution, which is **insufficient as the target model**.
+
+An inferred rationale must **never** be represented as though source evidence supported it.
+
+- `SOURCE_STATED` **requires durable source evidence attribution.** The current
+  `supporting_excerpt_index` does not qualify: it indexes a prompt-time list assembled by
+  keyword scan and never persisted, so after the run it dereferences nothing.
+- `INFERRED` must be **explicitly marked inferred** and must **not** be given synthetic
+  source evidence.
+
+Physical schema placement is **not** prescribed here. What is required is that basis and
+evidence be recoverable per rationale.
+
+## R9. `OTHER` is a source-supported residual, not a missing-information bucket
+
+| | |
+| --- | --- |
+| `OTHER` | A source-supported strategic rationale **exists** but does not fit one of the named categories. |
+| NULL / no rationale | **No determinable source-supported rationale.** |
+
+This **supersedes** the current taxonomy definition in `prompts/strategic_rationale.md` 0.5
+— "Rationale is something else **or** cannot be determined" — which conflates the two. The
+conflation becomes load-bearing rather than cosmetic once the §R7 defaults are retired,
+because far more volume lands in this bucket.
+
+## R10. Summary is not an authoritative source of structured facts
+
+**No structured field may be populated or corrected solely by parsing or mining Summary.**
+
+Stated as an authority rule rather than as "Summary contains no new facts", because the
+latter is a claim about content that could quietly stop being true. The authority rule holds
+regardless of what any particular summary happens to contain.
+
+---
+
+# S. Narrative and rationale artifacts *(2026-08-19)*
+
+Two transaction-data domains omitted from the v0.3 and v0.4 inventory. Neither has a Grata
+counterpart in the documents available here — recorded as **not found in the supplied
+material**, not as a claim that Grata lacks one.
+
+## S1. Summary — derived narrative artifact
+
+| | |
+| --- | --- |
+| Produced by | `stages/summarize.py` (Stage 12), `prompts/deal_summary.md` |
+| Stored | `summary`: `summary_text`, `word_count`, `is_current`, `prompt_version`, `model_confidence`, `notes` |
+| **Lineage** | current `transaction_record` row **+** advisor rollup (`advisor` ⋈ `staging_extraction` on `transaction_cluster_id`) → LLM → `summary_text`. **The stage reads no source text** — neither `source_raw` nor `clean_text` appears on this path. |
+| Basis | Derived. |
+| Reaches canonical / export | Yes — `summary_text` in the CSV export, `transaction_summary` in the review workbook. |
+| Grata counterpart | None found. |
+
+**Invariant: §R10.** Summary is not an authoritative source of structured transaction facts.
+
+**Recorded defects — not redesigned in this pass:**
+
+1. **Summary gates and feeds Strategic Rationale.** `stages/rationale_tag.py` joins
+   `summary … is_current = 1`, so a transaction with no current summary is **never**
+   classified, and `summary_text` is then passed into the rationale prompt as evidentiary
+   input. A narrative generated *without source text* is therefore load-bearing evidence for
+   a classification that §R8 requires to be source-grounded. **This is inconsistent with the
+   target semantics.** Tracked as its own follow-up: it is independent of the durable-evidence
+   work, and fixing evidence attribution would not by itself remove the dependency.
+2. **Prompt-contract mismatch.** The system prompt directs the model to use "the source PR's
+   own framing" and to convey "the strategic logic", but the stage supplies no PR text — only
+   whatever survived into extracted `*_description` fields. **Recorded; no redesign here.**
+3. `word_count` is stored but never validated. `_validate` checks key presence and non-empty
+   text only, so the prompt's 80–150 word contract is unenforced. Follow-up.
+
+## S2. Strategic rationale — structured classification
+
+| | |
+| --- | --- |
+| Produced by | `stages/rationale_tag.py` (Stage 13), `prompts/strategic_rationale.md` |
+| Stored | `rationale_tag`: `primary_rationale`, `secondary_rationales` (JSON array), `supporting_excerpt_index`, `model_confidence`, `is_current`, `prompt_version`, `notes` |
+| Vocabulary | Eight values, pinned in `_VALID_RATIONALES` and rejected on mismatch. **Provisionally intact**, `FINANCIAL_OR_ARBITRAGE` included. |
+| Basis today | **Mixed and indistinguishable** — the defect §R7/§R8 close. |
+| Reaches canonical / export | Yes — `primary_rationale` and `secondary_rationales_json` in the CSV export. Also scored as a flat enum against the gold set in `eval/score.py`. |
+| Grata counterpart | None found. |
+
+**Required additions: §R7–§R9.** A per-rationale basis; durable evidence attribution for
+`SOURCE_STATED`; `OTHER` redefined as a source-supported residual; the three structure-derived
+defaults retired.
+
+**Provenance gap.** `supporting_excerpt_index` is **not durable provenance**, and the fix is a
+**replacement rather than a removal** — the value is not derivable from anything currently
+stored, because its referent, the prompt-time excerpt list, is never persisted. A durable
+evidence reference has to be captured at classification time or it cannot be reconstructed
+afterwards at all.
+
+**Consequence to expect.** Retiring the defaults will move gold-set scores in `eval/score.py`,
+which grades `primary_rationale` as a flat enum with no notion of basis. That is a correct
+consequence of the semantics changing, not a regression.

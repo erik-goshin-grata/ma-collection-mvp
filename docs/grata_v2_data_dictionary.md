@@ -537,7 +537,28 @@ Consideration updates do not change transaction status.
 
 ---
 
-# 15. Operational / disclosure concepts
+# 15. Narrative and rationale artifacts
+
+Two domains omitted from v0.3/v0.4. Neither has a Grata counterpart in the supplied
+material. Full treatment in inventory §S; approved semantics in §R7–§R10.
+
+| Field / Concept | Definition | Shape | Population | Decision |
+|---|---|---|---|---:|
+| `summary_text` | Free-prose transaction narrative. **Derived** from the canonical `transaction_record` row plus an advisor rollup; the producing stage reads **no source text**. | TEXT | Derived (LLM) | ADD |
+| `word_count` | Length of `summary_text`. Stored today but **never validated** against the prompt's 80–150 word contract. | INTEGER | Derived | ADD / VERIFY |
+| `primary_rationale` | Why the transaction occurred. One of eight values. | ENUM | Source-stated, or inferred by an approved method | KEEP |
+| `secondary_rationales` | Additional rationales. **Each element requires its own basis and evidence** — a bare array of enum values is insufficient (§R8). | repeating | as above | CHANGE |
+| `rationale_basis` | `SOURCE_STATED` \| `INFERRED` (or equivalent). Carried **per rationale**, primary and every secondary. Physical placement not prescribed. | ENUM | Derived from how the classification was reached | **ADD** |
+| rationale evidence attribution | Durable source reference supporting a `SOURCE_STATED` rationale. | reference | Captured at classification time | **ADD** |
+| `supporting_excerpt_index` | Ephemeral index into a prompt-time excerpt list that is **never persisted**. | INTEGER | — | **CHANGE / REPLACE** by the row above — not derivable, the referent is simply gone |
+
+**`OTHER` (§R9)** means a source-supported rationale exists but fits no named category.
+Absence of a determinable source-supported rationale is **NULL**, not `OTHER`.
+
+**Summary authority (§R10).** No structured field may be populated or corrected solely by
+parsing or mining `summary_text`.
+
+# 16. Operational / disclosure concepts
 
 | Field / Concept | Definition | Decision |
 |---|---|---:|
@@ -548,7 +569,7 @@ Consideration updates do not change transaction status.
 
 Both disclosure fields use `DISCLOSED`, `PARTIALLY_DISCLOSED`, `UNDISCLOSED`, `UNKNOWN` and are independent. Example: terms undisclosed + revenue disclosed is valid.
 
-# 16. Requiredness / QA contract
+# 17. Requiredness / QA contract
 
 - `transaction_id` — REQUIRED
 - canonical `event_type` — REQUIRED at Gold
@@ -559,10 +580,12 @@ Both disclosure fields use `DISCLOSED`, `PARTIALLY_DISCLOSED`, `UNDISCLOSED`, `U
 - `termination_date` — REQUIRED when status is `TERMINATED`
 - `transaction_size_basis` — REQUIRED when `transaction_size` is populated
 - financial metric `period_type` / `period_end_date` — CONDITIONAL REQUIRED for period-based company financials
+- `rationale_basis` — REQUIRED whenever any rationale is populated, primary or secondary
+- rationale evidence attribution — REQUIRED when `rationale_basis` = `SOURCE_STATED`
 
 This is semantic/QA requiredness, not necessarily database `NOT NULL`.
 
-# 17. Deferred / lower-priority
+# 18. Deferred / lower-priority
 
 - consideration amendment/version history
 - detailed P/TBV denominator collection

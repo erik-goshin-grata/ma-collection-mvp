@@ -2707,27 +2707,42 @@ required" (superseded by "preferred home"), and Silver parity item K1 (absorbed 
 
 ### What is left
 
-**Eight items, none of them a Product decision.** Grouped by who can move them, because the
+**Sixteen items, none of them a Product decision.** Grouped by who can move them, because the
 groups have different unblocking conditions — ENG items are schedulable now, the prompt review
-needs a decision before it can be scheduled, evidence-blocked items cannot be scheduled at
-all, and external asks depend on another team answering.
+needs a decision before it can be scheduled, recorded defects are known and deliberately
+unactioned, evidence-blocked items cannot be scheduled at all, and external asks depend on
+another team answering.
 
-*(Seven until 2026-08-18; the source-of-truth correction sweep added the prompt /
-legacy-compatibility item below.)*
+*Lineage of this count: seven until 2026-08-18, when the source-of-truth correction sweep
+added the prompt / legacy-compatibility item; sixteen from 2026-08-19, when the Summary and
+Strategic Rationale review added three ENG items and five recorded follow-ups.*
 
-**ENG implementation (3)**
+**ENG implementation (6)**
 
 | item | note |
 | --- | --- |
 | Reconciliation / supersession **key** and implementation | Semantics settled by R1. The key is unlikely to be single-valued: a filed document is immutable, a web source can change under the same URL. |
 | Silver/Gold placement against the R6 invariants | Product does not prescribe the layer. No longer gates §E4. |
 | `PER_SHARE_X_SHARES` wiring | `aggregate.py` hard-codes `sec_shares = None`; `agreement_extract.py` already writes `transaction_security.shares_outstanding` with a diluted total and quality marker. Live population unverified, coverage limited to agreement-bearing deals. |
+| `rationale_basis` — schema and placement | Semantics settled by R8. `secondary_rationales` is a bare JSON array today and cannot carry per-item attribution at all. Product requires only that basis be recoverable per rationale. |
+| Durable rationale evidence attribution | Replaces `supporting_excerpt_index`. **A replacement, not a removal** — the referent is never persisted, so evidence must be captured at classification time or it is unrecoverable. |
+| Retire the three structure-derived rationale defaults | Changes a live model contract, so it needs its own regression. Expect gold-set movement in `eval/score.py`. |
 
 **Prompt / legacy-compatibility review (1)** — a decision is owed before any edit
 
 | item | note |
 | --- | --- |
 | Downstream prompts still enumerate `MINORITY_INVESTMENT` as a V2 event type | `prompts/strategic_rationale.md`, `prompts/aggregation.md`, `prompts/deal_summary.md`. **Not** treated as a stale-documentation fix — see the finding recorded below. |
+
+**Recorded defects / follow-ups (5)** — known, deliberately unactioned; none blocks the above
+
+| item | note |
+| --- | --- |
+| Summary gates and feeds Strategic Rationale | Independent of the evidence-attribution item; fixing evidence does not remove the dependency. |
+| Summary prompt-contract mismatch | Prompt asks for source-PR framing; the stage supplies no PR text. |
+| `summary.word_count` unenforced | Stored, never validated. |
+| No behavioral coverage for Stages 12–13 | Neither stage is exercised by any test. |
+| `specs/pipeline.md` stage numbering | Pre-`sec_documents`/`agreement_extract` scheme; numbers export as 12 where `run.py` has 14. |
 
 **Evidence-blocked (2)** — cannot be scheduled; each needs a case that does not yet exist
 
@@ -2833,3 +2848,73 @@ superseded normative statement about `transaction_size` semantics is known to su
 `docs/prompt_versions.md` was left unchanged: its "Current State" table is already correct
 (classifier 0.8, relevancy 0.6), and its "V2 Alignment History" table is history, not a
 normative statement.
+
+---
+
+## Summary and Strategic Rationale: Four Product Semantics (2026-08-19)
+
+Two transaction-data domains were omitted from the completed Grata inventory and handoff.
+Inspecting them at current `main` found one genuine unresolved Product question and a set of
+implementation defects. Full inventory treatment is §S; the decisions are §R7–§R10.
+
+### The question that was actually open
+
+Strategic Rationale mixed two different facts in one field. `prompts/strategic_rationale.md`
+0.5 says both:
+
+> "Do not invent rationale based on industry context. Must see explicit rationale language in
+> excerpts to classify."
+
+and, three rules earlier, that a PE acquirer, a `SPIN_OFF`/`SPLIT_OFF`, or a
+`RECAPITALIZATION` **defaults** to `FINANCIAL_OR_ARBITRAGE` — assigning a category from deal
+structure alone, with no source evidence. Nothing in storage or export distinguished the two,
+and `eval/score.py` grades the field as a flat enum, so a defaulted label and a source-stated
+one scored identically.
+
+The stage widens it further: when the keyword scan finds no excerpts it substitutes the string
+`"(none — classifying from summary only)"` and calls the model anyway — inviting classification
+from generated prose, in direct contradiction of the prompt's own evidence rule.
+
+### What was decided
+
+- **R7 — the three defaults are retired.** Each is either unsupported inference or a derivable
+  restatement of structured facts. This is the §A7 principle again: a label computable at read
+  time from `v2_event_type`, `recap_type` or `acquirer_type` should not consume the slot that
+  holds source-stated fact. `INFERRED` survives as a basis value for future approved methods;
+  none exists today.
+- **R8 — basis is per rationale**, primary and every secondary, with durable evidence required
+  for `SOURCE_STATED` and no synthetic evidence for `INFERRED`.
+- **R9 — `OTHER` is a source-supported residual.** Absence of a determinable rationale is NULL.
+- **R10 — Summary is not authoritative** for structured facts.
+
+R10 is deliberately phrased as an authority rule rather than "Summary contains no new facts".
+The latter is a claim about content that could quietly stop being true; the authority rule
+holds regardless of what any summary happens to contain.
+
+### Three premises that turned out to be wrong
+
+Worth recording, because each was plausible and each was checked rather than assumed.
+
+1. **There is no take-private default rule.** It exists only as Example 3 illustrating the PE
+   rule, and `is_take_private` is never passed to the rationale stage — it reaches the
+   classifier only via generated prose.
+2. **The PE rule is unexecutable as written.** It conditions on `acquirer_type`, which the user
+   template never sends; the model can only guess from the acquirer's name.
+3. **`supporting_excerpt_index` is not a removable derivable.** It looks like one, but its
+   referent — the prompt-time excerpt list — is never persisted, so there is nothing to derive
+   it from. The correct verdict is CHANGE/REPLACE, and the evidence must be captured at
+   classification time or it is gone.
+
+### Implementation defect found in the same pass, recorded separately
+
+Five of eight prompt-bearing stages stamp a version that disagrees with the prompt file they
+load: `aggregation` 0.3/0.4, `deal_summary` 0.8/0.9, `high_confidence_extraction` 0.17/0.18,
+`low_confidence_extraction` 0.3/0.5, `strategic_rationale` 0.4/0.5. Worse than a wrong label:
+`register_prompt_version` writes the stale version string against the **hash of the file
+actually loaded**, so `prompt_version` maps a version that never produced the text to the text
+that did, and any "which prompt produced this row?" query returns a confident wrong answer.
+
+Not a Product question. The bounded fix — align the five constants, add generic bidirectional
+prompt↔stage parity coverage with an explicit reason-bearing orphan allowlist, correct the two
+stale stage-number docstrings — is approved and lands separately. **Forward-only: historical
+`prompt_version` values are not backfilled.**
