@@ -2707,7 +2707,7 @@ required" (superseded by "preferred home"), and Silver parity item K1 (absorbed 
 
 ### What is left
 
-**Twenty-three items, none of them a Product decision.** Grouped by who can move them, because the
+**Twenty-eight items, none of them a Product decision.** Grouped by who can move them, because the
 groups have different unblocking conditions — ENG items are schedulable now, the prompt review
 needs a decision before it can be scheduled, recorded defects are known and deliberately
 unactioned, evidence-blocked items cannot be scheduled at all, and external asks depend on
@@ -2717,7 +2717,8 @@ another team answering.
 added the prompt / legacy-compatibility item; sixteen from 2026-08-19, when the Summary and
 Strategic Rationale review added three ENG items and five recorded follow-ups; seventeen when
 scoping the bounded rationale cleanup surfaced the no-durable-state finding; twenty-three when
-the V3 taxonomy review added six implementation/migration consequences.*
+the V3 taxonomy review added six implementation/migration consequences; twenty-eight when the
+four remaining core V3 areas added five more.*
 
 **ENG implementation (6)**
 
@@ -2747,7 +2748,7 @@ the V3 taxonomy review added six implementation/migration consequences.*
 | `specs/pipeline.md` stage numbering | Pre-`sec_documents`/`agreement_extract` scheme; numbers export as 12 where `run.py` has 14. |
 | "Processed, no rationale found" has no durable state | Not idempotent for that outcome; an ENG/design consideration, not a patch. Inventory §S2.1. |
 
-**V3 implementation / migration consequences (6)** — recorded 2026-08-19, **not repaired**
+**V3 implementation / migration consequences (11)** — recorded 2026-08-19, **not repaired**
 
 These are consequences of the V3 taxonomy decisions and of defects found while inspecting.
 **None of them redefines V3 semantics**, and none was fixed during the taxonomy review.
@@ -2760,6 +2761,11 @@ These are consequences of the V3 taxonomy decisions and of defects found while i
 | `parent_seller` extraction conditioned on `target_type` | The HC prompt populates `parent_seller` only "when `target_type` is subsidiary, business_unit, or assets", so it cannot serve as independent seller-side evidence. Recorded during the `is_divestiture` inspection; **still relevant to party/extraction semantics** even though V3 removes that flag. |
 | `is_take_private` uses acquirer-type membership as a private-buyer proxy | `_PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES` lists 12 values and treats membership as "buyer is private". Four leave the V3 enum (§T8), so **`is_take_private` needs a proper private-vs-listed input under V3.** Note an MBO of a listed company *is* a take-private, and `MANAGEMENT` is one of the removed values. |
 | `MANAGEMENT` removal must be sequenced | `acquirer_type = management` is live in V2; `management_participation` (MBO/MBI/BIMBO) is a decided V3 dimension that **is not built**. The destination must land with or before the removal, or MBO context is briefly unrepresentable. |
+| `hostile` boolean fans out to two dimensions | V2 `hostile` fuses posture, approach and proxy contest. **V2 `hostile = 0` must not migrate to `FRIENDLY`** — the stage writes `1 if flags.get("hostile") else 0`, coercing unstated to zero, so zero is not evidence of friendliness. `hostile = 1` cannot be resolved into which fact fired. Semantics **and** implementation path both change (§T11). |
+| `offer_mechanism` has no ordinary-source extraction | V2 captures tender offer **only** as `merger_structure = TENDER_OFFER` on the Stage 11 agreement path, which is gated by the Stage 5 public-party trigger. **V3 must not depend on the deferred SEC path** — ordinary transaction-source extraction is required. Existing SEC/agreement evidence may remain a corroborating/migration source (§T12). |
+| `asset_type` has no V2 migration source | No asset sub-classification exists anywhere in V2 — schema, stages, prompts or `lib/`. Every value is **newly collected**, so this needs ordinary-source extraction plus regression/real-case validation rather than a migration (§T13). |
+| `round_label` free text → canonical `round` | `round_label` is unconstrained text with no validator anywhere. Mapping it to a canonical `round` is a **normalization exercise with a residue**, not a mechanical migration (§T14). |
+| `vc_stage` must derive from `round`, not substrings | The V2 derivation substring-matches `round_label`. Verified defects: **Series H/I/J → null** (the branch enumerates `series d`–`series g` literally), **`Bridge Round` → null** despite being one of the prompt's own documented label examples, and **`Series AA` → `EARLY_STAGE`** by substring collision. No test exercises the derivation (§T14). |
 
 **Evidence-blocked (2)** — cannot be scheduled; each needs a case that does not yet exist
 
@@ -3074,4 +3080,82 @@ offer-mechanism cleanup · Funding Round/Stage vocabulary · ML destination mapp
 Recorded so a later reader does not mistake an inspection finding for a decision. The six
 implementation consequences are in the backlog above, **unrepaired by design** — current V2
 behaviour does not get to redefine V3 semantics.
+
+---
+
+## V3 Taxonomy Closed: Attitude, Offer Mechanism, Asset Type, Funding (2026-08-19)
+
+The four remaining core V3 areas, settled. **Documentation only.** Full text is inventory
+**§T11–§T15**, which is authoritative; this records the reasoning and the consequences.
+
+### What was decided
+
+**Attitude + Approach (§T11)** — two independent dimensions, `deal_attitude`
+(`FRIENDLY`/`HOSTILE`/null) and `approach_type` (`SOLICITED`/`UNSOLICITED`/null). The v0.4.1
+proposal kept `UNSOLICITED` inside `deal_attitude`, which reproduced the very conflation it
+was meant to fix: a deal can be unsolicited **and** friendly, and one enum cannot say so. No
+`NEUTRAL`; ML `Natural` not needed. `competing_bid` stays an independent boolean.
+**Proxy contest is not promoted** — inspection found no other home and no demonstrated use;
+its only substantive appearance in the repository is the third clause of the `hostile`
+extraction rule.
+
+**Offer Mechanism (§T12)** — `TENDER_OFFER` / null only. `MANDATORY_OFFER` is not adopted:
+nothing establishes it as a distinct mechanism rather than a regulatory qualifier, and it has
+no field, rule, example, test or source evidence anywhere. `SCHEME_OF_ARRANGEMENT` is a
+statutory combination route; one-step/two-step are process; squeeze-out is a deferred
+agreement mechanic. **Orthogonal to merger structure** — and V2 currently destroys that
+orthogonality, since single-valued `merger_structure` forces a two-step deal to record one of
+two true facts.
+
+**Asset Type (§T13)** — an eleven-value classification subordinate to `target_type = ASSETS`,
+single-valued, settled but extensible. Keeping `FACILITY` distinct from `REAL_ESTATE`
+preserves a real transaction-object distinction. **This resolves the long-blocked
+`Infrastructure` / `Real Estate` question without the ML definitions** (§Q5.10, §Q7.8): those
+labels read as both sector and asset class because they conflate the thing transacted with
+the industry, and separating the axes is what settles them.
+
+**Funding Round + Stage (§T14)** — three distinct concepts kept separate: `round_label`
+(verbatim source wording), `round` (canonical, researcher-selectable, preserving `SERIES_A1`/
+`A2`/`A3` and `ANGEL`), and `vc_stage` (broad grouping **derived from canonical `round`**).
+No Series-G ceiling. Extension and Bridge stay orthogonal characteristics; venture debt is an
+event type, not a stage; convertible note is an explicitly noted edge.
+
+### Two reasoning corrections, applied to this review and standing (§T15)
+
+Both were used in this review and are **withdrawn**:
+
+1. **Export presence is not evidence** of canonical-model importance, maturity or priority.
+   Exports are inspection surfaces, not the model.
+2. **Upstream provider categories are not canonical classification**, and provider coverage is
+   not a proxy for whether our pipeline can classify or test a source. The corpus triage
+   demonstrated the gap directly — provider labels disagreed with what the source text
+   supports in several cases.
+
+The canonical reasoning path is
+**source evidence → extraction → validation → canonical V3 storage/derivation → Product use.**
+
+### Evidence worth keeping
+
+**The funding stage derivation was tested by execution, not reading.** Running
+`_derive_round_stage_category` against realistic labels showed Series H/I/J returning null
+(the branch enumerates `series d`–`series g` literally), `Bridge Round` returning null despite
+being one of the extraction prompt's own four documented label examples, and `Series AA`
+colliding into `EARLY_STAGE` because `"series a"` is a substring of it. It also confirmed the
+good news: **numbered variants already map correctly**, so `SERIES_A2` loses nothing under a
+canonical vocabulary. No test exercises any of this.
+
+**V2 extracts the two-step tender-offer fact and then discards it.** The agreement prompt's
+own worked example stores `merger_structure = TENDER_OFFER` while its note describes a
+reverse-triangular back-end — the field's shape, not the extraction, is what loses the fact.
+
+### Contradictions with settled V3 domains
+
+**None.** `VENTURE_DEBT` is already a settled `event_type`, so excluding it from `vc_stage` is
+confirmatory rather than conflicting. §T9's `round_price_direction` is untouched by keeping
+extension and bridge as separate characteristics, consistent with §A6.3. One item is
+**unhomed rather than contradictory**: `CONVERTIBLE_NOTE` has its wording preserved in
+`round_label` but no canonical classification on either axis — noted, not solved.
+
+Backlog moves to twenty-eight; the five new items are implementation consequences, not
+Product questions.
 

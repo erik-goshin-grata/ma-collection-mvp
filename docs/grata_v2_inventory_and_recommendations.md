@@ -179,8 +179,8 @@ Current `PartyType` covers PE, VC, growth equity firm, corporation, individual, 
 | `financials_disclosure_status` | ENUM | KEEP / NARROW DEFINITION | Covers target/company financial metrics (revenue, EBITDA, debt, cash, etc.), not transaction economics. Add separate `transaction_terms_disclosure_status` below. |
 | `pct_acquired` | DATA POINT | KEEP | Current transaction stake, not resulting ownership. |
 | `per_share_price` | DATA POINT | KEEP | Per-target-security consideration. |
-| `round_label` | DATA POINT | KEEP | Source label such as `Series B`, `Seed`, `Series C extension`; preserve source wording. |
-| `round_stage_category` | ENUM | KEEP | Normalized analytical bucket derived from round label/context (`PRE_SEED`, `SEED`, `EARLY_STAGE`, `GROWTH`, `LATE_STAGE`). |
+| `round_label` | DATA POINT | KEEP | Source label such as `Series B`, `Seed`, `Series C extension`; preserve source wording. **V3 (§T14): unchanged — verbatim source wording. A canonical `round` is added alongside it.** |
+| `round_stage_category` | ENUM | KEEP | Normalized analytical bucket derived from round label/context (`PRE_SEED`, `SEED`, `EARLY_STAGE`, `GROWTH`, `LATE_STAGE`). **V3 (§T14): becomes `vc_stage`, same five values, but derived from canonical `round` — not substring-matched against `round_label`.** |
 | `round_sequence_number` | DATA POINT | KEEP | Funding sequence. |
 | `prior_round_id` | FK / relationship | KEEP | Prior funding round linkage. |
 | `facility_size` | DATA POINT | KEEP | Funding/debt facility size. |
@@ -1723,6 +1723,13 @@ is recreated — §C3's derived summary remains the only rollup.
 
 ## Q3. Attitude
 
+> **SUPERSEDED by §T11 (2026-08-19).** The inspection below stands — the harness boolean
+> conflates three facts, and that finding is independent of ML. The **proposed representation
+> does not**: v0.4.1 put `UNSOLICITED` inside `deal_attitude`, which reproduces the conflation
+> one level up. V3 splits it into **two independent dimensions**, `deal_attitude`
+> (`FRIENDLY`/`HOSTILE`/null) and `approach_type` (`SOLICITED`/`UNSOLICITED`/null). `NEUTRAL`
+> is not added and ML `Natural` is not needed. Proxy contest is **not promoted** (§T11.1).
+
 **Inspection result — the existing state differs from the premise on both sides.**
 
 | layer | state |
@@ -1773,8 +1780,8 @@ requirement.
 
 | # | Requirement | Shape | Driven by | Status |
 | --- | --- | --- | --- | --- |
-| Q5.1 | `offer_mechanism` — `TENDER_OFFER` / `MANDATORY_OFFER` / `SCHEME_OF_ARRANGEMENT` / `ONE_STEP_MERGER` / `NULL` | typed dimension, transaction-level | `Tender Offer`, `Mandatory Offer` | **Firm** for `Tender Offer`; the `MANDATORY_OFFER` value is provisional |
-| Q5.2 | `deal_attitude` — `FRIENDLY` / `HOSTILE` / `UNSOLICITED` / `NULL` (+ `NEUTRAL` if Q7.3 resolves that way) | typed dimension, replaces the harness boolean `hostile` | ML Attitude **and** the harness conflation defect | **Firm** — justified by the harness defect independent of ML |
+| Q5.1 | ~~`offer_mechanism` — `TENDER_OFFER` / `MANDATORY_OFFER` / `SCHEME_OF_ARRANGEMENT` / `ONE_STEP_MERGER` / `NULL`~~ **SUPERSEDED by §T12: the V3 enum is `TENDER_OFFER` / null only.** `MANDATORY_OFFER` is not adopted (no evidence it is a distinct mechanism rather than a regulatory qualifier); `SCHEME_OF_ARRANGEMENT` is a statutory combination route, destination undecided; `ONE_STEP_MERGER` is process/sequence. | typed dimension, transaction-level | `Tender Offer`, `Mandatory Offer` | **Firm** for `Tender Offer`; the `MANDATORY_OFFER` value is provisional |
+| Q5.2 | ~~`deal_attitude` — `FRIENDLY` / `HOSTILE` / `UNSOLICITED` / `NULL` (+ `NEUTRAL` if Q7.3 resolves that way)~~ **SUPERSEDED by §T11: V3 splits this into two independent dimensions** — `deal_attitude` (`FRIENDLY` / `HOSTILE` / null) and `approach_type` (`SOLICITED` / `UNSOLICITED` / null). Keeping `UNSOLICITED` inside `deal_attitude` reproduced the conflation it was meant to fix: a deal can be unsolicited **and** friendly. `NEUTRAL` is **not** added and the ML `Natural` question no longer blocks the enum — so this row's dependency is lifted regardless of how it resolves. (The cited ask is **Q7.1**, not Q7.3; Q7.3 is the `Public`/`Private` question. Pre-existing mis-citation, recorded rather than silently renumbered.) | typed dimension, replaces the harness boolean `hostile` | ML Attitude **and** the harness conflation defect | **Firm** — justified by the harness defect independent of ML |
 | Q5.3 | Bidder / defense role incl. `WHITE_KNIGHT` | `transaction_party` role or attribute | `White Knight` | **Firm** that it is a party property, not attitude; whether the shape is a bidder role, a defense-posture attribute, or both is open |
 | Q5.4 | Consideration form for acquirer-issued debt securities | `consideration_form` value | `Loan Notes` | **Conditional on Q7.5** |
 | Q5.5 | Consideration form for asset exchange / swap | `consideration_form` value | `Asset Swap` | **Conditional on Q7.6** |
@@ -1782,7 +1789,7 @@ requirement.
 | Q5.7 | Consideration form for a target-paid special dividend, with a non-aggregation rule | `consideration_form` value + §C3 rule | `Special Dividend` | **Conditional on Q7.7** |
 | Q5.8 | `MetricType`: `REVENUE_SYNERGIES`, `COST_SYNERGIES`, `TOTAL_SYNERGIES`; plus a `SYNERGY` class | metric types + class mapping | ML Synergies | **Firm** |
 | Q5.9 | `transaction_geography` — `CROSS_BORDER` / `DOMESTIC` / `UNKNOWN` | **derived, not stored** | `Cross-Border`, `Domestic` | **Firm** — no schema change; a dictionary derivation with a strict unknown-not-domestic rule |
-| Q5.10 | `target_asset_class` for asset-type targets | — | `Infrastructure`, `Real Estate` | **Blocked on Q7.8** — not proposed until the labels are defined |
+| Q5.10 | `target_asset_class` for asset-type targets | — | `Infrastructure`, `Real Estate` | ~~**Blocked on Q7.8**~~ **RESOLVED by §T13 (2026-08-19).** V3 adds **`asset_type`**, subordinate to `target_type = ASSETS`, with an 11-value initial vocabulary including `INFRASTRUCTURE` and `REAL_ESTATE`. The block is lifted **without** the ML definitions: those labels read as both sector and asset class because they conflate the thing transacted with the industry, and separating the two axes resolves it. |
 
 **Not required, and worth stating**, because the instinct is to add them: no new event
 types, no `is_majority`, no `PREFERENCE_SHARES` form, no `target_type` values for
@@ -2405,12 +2412,189 @@ before canonical relationship resolution.
   secondary-buyout confirmed **orthogonal**; stock-for-stock / earnout / CVR derivations
   **where the consideration-component population precondition is satisfied**.
 
-## T10. Explicitly NOT decided in this pass
+## T10. Explicitly NOT decided
 
 Recorded so later readers do not mistake inspection findings for decisions:
 
 physical representation of sponsor-backed status (§T8.1) · SEC acquisition-vehicle /
-`MERGER_SUB` disposition · detailed merger legal structure · target asset-type enum and
-placement · `target_status` cleanup · majority/minority representation · attitude/approach
-work · offer-mechanism cleanup · Funding Round/Stage vocabulary · ML destination mapping.
+`MERGER_SUB` disposition · detailed merger legal structure · `target_status` cleanup ·
+majority/minority representation · ML destination mapping.
+
+> **Four items left this list on 2026-08-19** and are now decided: attitude/approach
+> (**§T11**), offer mechanism (**§T12**), asset type (**§T13**), Funding Round/Stage
+> (**§T14**). The remaining six stand.
+
+---
+
+## T11. Attitude + Approach *(decided 2026-08-19)*
+
+**Two independent dimensions**, replacing the single V2 boolean `hostile`.
+
+| Dimension | Values | Question answered |
+| --- | --- | --- |
+| **`deal_attitude`** | `FRIENDLY` · `HOSTILE` · unknown/null | The target board's **posture** toward the approach |
+| **`approach_type`** | `SOLICITED` · `UNSOLICITED` · unknown/null | How the offer **arrived** |
+
+**`UNSOLICITED` is not an attitude.** A transaction may be unsolicited and later or currently
+friendly/recommended — a common and commercially meaningful state that a single enum cannot
+express. This **supersedes the v0.4.1 `deal_attitude`** proposal, which carried `UNSOLICITED`
+as an attitude value and so reproduced the conflation one level up.
+
+- **No `NEUTRAL`** at this time. ML `Natural` is **not needed for V3** and remains outside
+  this decision.
+- **Absence of hostile evidence must not be interpreted as `FRIENDLY`.** Null means the
+  posture is not established.
+- **`Initially Hostile` is not a stored current-state value.** It is derived from attitude
+  history/transitions, so a transaction may have current `deal_attitude = FRIENDLY` while its
+  history establishes it was initially hostile.
+- **`competing_bid` remains an independent V3 boolean fact.** It describes contest/bidding
+  dynamics, not attitude or solicitation. No broader contest-dynamics taxonomy in this pass.
+- **`approach_type` is not expanded** with auction/bilateral/process values now. It answers
+  only solicited vs unsolicited and is extensible later on a concrete Product need.
+
+### T11.1 Proxy contest — not promoted to V3 in this pass
+
+The V2 `hostile` rule fuses **three** facts: *"true if the deal is described as hostile,
+unsolicited, **or subject to a proxy contest**."* Two of the three are homed above; the third
+is not, deliberately.
+
+Inspection found **no other target concept and no demonstrated Product use**: proxy contest
+has no field in any schema, no separate extraction rule, no ML label, no test, no gold-set
+row and no consumer. Its only substantive appearance in the repository is that clause. The
+nearest neighbour, `advisor_specialty = proxy_solicitation`, is a **service engagement**, not
+the contest fact.
+
+**Not promoted.** A new canonical flag is **not** created merely to preserve every input to
+the old overloaded boolean. Because it was only ever expressible through the fused boolean, a
+V2 `hostile = 1` row cannot be resolved into which fact fired — so nothing is lost in
+migration terms either. If a concrete Product or filtering requirement appears later it needs
+a new extraction rule regardless.
+
+## T12. Offer Mechanism *(decided 2026-08-19)*
+
+**`offer_mechanism` = `TENDER_OFFER` · null.** Optional and **not universally applicable** —
+most transactions legitimately have no offer mechanism. Do not force a value.
+
+`TENDER_OFFER` is the only value with sufficient semantic and extraction basis to adopt now.
+
+**Orthogonal to combination/merger structure.** A transaction may have
+`offer_mechanism = TENDER_OFFER` **and** proceed through a subsequent statutory/back-end
+merger — the normal two-step US public deal. These facts must not be forced into one enum.
+V2 does exactly that: `merger_structure` is single-valued, so a deal that is both
+`TENDER_OFFER` and `REVERSE_TRIANGULAR` records only one, and the extraction prompt's own
+worked example stores `TENDER_OFFER` while its note describes a reverse-triangular back-end.
+**The fact is extracted and then discarded by the field's shape.**
+
+**Not included in the initial V3 enum:**
+
+| Excluded | Why |
+| --- | --- |
+| `MANDATORY_OFFER` | Current evidence does not establish it as a **distinct mechanism** rather than a regulatory **trigger/qualifier** on an offer. It has no field, prompt rule, example, test or source evidence anywhere. May be added, or represented as a qualifier, when actual source/use evidence establishes the need. **V3 extensibility, not an unresolved requirement.** |
+| `SCHEME_OF_ARRANGEMENT` | A different legal/statutory concept — a combination route, not an offer mechanism. **Its destination is not decided in this item.** |
+| `ONE_STEP_MERGER` / `TWO_STEP_MERGER` | Transaction process/sequence. One-step is largely the named *absence* of an offer; two-step is a composite of two facts already representable separately. |
+| squeeze-out / back-end merger mechanics | Detailed agreement mechanics — separately deferred (§T2). |
+
+**No redundant flags.** No `is_tender_offer`, `is_one_step` or `is_two_step`.
+
+**Null semantics:** null means the mechanism is **not established or not applicable** from
+available evidence. **Do not create `NOT_TENDER_OFFER`**, and absence of tender-offer language
+is **not** authoritative negative evidence.
+
+## T13. Asset Type *(decided 2026-08-19)*
+
+**`asset_type`** — a **subordinate** classification applicable when `target_type = ASSETS`,
+answering *what kind of asset is being transacted?* It is **not** a replacement for
+`target_type`, sector, or industry classification.
+
+**Initial V3 vocabulary** — `REAL_ESTATE` · `INFRASTRUCTURE` · `ENERGY` ·
+`NATURAL_RESOURCES` · `INTELLECTUAL_PROPERTY` · `DATA` · `FACILITY` · `EQUIPMENT` ·
+`CONTRACTS_OR_RIGHTS` · `BRAND_OR_PRODUCT` · `OTHER` · unknown/null.
+
+**Settled but extensible.** Legitimate additional asset types may be added from real cases
+later **without reopening the semantic model**. Do not attempt theoretical exhaustiveness.
+
+- **`FACILITY` stays distinct from `REAL_ESTATE`.** An operating plant, mill or yard is a
+  useful transaction-object distinction from property acquired principally as real estate.
+- **Asset type is distinct from sector.** `INFRASTRUCTURE`, `ENERGY` and the rest describe
+  the **transacted asset**; the company's industry/sector remains a separate classification.
+  This resolves the long-standing `Infrastructure` / `Real Estate` ambiguity (§Q5.10, §Q7.8)
+  **without needing the ML definitions**: those labels read as both because they conflate the
+  thing transacted with the industry, and placement separates them.
+- **Single-valued to start.** A portfolio containing multiple assets of the same class is one
+  `asset_type`. Multi-valued cardinality is **not** introduced for compound rights such as a
+  licence interest plus operatorship. If validation demonstrates genuinely mixed asset-class
+  transactions where one classification loses material information, that is reported as an
+  **extension requirement**.
+- **Transaction relevance is an upstream question** and does not gate the vocabulary. If an
+  in-scope transaction involves a data asset, V3 must be able to classify it — so `DATA`
+  stands regardless of any unresolved relevance question about a particular source.
+
+## T14. Funding Round + Stage *(decided 2026-08-19)*
+
+**Three distinct concepts, preserved separately.**
+
+| Concept | Role |
+| --- | --- |
+| **`round_label`** | The **verbatim source-reported wording**, preserved as stated |
+| **`round`** | The **canonical, detailed, researcher-selectable/filterable** round classification |
+| **`vc_stage`** | The **broad normalized grouping**, derived from canonical `round` |
+
+**`round` — canonical detailed classification.**
+
+- **Preserve meaningful numbered variants** — `SERIES_A1`, `SERIES_A2`, `SERIES_A3` and so
+  on. **Do not normalize `SERIES_A2` down to `SERIES_A`.**
+- **`ANGEL` is its own canonical round**, not folded into Seed.
+- **Settled but extensible.** Later legitimate letter/number variants may be added without
+  reopening the semantic model. **Do not impose the V2 Series-G ceiling** — the V2 derivation
+  enumerates `series d`–`series g` literally, so Series H and beyond currently return null.
+
+**`vc_stage` — initial vocabulary and mapping.**
+
+`PRE_SEED` · `SEED` · `EARLY_STAGE` · `GROWTH` · `LATE_STAGE` · null
+
+| Canonical `round` | `vc_stage` |
+| --- | --- |
+| Pre-Seed | `PRE_SEED` |
+| Seed · **Angel** | `SEED` |
+| Series A family, **including A1/A2/etc.** | `EARLY_STAGE` |
+| Series B / C families | `GROWTH` |
+| Series D and beyond | `LATE_STAGE` |
+
+**`vc_stage` derives from canonical `round`, not from substring matching against
+`round_label`.** This is **explicit V3 normalization logic**, not inference from arbitrary
+source strings. The V2 approach — substring tests over free text — produces concrete defects
+established by executing the live derivation: Series H/I/J return null, `Bridge Round` returns
+null despite being one of the extraction prompt's own documented label examples, and
+`Series AA` collides into `EARLY_STAGE` because `"series a"` is a substring of it.
+
+**Orthogonal characteristics, not stages:**
+
+- **Extension and Bridge remain orthogonal round characteristics.** Existing
+  `is_extension_round` / `is_bridge_round` semantics stay separate for now.
+- **Venture Debt is not a VC stage.** It describes financing/event/instrument structure and
+  already has a home on the event axis as `event_type = VENTURE_DEBT`.
+- **Convertible Note** is likewise not a stage. It remains an **explicitly noted edge** — its
+  wording is preserved in `round_label`, but it has no canonical classification on either the
+  round or the event axis. **Not solved in this pass.**
+
+**Validation note.** Funding cases for validation must be selected from **actual funding
+source texts**, independently of whatever category any upstream provider assigned them.
+
+## T15. Standing reasoning corrections
+
+Two lines of reasoning are **not** valid evidence about V3 semantics, and were used and
+withdrawn during this review:
+
+1. **CSV/XLSX export presence or absence is not evidence** of canonical-model importance,
+   field maturity, or implementation priority. Exports are inspection/output surfaces, not the
+   canonical model, and are a downstream implementation concern only when explicitly reviewed.
+2. **Upstream provider categories are not canonical classification**, and provider category
+   coverage is **not** a proxy for whether our pipeline can classify or test a source. A
+   provider supplies source material; Transactions applies its own classification with its own
+   provenance. A 2026-08-19 corpus triage demonstrated the gap directly — provider labels
+   disagreed with what the source text supports in several cases.
+
+**The canonical reasoning path is:**
+
+`source evidence → extraction → validation → canonical V3 storage/derivation → Product/researcher use`
 

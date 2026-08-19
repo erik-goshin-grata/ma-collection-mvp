@@ -37,6 +37,88 @@ each decision.
 
 ---
 
+## 0. V3 orientation — read this first
+
+**Transactions V3 is the canonical target data model.** V2/harness behaviour and the earlier
+Grata model are **inputs** to it, not authorities over it. This section is the standalone
+orientation; **detailed field definitions live in the V3 dictionary and inventory §T** (§10),
+which this document deliberately does not duplicate.
+
+### 0.1 What V3 settles
+
+| Domain | V3 semantics | §T |
+| --- | --- | --- |
+| Event taxonomy | `event_type` is the top-level answer to "what happened?". Canonical `event_category` **removed**; Product/FE families are **derived** from `event_type`. | T1 |
+| Combination structure | `MERGER` / `REVERSE_MERGER` / `DE_SPAC` / null, **hierarchical** — query by implication, never equality. | T2 |
+| Target type | `STANDALONE_COMPANY` / `SUBSIDIARY` / `BUSINESS_UNIT` / `ASSETS` / null. `SPINCO` removed — implied by `event_type`. | T3 |
+| Divestiture | **Removed from V3.** Derive a *Divestitures* grouping from event types if wanted. | T4 |
+| Party roles | `TARGET` · `BUYER` · `SELLER` · `INVESTOR` · `PARENT_ACQUIRER` · `PARENT_SELLER` · `SPONSOR_BUYER` · `SPONSOR_SELLER` · `ADVISOR` · `LENDER` · `JV_PARTNER` · `UNDERWRITER`. **Sponsor side is directly representable.** | T5 |
+| Advisors | Role is `ADVISOR`; the participation references the **specific party advised**; `advisor_specialty` describes the service; **side is derived**. | T6 |
+| Sponsor transaction role | `PLATFORM` / `ADD_ON` / null. `ADD_ON` needs **no literal wording** and is **never inferred from `acquirer_type`**. | T7 |
+| Acquirer type | Retained as **extracted transaction context**, vocabulary purified to genuine economic/entity types. `PE_PORTFOLIO` / `MANAGEMENT` / `EMPLOYEE_GROUP` removed. | T8 |
+| Attitude + Approach | **Two independent dimensions:** `deal_attitude` (`FRIENDLY`/`HOSTILE`/null) and `approach_type` (`SOLICITED`/`UNSOLICITED`/null). | T11 |
+| Offer mechanism | `TENDER_OFFER` / null. Optional, and **orthogonal** to combination/merger structure. | T12 |
+| Asset type | Eleven values, **subordinate to `target_type = ASSETS`**, single-valued, distinct from sector. | T13 |
+| Funding round | Three concepts: `round_label` (verbatim) · `round` (canonical, keeps `SERIES_A2`) · `vc_stage` (**derived from `round`**). | T14 |
+
+**Settled but extensible.** Each vocabulary can gain legitimate values from real cases without
+reopening the semantic model. Six items remain explicitly undecided (§T10).
+
+### 0.2 Material V2 → V3 changes
+
+| Change | Nature |
+| --- | --- |
+| `event_category` removed; families derived | Removal + derivation |
+| `SHARE_PURCHASE` / `ASSET_PURCHASE` / `SPINCO` removed | Vocabulary removal — each was a duplicate or a named null |
+| `is_divestiture` removed | Removal, **not** repair |
+| Four recap flags removed; `recap_type` survives | Redundancy removal |
+| `is_platform_investment` + `is_add_on` → `sponsor_transaction_role` | Collapse **with specified evidence semantics** |
+| `acquirer_type` vocabulary purified | Three values removed; behaviour qualifiers dropped from definitions |
+| `hostile` boolean → `deal_attitude` + `approach_type` | **One field fans out to two**; third fused fact not promoted |
+| `merger_structure = TENDER_OFFER` → `offer_mechanism` | Field split — restores orthogonality V2 destroys |
+| `asset_type` added | **New collection**, no V2 source |
+| `round_stage_category` → `vc_stage`, derived from new canonical `round` | Derivation input changes from free text to a controlled vocabulary |
+| `PARENT_ACQUIRER`, `SPONSOR_BUYER`, `SPONSOR_SELLER`, `ADVISOR` | Role additions and one reversal of a v0.4 collapse |
+
+### 0.3 Product requirements vs ENG choices
+
+**Product requires** — the semantics above: which facts are independent, which are derived,
+which vocabularies apply, and what null means in each. Where a decision reads like a design,
+it is a semantic requirement any design must meet.
+
+**ENG chooses** — physical placement, storage shape, column vs child table, enum vs lookup,
+casing and naming conventions, migration mechanics, and how the `combination_structure`
+implication set is expressed, **provided Product semantics are unchanged**.
+
+**The standing Engineering constraint holds:** prefer typed dimensions and derivation over
+unnecessary flag proliferation — while **retaining independent facts and useful
+Product/researcher distinctions**. A 2026-08-19 audit found that guidance had been
+over-applied in three places, and §T5–T6 record the reversals. The distinguishing test:
+collapsing a genuinely single dimension **adds** a representable state; collapsing distinct
+roles **removes** one.
+
+### 0.4 Where the rest is
+
+**Known V2 implementation defects** → §6, *Recorded defects and follow-ups*.
+**V3 migration/implementation consequences** → §6, *V3 implementation / migration consequences*.
+**Validation requirements for changed executable paths** → the validation-status note above,
+and §0.5.
+
+### 0.5 Validation requirement, restated
+
+V3 is an **evolution** of a developed pipeline. Existing tests and prior validation remain
+relevant evidence **where V3 semantics do not change them**. For every concept that does
+change, trace the **V2 → V3 path** — source evidence → extraction → validation →
+canonical storage/derivation → Product/researcher use — and **add or rerun** regression and
+real-transaction validation wherever the semantics or the implementation path change. A green
+suite is a regression check on the current codebase, not evidence of V3.
+
+**Two reasoning rules apply to any further evaluation** (§T15): export presence is **not**
+evidence of canonical-model importance or priority, and upstream provider categories are
+**not** canonical classification nor a proxy for what our pipeline can classify or test.
+
+---
+
 ## 1. Executive summary
 
 **What was assessed.** The Grata V2 transaction data model — every Gold table in the
@@ -63,10 +145,10 @@ and reviewing them produced four further Product decisions (§5, R7–R10). The 
 rationale must distinguish **source-stated** from **inferred**, per rationale, and the three
 structure-derived defaults that silently produced inferred rationales are retired.
 
-**Where this leaves us.** No Product decisions are open. Twenty-three items remain, none of them a
-Product choice: six ENG implementation items (schedulable now), one prompt /
-legacy-compatibility review (a decision is owed before it can be scheduled), six recorded
-defects and follow-ups, **six V3 implementation/migration consequences**, two
+**Where this leaves us.** No Product decisions are open, and **the V3 taxonomy is closed** — see §0. Twenty-eight
+items remain, none of them a Product choice: six ENG implementation items (schedulable now),
+one prompt / legacy-compatibility review (a decision is owed before it can be scheduled), six
+recorded defects and follow-ups, **eleven V3 implementation/migration consequences**, two
 evidence-blocked items (cannot be scheduled), and two external-system asks.
 
 > **Read §5 before reviewing.** The Product decisions listed there are settled. They can be
@@ -274,7 +356,7 @@ vocabulary or the *accepted* one — and if the latter, should legacy values be 
 such in the prompt text? Prompt edits change live model contracts and need their own
 regression.
 
-### V3 implementation / migration consequences (6)
+### V3 implementation / migration consequences (11)
 
 Recorded 2026-08-19 alongside the V3 taxonomy decisions. **Deliberately unrepaired** — current
 V2 behaviour does not redefine V3 semantics. Full detail in `decisions.md`.
@@ -287,6 +369,11 @@ V2 behaviour does not redefine V3 semantics. Full detail in `decisions.md`.
 | `parent_seller` conditioned on `target_type` | Cannot serve as independent seller-side evidence. |
 | `is_take_private` private-buyer proxy | Uses acquirer-type membership; four of those values leave the V3 enum, so a proper private-vs-listed input is needed. An MBO of a listed company *is* a take-private. |
 | `MANAGEMENT` removal sequencing | `management_participation` is decided but **not built**; it must land with or before the removal. |
+| `hostile` fans out to two dimensions | V2 coerces unstated to zero, so **`hostile = 0` must not migrate to `FRIENDLY`**; `hostile = 1` cannot be resolved into which of three fused facts fired. |
+| `offer_mechanism` has no ordinary-source extraction | V2 captures tender offer only via `merger_structure` on the trigger-gated SEC path. **V3 must not depend on it.** |
+| `asset_type` has no V2 migration source | No asset sub-classification exists anywhere in V2; every value is newly collected. |
+| `round_label` → canonical `round` | Free text with no validator; mapping is a normalization exercise **with a residue**, not a mechanical migration. |
+| `vc_stage` must derive from `round` | The V2 substring derivation returns null for Series H+ and `Bridge Round`, and collides `Series AA` into `EARLY_STAGE`. No test exercises it. |
 
 ### Recorded defects and follow-ups (6)
 
