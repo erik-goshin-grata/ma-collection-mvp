@@ -61,6 +61,11 @@ HC_FIELDS = (
     "round_size",
     "pct_acquired",
     "stake_transition_type",
+    # V3 §T12 (2026-08-20). Ordinary-source owner of the tender-offer fact. Stage 11 may
+    # additionally observe it from merger_structure = TENDER_OFFER; both land here and are
+    # resolved by ordinary tier logic. Omitting this line strands the field on
+    # staging_extraction, since Stage 9 reads observations by default.
+    "offer_mechanism",
     "is_platform_investment",
     "is_secondary_buyout",
     "is_merger_of_equals",

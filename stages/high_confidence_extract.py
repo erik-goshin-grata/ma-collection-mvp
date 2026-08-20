@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.19"
+_VERSION = "0.20"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -75,6 +75,9 @@ _VALID_ASSET_TYPES = frozenset({
     "INTELLECTUAL_PROPERTY", "DATA", "FACILITY", "EQUIPMENT",
     "CONTRACTS_OR_RIGHTS", "BRAND_OR_PRODUCT", "OTHER",
 })
+# V3 §T12 — deliberately one value plus null. MANDATORY_OFFER, SCHEME_OF_ARRANGEMENT,
+# ONE_STEP_MERGER and TWO_STEP_MERGER are excluded by that decision, not pending.
+_VALID_OFFER_MECHANISM = frozenset({"TENDER_OFFER"})
 _VALID_STAKE_TRANSITION_TYPES = frozenset({
     "NEW_MINORITY_STAKE",
     "NEW_MAJORITY_STAKE",
@@ -180,6 +183,13 @@ def _validate(result: dict) -> str | None:
     stt = (result.get("deal") or {}).get("stake_transition_type")
     if stt is not None and stt not in _VALID_STAKE_TRANSITION_TYPES:
         return f"invalid deal.stake_transition_type: {stt!r}"
+
+    # offer_mechanism — vocabulary only. Unlike asset_type there is deliberately NO
+    # cross-field guard: a tender offer legitimately coexists with a back-end merger,
+    # so nothing may suppress it on the basis of another field.
+    om = (result.get("deal") or {}).get("offer_mechanism")
+    if om is not None and om not in _VALID_OFFER_MECHANISM:
+        return f"invalid deal.offer_mechanism: {om!r}"
 
     # asset_type — vocabulary check here; the subordination rule (null unless
     # target_type = assets) is enforced at the write, where target_type is in scope.
@@ -415,6 +425,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 ps.get("description"),
                 (txn.get("deal") or {}).get("pct_acquired"),
                 (txn.get("deal") or {}).get("stake_transition_type"),
+                (txn.get("deal") or {}).get("offer_mechanism"),
                 features.get("is_platform_investment"),
                 features.get("is_secondary_buyout"),
                 features.get("is_merger_of_equals"),
@@ -461,7 +472,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         acquirer_sponsor_name = ?,
                         parent_seller_name = ?,  parent_seller_ticker = ?,
                         parent_seller_description = ?,
-                        pct_acquired = ?,  stake_transition_type = ?,
+                        pct_acquired = ?,  stake_transition_type = ?,  offer_mechanism = ?,
                         is_platform_investment = ?,  is_secondary_buyout = ?,  is_merger_of_equals = ?,
                         announced_date = ?,  closed_date = ?,  signing_date = ?,
                         announced_date_precision = ?,  closed_date_precision = ?,  signing_date_precision = ?,
@@ -515,7 +526,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         acquirer_sponsor_name,
                         parent_seller_name, parent_seller_ticker,
                         parent_seller_description,
-                        pct_acquired, stake_transition_type,
+                        pct_acquired, stake_transition_type, offer_mechanism,
                         is_platform_investment, is_secondary_buyout, is_merger_of_equals,
                         announced_date, closed_date, signing_date,
                         announced_date_precision, closed_date_precision, signing_date_precision,
@@ -541,7 +552,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

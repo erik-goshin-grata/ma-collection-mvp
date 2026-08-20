@@ -98,6 +98,7 @@ _FIELDS = [
     ("per_share_price", "number"),
     ("pct_acquired", "number"),
     ("stake_transition_type", "string"),
+    ("offer_mechanism", "string"),   # TENDER_OFFER | null (V3 §T12)
     ("is_platform_investment", "boolean"),
     ("is_secondary_buyout", "boolean"),
     ("is_merger_of_equals", "boolean"),
@@ -1389,7 +1390,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.asset_type,
                se.announced_date, se.closed_date, se.signing_date,
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
-               se.stake_transition_type,
+               se.stake_transition_type, se.offer_mechanism,
                se.is_platform_investment, se.is_secondary_buyout, se.is_merger_of_equals,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
@@ -1669,6 +1670,7 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "per_share_price",
     "pct_acquired",
     "stake_transition_type",
+    "offer_mechanism",
     "target_revenue",
     "target_revenue_period_type",
     "target_revenue_period_type_v2",
@@ -2038,6 +2040,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("per_share_price"),
                     pct_resolved,  # §2.6-resolved: 100 (assumed) for control types when silent
                     field_values.get("stake_transition_type"),
+                    field_values.get("offer_mechanism"),
                     field_values.get("target_revenue"),
                     field_values.get("target_revenue_period_type"),
                     field_values.get("target_revenue_period_type_v2"),

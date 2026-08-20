@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.19 (asset_type, subordinate to target_type = assets)
+**Version:** 0.20 (offer_mechanism — direct offer to securityholders)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -198,6 +198,18 @@ deal:
   distinguish prior ownership, current stake acquired, and/or resulting
   ownership/control. Otherwise null. Do not infer from pct_acquired alone.
   Do not return UNKNOWN for this field; null is the no-observation state.
+- offer_mechanism: Whether the acquisition is being effected through an offer
+  made directly to target securityholders. Enum or null: TENDER_OFFER | null.
+    TENDER_OFFER — established by tender-offer, exchange-offer, or equivalent
+      direct offer-to-securityholders language: "commence a tender offer",
+      "exchange offer", "offer to purchase all outstanding shares".
+    null — that mechanism is not established. This is the common case.
+    Do NOT infer TENDER_OFFER because the target is public. Most public-company
+      acquisitions are not effected by an offer to securityholders.
+    Do NOT infer it from a merger agreement alone.
+    A two-step deal — a tender offer followed by a back-end merger — sets BOTH
+      offer_mechanism = TENDER_OFFER and combination_structure = MERGER. They
+      answer different questions and do not compete.
   Values:
     NEW_MINORITY_STAKE — buyer/investor owned 0% or no prior stake is stated,
       acquires less than 50%, and remains below control.
@@ -531,7 +543,8 @@ code fences, no preamble.
         "description": null
       },
       "deal": {
-        "pct_acquired": null
+        "pct_acquired": null,
+        "offer_mechanism": null
       },
       "dates": {
         "announced_date": "2026-04-15",
@@ -636,7 +649,9 @@ Extract all transactions from this source.
       },
       "deal": {
         "pct_acquired": "number | null",
-        "stake_transition_type": "NEW_MINORITY_STAKE | NEW_MAJORITY_STAKE | FULL_ACQUISITION | MINORITY_ACQUIRING_MAJORITY | MAJORITY_ACQUIRE_REMAINING | MINORITY_ACQUIRING_REMAINING | MAJORITY_INCREASING_STAKE | MINORITY_INCREASING_STAKE | null"
+        "stake_transition_type": "NEW_MINORITY_STAKE | NEW_MAJORITY_STAKE | FULL_ACQUISITION | MINORITY_ACQUIRING_MAJORITY | MAJORITY_ACQUIRE_REMAINING | MINORITY_ACQUIRING_REMAINING | MAJORITY_INCREASING_STAKE | MINORITY_INCREASING_STAKE | null",
+        "offer_mechanism": "TENDER_OFFER | null",
+        "offer_mechanism": null
       },
       "dates": {
         "announced_date": "YYYY-MM-DD | null",
@@ -740,7 +755,8 @@ Output:
         "description": null
       },
       "deal": {
-        "pct_acquired": null
+        "pct_acquired": null,
+        "offer_mechanism": null
       },
       "dates": {
         "announced_date": "2026-04-15",
@@ -836,7 +852,8 @@ Output:
         "description": null
       },
       "deal": {
-        "pct_acquired": null
+        "pct_acquired": null,
+        "offer_mechanism": null
       },
       "dates": {
         "announced_date": "2026-04-10",
@@ -930,7 +947,8 @@ Output:
         "description": null
       },
       "deal": {
-        "pct_acquired": null
+        "pct_acquired": null,
+        "offer_mechanism": null
       },
       "dates": {
         "announced_date": "2026-04-23",
@@ -1016,7 +1034,8 @@ Output:
         "description": null
       },
       "deal": {
-        "pct_acquired": null
+        "pct_acquired": null,
+        "offer_mechanism": null
       },
       "dates": {
         "announced_date": "2026-05-01",
@@ -1105,7 +1124,7 @@ Output:
         "sponsor_name": null
       },
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": null},
+      "deal": {"pct_acquired": null, "offer_mechanism": null},
       "dates": {
         "announced_date": "2026-04-30",
         "announced_date_precision": "exact",
@@ -1154,7 +1173,7 @@ Output:
         "sponsor_name": null
       },
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": null},
+      "deal": {"pct_acquired": null, "offer_mechanism": null},
       "dates": {
         "announced_date": "2026-04-30",
         "announced_date_precision": "exact",
@@ -1224,7 +1243,7 @@ Output:
       "target": {"name": null, "domain": null, "ticker": null, "description": null, "asset_type": null},
       "acquirer": {"name": null, "domain": null, "ticker": null, "type": "unknown", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": null},
+      "deal": {"pct_acquired": null, "offer_mechanism": null},
       "dates": {
         "announced_date": "2026-06-01",
         "announced_date_precision": "exact",
@@ -1290,7 +1309,7 @@ Output:
       "target": {"name": "BÉIS, LLC", "domain": null, "ticker": null, "description": null, "asset_type": null},
       "acquirer": {"name": "Samsonite Group S.A.", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE"},
+      "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE", "offer_mechanism": null},
       "dates": {
         "announced_date": "2026-08-13",
         "announced_date_precision": "exact",
@@ -1377,7 +1396,7 @@ Output:
       },
       "acquirer": {"name": "Cascade Midstream Partners", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": "Meridian Energy Corp", "ticker": null, "description": null},
-      "deal": {"pct_acquired": null, "stake_transition_type": null},
+      "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": null},
       "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
       "notes": "TARGET TYPE is assets, so asset_type is populated. A pipeline system is INFRASTRUCTURE because that is the thing transacted, not ENERGY, which would describe the parties' sector. No employees or going-concern unit transfer, consistent with an asset purchase rather than a business unit."
     }
@@ -1388,6 +1407,42 @@ Output:
 **Why asset_type is null in the other examples.** In Examples 1-7 the TARGET TYPE supplied
 is `standalone_company`, so asset_type is null in each. It is subordinate to the target
 type, not an independent judgement about what the target does.
+
+**Example 9 — Two-step tender offer: offer_mechanism and combination_structure coexist:**
+
+Input:
+```
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
+
+TITLE: Halden Therapeutics to Acquire Verity Biosciences for $18.50 Per Share
+BODY: Halden Therapeutics announced a definitive agreement to acquire Verity Biosciences
+(NASDAQ: VRTY) for $18.50 per share in cash. Under the agreement, a wholly owned
+subsidiary of Halden will commence a tender offer to purchase all outstanding shares of
+Verity common stock. Following completion of the tender offer, the subsidiary will merge
+into Verity, which will become a wholly owned subsidiary of Halden.
+```
+
+Output:
+```json
+{
+  "transactions": [
+    {
+      "target": {"name": "Verity Biosciences", "domain": null, "ticker": "NASDAQ: VRTY", "description": null, "asset_type": null},
+      "acquirer": {"name": "Halden Therapeutics", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
+      "parent_seller": {"name": null, "ticker": null, "description": null},
+      "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": "TENDER_OFFER"},
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "notes": "\"commence a tender offer to purchase all outstanding shares\" is a direct offer to securityholders. The back-end merger is a separate fact recorded as combination_structure by the classifier; it does not compete with offer_mechanism and does not replace it."
+    }
+  ]
+}
+```
+
+**Why offer_mechanism is null in Examples 1-8.** None of them describes an offer made to
+securityholders. Example 2 is a public take-private effected by merger agreement, which is
+the case most likely to be mistyped: a public target is not evidence of a tender offer.
 
 ---
 
@@ -1421,3 +1476,4 @@ type, not an independent judgement about what the target does.
 | 0.15 | 2026-08-14 | Added required `value_observations` array for independently typed deal-value facts. |
 | 0.16 | 2026-08-14 | Added explicit-evidence `features` object for platform investment, secondary buyout, and merger-of-equals flags. |
 | 0.19 | 2026-08-20 | **`asset_type` added (V3 §T13), subordinate to `target_type = assets`.** Eleven values plus null, answering *what kind of asset is being transacted* — **not** the target's sector or industry, which remains a separate classification. `FACILITY` is deliberately distinct from `REAL_ESTATE`: an operating plant is a different transaction object from property held principally as real estate. Single-valued; a portfolio of like assets is one value. **Null for every target type other than `assets`**, enforced in the stage validator — it is a sub-classification of an asset purchase, not an independent judgement. Example 8 added; all ten existing example target blocks carry `asset_type: null`. |
+| 0.20 | 2026-08-20 | **`offer_mechanism` added (V3 §T12).** `TENDER_OFFER` | null, in the `deal` block. Describes whether the acquisition is effected through an offer made directly to target securityholders; established by tender-offer, exchange-offer or equivalent language. Vocabulary deliberately not expanded — `MANDATORY_OFFER`, `SCHEME_OF_ARRANGEMENT`, `ONE_STEP_MERGER` and `TWO_STEP_MERGER` are excluded by §T12. Two anti-inference rules: a public target is not evidence of a tender offer, and a merger agreement alone is not either. Example 9 added for the two-step case, where `offer_mechanism = TENDER_OFFER` and `combination_structure = MERGER` coexist. Previously this fact existed only as `merger_structure = TENDER_OFFER` on the SEC/agreement path, unreachable for any transaction without a filing; that path is retained as corroborating evidence, not replaced. |

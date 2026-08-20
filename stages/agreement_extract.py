@@ -830,6 +830,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         doc_sections += 1
                         prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
 
+                        # V3 §T12 corroboration. `merger_structure = TENDER_OFFER` and
+                        # canonical `offer_mechanism` are the same fact seen from the
+                        # agreement, so the agreement contributes an observation rather
+                        # than having its evidence discarded. It does NOT become the
+                        # canonical owner: high_confidence_extraction populates the field
+                        # independently, and where both establish it, ordinary tier
+                        # resolution merges two agreeing observations.
+                        #
+                        # Only TENDER_OFFER maps. DIRECT / FORWARD_TRIANGULAR /
+                        # REVERSE_TRIANGULAR stay merger-mechanics observations with no V3
+                        # destination (§T2 defers them); mapping them here would invent one.
+                        # `merger_structure` itself is untouched and keeps all four values.
+                        if result.get("merger_structure") == "TENDER_OFFER":
+                            result = {**result, "offer_mechanism": "TENDER_OFFER"}
+
                         try:
                             obs_before = conn.execute(
                                 "SELECT COUNT(*) FROM transaction_field_observation WHERE transaction_id=? AND is_current=1",

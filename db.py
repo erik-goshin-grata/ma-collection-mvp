@@ -324,6 +324,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     # 006 (V3 §T13 asset type) — same sentinel-guarded pattern.
     if "asset_type" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "006_v3_asset_type.sql").read_text(encoding="utf-8"))
+    # 007 (V3 §T12 offer mechanism) — adds offer_mechanism to staging_extraction and
+    # transaction_record. Sentinel-guarded like the rest; this directory is NOT globbed.
+    if "offer_mechanism" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "007_v3_offer_mechanism.sql").read_text(encoding="utf-8"))
 
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
