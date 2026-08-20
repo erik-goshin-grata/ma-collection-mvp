@@ -27,6 +27,7 @@ Spec references: prompts/aggregation.md, specs/pipeline.md §2 (Stage 9)
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -143,7 +144,7 @@ _FIELDS = [
     ("facility_size", "number"),
     ("total_raised_to_date", "number"),
     ("is_extension_round", "boolean"),
-    ("is_down_round", "boolean"),
+    ("round_price_direction", "string"),   # UP | DOWN | FLAT | null (V3 §A6.3)
     ("is_bridge_round", "boolean"),
     ("use_of_proceeds", "string"),
     ("has_board_seat", "boolean"),
@@ -324,24 +325,78 @@ def _derive_transaction_status(event_history_type: str | None, closed_date: str 
     return "PENDING"
 
 
-def _derive_round_stage_category(round_label: str | None) -> str | None:
-    """Derive round_stage_category from round_label."""
+_ROUND_RE = re.compile(r"^series[\s\-_]*([a-z])[\s\-_]*([0-9]*)$")
+_PRE_SEED_RE = re.compile(r"^pre[\s\-_]*seed$")
+
+# Series D and beyond. Compared as a parsed single letter, never as a substring: the V2
+# derivation enumerated "series d".."series g" literally, so Series H and beyond returned
+# null, and "series a" matched inside "Series AA".
+_EARLY = "a"
+_GROWTH = ("b", "c")
+
+
+def _normalize_round(round_label: str | None) -> str | None:
+    """`round_label` (verbatim source wording) -> canonical `round`, or None.
+
+    Deterministic normalization, not model output: the prompt emits only the verbatim
+    label, so there is no vocabulary for a prompt validator to enforce (V3 §T14).
+
+    The shape is generative but bounded -- PRE_SEED, SEED, ANGEL, SERIES_<letter>, and
+    SERIES_<letter><positive int>. Anything outside it returns None rather than a guess,
+    and `round_label` keeps the original wording either way. `Series AA` is the case that
+    matters: the V2 substring test mapped it to EARLY_STAGE by collision, and under V3 it
+    is simply not a representable round.
+
+    Bridge, extension, venture debt and convertible notes are NOT rounds. They describe
+    instrument or event structure and have their own fields; returning None here is the
+    correct answer, not a gap.
+    """
     if not round_label:
         return None
     label = round_label.lower().strip()
-    if any(x in label for x in ("pre-seed", "pre_seed", "preseed")):
+    # Strip qualifiers that describe the round without changing which round it is.
+    for suffix in (" extension", " round", " financing", " funding"):
+        while label.endswith(suffix):
+            label = label[: -len(suffix)].strip()
+    if _PRE_SEED_RE.match(label):
         return "PRE_SEED"
-    if any(x in label for x in ("seed", "angel")):
+    if label == "seed":
         return "SEED"
-    if "series a" in label or "series-a" in label:
-        return "EARLY_STAGE"
-    if any(x in label for x in ("series b", "series-b", "series c", "series-c")):
-        return "GROWTH"
-    if any(x in label for x in (
-        "series d", "series e", "series f", "series g",
-        "growth equity", "growth", "late stage", "late-stage",
-    )):
-        return "LATE_STAGE"
+    if label == "angel":
+        return "ANGEL"
+    m = _ROUND_RE.match(label)
+    if m:
+        letter, number = m.group(1), m.group(2)
+        if number:
+            # A leading zero or a zero index is not a real round variant.
+            if number.startswith("0"):
+                return None
+            return f"SERIES_{letter.upper()}{int(number)}"
+        return f"SERIES_{letter.upper()}"
+    return None
+
+
+def _derive_vc_stage(canonical_round: str | None) -> str | None:
+    """Canonical `round` -> broad `vc_stage` (V3 §T14).
+
+    Derived from the normalized round, never from `round_label`. The series letter is
+    parsed and compared as a letter, so there is no ceiling: Series H, I, J and beyond all
+    resolve to LATE_STAGE, which the V2 literal enumeration could not do.
+    """
+    if not canonical_round:
+        return None
+    if canonical_round == "PRE_SEED":
+        return "PRE_SEED"
+    if canonical_round in ("SEED", "ANGEL"):
+        return "SEED"
+    if canonical_round.startswith("SERIES_"):
+        letter = canonical_round[len("SERIES_"):][:1].lower()
+        if letter == _EARLY:
+            return "EARLY_STAGE"
+        if letter in _GROWTH:
+            return "GROWTH"
+        if letter > "c":
+            return "LATE_STAGE"
     return None
 
 
@@ -1417,7 +1472,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                -- Funding fields (Stage 4b) — required so funding deal value/round data propagates
                se.round_label, se.round_size, se.pre_money_valuation, se.post_money_valuation,
                se.valuation_currency, se.round_currency, se.facility_size, se.total_raised_to_date,
-               se.is_extension_round, se.is_down_round, se.is_bridge_round,
+               se.is_extension_round, se.round_price_direction, se.is_bridge_round,
                se.use_of_proceeds, se.has_board_seat, se.board_seat_notes,
                sr.source_type, sr.source_tier, sr.published_date, sr.clean_text
         FROM staging_extraction se
@@ -1709,7 +1764,9 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "has_earnout",
     "has_cvr",
     "round_label",
-    "round_stage_category",
+    "round",
+    "vc_stage",
+    "round_price_direction",
     "round_size",
     "pre_money_valuation",
     "post_money_valuation",
@@ -1718,7 +1775,6 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "facility_size",
     "total_raised_to_date",
     "is_extension_round",
-    "is_down_round",
     "is_bridge_round",
     "use_of_proceeds",
     "has_board_seat",
@@ -1850,10 +1906,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             txn_status = _derive_transaction_status(
                 field_values.get("event_history_type"), field_values.get("closed_date")
             )
-            # Derive round_stage_category from round_label
-            round_stage_category = _derive_round_stage_category(
-                field_values.get("round_label")
-            )
+            # V3 §T14: two deterministic steps, not one substring test.
+            # round_label (verbatim) -> canonical round -> broad vc_stage.
+            # Both are DERIVED here, not extracted and not observed -- the same shape the
+            # V2 round_stage_category used, so neither belongs in FUNDING_FIELDS.
+            canonical_round = _normalize_round(field_values.get("round_label"))
+            vc_stage = _derive_vc_stage(canonical_round)
 
             # Check for existing transaction_record to determine version and to
             # preserve the manual net_debt input across re-aggregation.
@@ -2080,7 +2138,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     _derive_has_cvr(field_values.get("consideration_components")),
                     # Funding fields
                     field_values.get("round_label"),
-                    round_stage_category,
+                    canonical_round,
+                    vc_stage,
+                    field_values.get("round_price_direction"),
                     field_values.get("round_size"),
                     field_values.get("pre_money_valuation"),
                     field_values.get("post_money_valuation"),
@@ -2089,7 +2149,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("facility_size"),
                     field_values.get("total_raised_to_date"),
                     field_values.get("is_extension_round"),
-                    field_values.get("is_down_round"),
                     field_values.get("is_bridge_round"),
                     field_values.get("use_of_proceeds"),
                     field_values.get("has_board_seat"),

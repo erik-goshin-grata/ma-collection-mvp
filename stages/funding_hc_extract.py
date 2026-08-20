@@ -27,7 +27,7 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 from lib.observation_writer import write_staging_observations_for_extraction
 
 _PROMPT_NAME = "funding_hc_extraction"
-_VERSION = "0.1"
+_VERSION = "0.2"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
@@ -38,6 +38,10 @@ _REQUIRED_KEYS = frozenset({
 })
 
 _VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
+# V3 §A6.3 / §T14. Replaces the is_down_round boolean, which could only record DOWN --
+# is_up_round never existed -- so 0 fused up, flat and unknown. null stays distinct from
+# FLAT: "not stated" and "unchanged" are different facts, so this is NOT coerced.
+_VALID_ROUND_PRICE_DIRECTION = frozenset({"UP", "DOWN", "FLAT"})
 _VALID_INVESTOR_TYPES = frozenset({
     "vc_firm", "growth_equity", "corporate_vc", "family_office",
     "hedge_fund", "sovereign_wealth_fund", "angel", "accelerator",
@@ -64,6 +68,10 @@ def _validate(result: dict) -> str | None:
         itype = inv.get("investor_type")
         if itype is not None and itype not in _VALID_INVESTOR_TYPES:
             return f"invalid investor_type: {itype!r}"
+
+    rpd = (result.get("round") or {}).get("round_price_direction")
+    if rpd is not None and rpd not in _VALID_ROUND_PRICE_DIRECTION:
+        return f"invalid round.round_price_direction: {rpd!r}"
 
     return None
 
@@ -206,7 +214,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 rd.get("facility_size"),
                 rd.get("total_raised_to_date"),
                 1 if rd.get("is_extension_round") else 0,
-                1 if rd.get("is_down_round") else 0,
+                rd.get("round_price_direction"),   # three-state: None stays None
                 1 if rd.get("is_bridge_round") else 0,
                 dt.get("announced_date"),
                 dt.get("announced_date_precision"),
@@ -241,7 +249,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         facility_size = ?,
                         total_raised_to_date = ?,
                         is_extension_round = ?,
-                        is_down_round = ?,
+                        round_price_direction = ?,
                         is_bridge_round = ?,
                         announced_date = ?,
                         announced_date_precision = ?,
@@ -271,7 +279,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         round_label, round_size, round_currency, valuation_currency,
                         pre_money_valuation, post_money_valuation,
                         facility_size, total_raised_to_date,
-                        is_extension_round, is_down_round, is_bridge_round,
+                        is_extension_round, round_price_direction, is_bridge_round,
                         announced_date, announced_date_precision,
                         closed_date, closed_date_precision,
                         financials_disclosure_status, consideration_type,
@@ -296,7 +304,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         rd.get("pre_money_valuation"), rd.get("post_money_valuation"),
                         rd.get("facility_size"), rd.get("total_raised_to_date"),
                         1 if rd.get("is_extension_round") else 0,
-                        1 if rd.get("is_down_round") else 0,
+                        rd.get("round_price_direction"),   # three-state: None stays None
                         1 if rd.get("is_bridge_round") else 0,
                         dt.get("announced_date"), dt.get("announced_date_precision"),
                         dt.get("closed_date"), dt.get("closed_date_precision"),

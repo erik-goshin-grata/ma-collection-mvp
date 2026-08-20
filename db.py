@@ -328,6 +328,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     # transaction_record. Sentinel-guarded like the rest; this directory is NOT globbed.
     if "offer_mechanism" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "007_v3_offer_mechanism.sql").read_text(encoding="utf-8"))
+    # 008 (V3 §T14 / §A6.3 funding round, stage, price direction). Sentinel-guarded like
+    # the rest; this directory is NOT globbed, so a migration without a block never runs.
+    if "round_price_direction" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "008_v3_funding_round.sql").read_text(encoding="utf-8"))
 
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction

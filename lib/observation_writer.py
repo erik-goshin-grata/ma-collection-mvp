@@ -130,7 +130,10 @@ FUNDING_FIELDS = (
     "facility_size",
     "total_raised_to_date",
     "is_extension_round",
-    "is_down_round",
+    # V3 §A6.3 (2026-08-20). `is_down_round` left this group in the same change: Stage 4b
+    # no longer writes that column, so observing it produced a permanent NULL. Governs NEW
+    # observation writing only -- the historical column and existing rows are untouched.
+    "round_price_direction",
     "is_bridge_round",
     "use_of_proceeds",
     "has_board_seat",

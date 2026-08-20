@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.1
+**Version:** 0.2 (round_price_direction replaces is_down_round)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -147,8 +147,16 @@ round:
 - is_extension_round: true when source describes this as an extension,
   continuation, or tranche of a prior round ("Series B extension", "additional
   tranche", "continuation of our Series A"). false otherwise.
-- is_down_round: true only when source explicitly states the valuation is below
-  a prior round. Do NOT infer from valuation figures.
+- round_price_direction: enum or null — UP | DOWN | FLAT | null. The valuation
+  of this round relative to the company's prior round.
+    DOWN when the source explicitly states the valuation is below a prior round.
+    UP when the source explicitly states it is above a prior round.
+    FLAT when the source explicitly states it is unchanged from a prior round.
+    null when the source does not establish the comparison. This is the common
+      case, and it is NOT the same as FLAT — "not stated" and "unchanged" are
+      different facts.
+    Do NOT infer any value from valuation figures. Two disclosed valuations do
+      not license a comparison unless the source itself makes it.
 - is_bridge_round: true when source explicitly describes this as bridge
   financing. false otherwise.
 
@@ -251,7 +259,7 @@ code fences, no preamble.
         "facility_size": null,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -329,7 +337,7 @@ Extract all funding transactions from this source.
         "facility_size": "number | null",
         "total_raised_to_date": "number | null",
         "is_extension_round": "boolean",
-        "is_down_round": "boolean",
+        "round_price_direction": "UP | DOWN | FLAT | null",
         "is_bridge_round": "boolean"
       },
       "dates": {
@@ -426,7 +434,7 @@ Output:
         "facility_size": null,
         "total_raised_to_date": 68000000,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -498,7 +506,7 @@ Output:
         "facility_size": null,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -567,7 +575,7 @@ Output:
         "facility_size": 30000000,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -624,7 +632,7 @@ Output:
         "facility_size": null,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -657,7 +665,7 @@ Output:
         "facility_size": null,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -690,7 +698,7 @@ Output:
         "facility_size": null,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -759,7 +767,7 @@ Output:
         "facility_size": null,
         "total_raised_to_date": null,
         "is_extension_round": false,
-        "is_down_round": false,
+        "round_price_direction": null,
         "is_bridge_round": false
       },
       "dates": {
@@ -777,6 +785,60 @@ Output:
   ]
 }
 ```
+
+---
+
+**Example 6 — Down round stated explicitly, and the comparison the source did not make:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+SOURCE TIER: T1
+V2 EVENT TYPE: VC_ROUND
+EVENT HISTORY TYPE: ANNOUNCED
+PUBLISHED DATE: 2026-05-04
+TITLE: Northwind Robotics Raises $40M Series C
+BODY: Northwind Robotics today announced a $40 million Series C financing led by
+Calder Ventures at a $180 million post-money valuation. The company said the round
+was completed at a valuation below its 2024 Series B, which it attributed to a
+broader repricing in industrial automation.
+```
+
+Output:
+```json
+{
+  "transactions": [
+    {
+      "company": {"name": "Northwind Robotics", "domain": null, "description": "a developer of industrial automation robotics"},
+      "round": {
+        "label": "Series C",
+        "size": 40000000,
+        "currency": "USD",
+        "pre_money_valuation": null,
+        "post_money_valuation": 180000000,
+        "valuation_currency": "USD",
+        "facility_size": null,
+        "total_raised_to_date": null,
+        "is_extension_round": false,
+        "round_price_direction": "DOWN",
+        "is_bridge_round": false
+      },
+      "investors": [{"name": "Calder Ventures", "investor_type": "VENTURE_CAPITAL", "is_lead": true}],
+      "dates": {"announced_date": "2026-05-04", "announced_date_precision": "exact"},
+      "use_of_proceeds": null,
+      "has_board_seat": null,
+      "board_seat_notes": null,
+      "model_confidence": "HIGH",
+      "notes": "round_price_direction DOWN on the source's own statement that the round was completed below the prior Series B. The post-money figure alone would not have licensed that; only the stated comparison does."
+    }
+  ]
+}
+```
+
+**Why the other examples are null.** None of Examples 1-5 states how this round's valuation
+compares with a prior one. Several disclose a valuation, which is exactly the trap: a
+disclosed figure is not a comparison. `null` means the source did not establish the
+direction, and it is a different fact from `FLAT`, which asserts the valuation is unchanged.
 
 ---
 
@@ -800,3 +862,4 @@ Output:
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-07-28 | Initial version — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT extraction. Multi-investment source support. Sparse source handling. Five examples covering PR release, growth equity, venture debt, portfolio page, SAFE/undisclosed. |
+| 0.2 | 2026-08-20 | **`round_price_direction` replaces `is_down_round` (V3 §A6.3 / §T14).** `UP` | `DOWN` | `FLAT` | null. The boolean could only ever record DOWN — `is_up_round` never existed anywhere in the codebase — so `is_down_round = 0` fused *up*, *flat* and *unknown* into one bit. All three values now have extraction vocabulary, and **null stays distinct from `FLAT`**: "not stated" and "unchanged" are different facts. The existing anti-inference rule is preserved and widened — two disclosed valuations do not license a comparison unless the source makes it. Example 6 added for an explicitly stated down round. Canonical `round` and `vc_stage` are **not** prompt fields: they are deterministic normalizations of `round_label`, which is unchanged and still verbatim. |
