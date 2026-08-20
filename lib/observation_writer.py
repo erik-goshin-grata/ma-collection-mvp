@@ -98,8 +98,11 @@ HC_FIELDS = (
 # column, so observing it produced a permanent NULL. Its replacements are the two typed
 # dimensions below. This governs NEW Stage 7 observation writing only — the historical
 # `hostile` column and existing rows are untouched.
+# `includes_earnout` left this group on 2026-08-20 with the same reasoning that removed
+# `hostile`: Stage 7 no longer writes it, so observing it produced a permanent NULL. Its
+# replacement is not another flag -- consideration_components is authoritative, and
+# has_earnout / has_cvr derive from specific component forms.
 LC_SCALAR_FIELDS = (
-    "includes_earnout",
     "deal_attitude",
     "approach_type",
     "competing_bid",

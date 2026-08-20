@@ -122,7 +122,6 @@ _FIELDS = [
     ("balance_sheet_as_of_date", "date"),
     ("financials_disclosure_status", "string"),
     ("consideration_components", "json"),
-    ("includes_earnout", "boolean"),
     ("hostile", "boolean"),          # legacy; no longer written by Stage 7 (V3 §T11)
     ("deal_attitude", "string"),     # FRIENDLY | HOSTILE | null
     ("approach_type", "string"),     # SOLICITED | UNSOLICITED | null
@@ -1451,7 +1450,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
                se.financials_currency,
                se.consideration_components,
-               se.includes_earnout, se.hostile, se.competing_bid,
+               se.hostile, se.competing_bid,
                se.deal_attitude, se.approach_type,
                se.regulatory_approvals_required,
                se.has_go_shop, se.go_shop_period_days,
@@ -1743,7 +1742,6 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "multiple_quality",
     "consideration_type",
     "consideration_components",
-    "includes_earnout",
     "hostile",
     "deal_attitude",
     "approach_type",
@@ -2116,7 +2114,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     multiples["multiple_quality"],
                     ctype,
                     field_values.get("consideration_components"),
-                    field_values.get("includes_earnout"),
                     field_values.get("hostile"),
                     field_values.get("deal_attitude"),
                     field_values.get("approach_type"),

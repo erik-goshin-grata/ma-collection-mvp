@@ -8,8 +8,7 @@ gone through Stage 5/6 (e.g., resume after partial run).
 
 Populates on success (status → LC_EXTRACTED):
   - consideration_components (JSON array on staging_extraction)
-  - flags: includes_earnout, deal_attitude, approach_type, competing_bid,
-    regulatory_approvals_required
+  - flags: deal_attitude, approach_type, competing_bid, regulatory_approvals_required
   - go_shop: has_go_shop, go_shop_period_days
   - termination_fees: target_fee_amount/percentage, acquirer_fee_amount/percentage
   - lc_prompt_version
@@ -45,7 +44,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "low_confidence_extraction"
-_VERSION = "0.6"
+_VERSION = "0.7"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -56,6 +55,14 @@ _VALID_ADVISOR_TYPES = frozenset({"FINANCIAL", "LEGAL", "OTHER"})
 _VALID_ADVISED_PARTIES = frozenset({"TARGET", "ACQUIRER", "PARENT_SELLER", "BOTH", "UNKNOWN"})
 # V3 §T11 — two independent nullable dimensions replacing the fused `hostile` boolean.
 # null is a valid, meaningful value for both: the source did not establish the fact.
+# Component forms were never validated: the prompt listed eight and nothing enforced them,
+# so an off-vocabulary spelling ("EARN_OUT", "Earnout") stored silently and then matched
+# neither derived filter. consideration_components is the authoritative extraction, so its
+# vocabulary is enforced like any other.
+_VALID_CONSIDERATION_FORMS = frozenset({
+    "CASH", "ACQUIRER_STOCK", "TARGET_STOCK", "EARNOUT", "CVR",
+    "CONTINGENT_CONSIDERATION", "DEBT_ASSUMED", "RETAINED_EQUITY", "OTHER",
+})
 _VALID_DEAL_ATTITUDE = frozenset({"FRIENDLY", "HOSTILE"})
 _VALID_APPROACH_TYPE = frozenset({"SOLICITED", "UNSOLICITED"})
 _SLEEP = 1.0  # conservative Opus throttle
@@ -71,8 +78,15 @@ def _validate(result: dict) -> str | None:
         return f"missing required keys: {missing}"
     if not isinstance(result.get("advisors"), list):
         return "advisors must be a list"
-    if not isinstance(result.get("consideration_components"), list):
+    components = result.get("consideration_components")
+    if not isinstance(components, list):
         return "consideration_components must be a list"
+    for comp in components:
+        if not isinstance(comp, dict):
+            return f"consideration component must be an object: {comp!r}"
+        form = comp.get("form")
+        if form not in _VALID_CONSIDERATION_FORMS:
+            return f"invalid consideration component form: {form!r}"
     go_shop = result.get("go_shop") or {}
     if not go_shop.get("has_go_shop", False) and go_shop.get("go_shop_period_days") is not None:
         return "go_shop_period_days must be null when has_go_shop is false"
@@ -215,7 +229,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             UPDATE staging_extraction SET
                 status = 'LC_EXTRACTED',
                 consideration_components = ?,
-                includes_earnout = ?,
                 deal_attitude = ?,
                 approach_type = ?,
                 competing_bid = ?,
@@ -234,7 +247,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             """,
             (
                 json.dumps(result.get("consideration_components") or []),
-                1 if flags.get("includes_earnout") else 0,
                 # V3 §T11: three-state. None must stay None — "not established" is not
                 # "friendly". Do NOT coerce these to a default the way the flags below are.
                 flags.get("deal_attitude"),
@@ -276,11 +288,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
         lc_extracted += 1
         log.info(
-            "extraction_id=%d LC_EXTRACTED  advisors=%d  components=%d  earnout=%s  regulatory=%s",
+            "extraction_id=%d LC_EXTRACTED  advisors=%d  components=%d  regulatory=%s",
             eid,
             len(clean_advisors),
             len(result.get("consideration_components") or []),
-            flags.get("includes_earnout"),
             flags.get("regulatory_approvals_required"),
         )
         time.sleep(_SLEEP)

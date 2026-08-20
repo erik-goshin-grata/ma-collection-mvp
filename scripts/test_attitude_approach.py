@@ -29,6 +29,7 @@ model against real source text, which is a separate gate.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -210,9 +211,19 @@ def _test_aggregation_wiring(failures: list[str]) -> None:
 def _test_prompt_contract(failures: list[str]) -> None:
     text = open(LC_PROMPT_PATH, encoding="utf-8").read()
 
-    _assert_equal(failures, "prompt/stage_version_parity", _VERSION, "0.6")
-    if "**Version:** 0.6" not in text:
-        failures.append("prompt: version line is not 0.6")
+    # Parity plus a minimum, not an exact pin. Pinning 0.6 asserted the prompt was frozen,
+    # so the next slice's legitimate bump broke this test rather than finding a defect --
+    # which is what happened when 0.7 added the contingent consideration forms. Compared
+    # numerically because these are dotted decimals: 0.10 > 0.9, which strings invert.
+    m = re.search(r"^\*\*Version:\*\* (\d+)\.(\d+)", text, re.M)
+    if m is None:
+        failures.append("prompt: no parseable version line")
+    else:
+        _assert_equal(failures, "prompt/stage_version_parity",
+                      f"{m.group(1)}.{m.group(2)}", _VERSION)
+        if (int(m.group(1)), int(m.group(2))) < (0, 6):
+            failures.append(f"prompt: version {m.group(0)!r} predates the release that split "
+                            f"hostile into attitude and approach (0.6)")
 
     # The fused field must be gone from the contract, not merely supplemented.
     if '"hostile"' in text:

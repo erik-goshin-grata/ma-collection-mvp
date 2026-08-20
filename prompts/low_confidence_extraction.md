@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.6 (V3 attitude/approach split)
+**Version:** 0.7 (contingent consideration forms; includes_earnout retired)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -85,7 +85,8 @@ Rules:
 CONSIDERATION COMPONENTS:
 
 Extract the forms of consideration in the deal as an array of components. For each component:
-- form — enum: CASH, ACQUIRER_STOCK, TARGET_STOCK, EARNOUT, CVR, DEBT_ASSUMED, RETAINED_EQUITY, OTHER
+- form — enum: CASH, ACQUIRER_STOCK, TARGET_STOCK, EARNOUT, CVR, CONTINGENT_CONSIDERATION,
+  DEBT_ASSUMED, RETAINED_EQUITY, OTHER
 - amount — dollar amount of this component (null if not stated or not calculable)
 - percentage — percentage of total deal value (null if not calculable)
 - description — brief text describing the component (e.g., "$400M cash at closing," "contingent value right paying up to $5 per share")
@@ -96,9 +97,30 @@ form enum semantics:
 - TARGET_STOCK — exchange of target stock (rare in MVP scope)
 - EARNOUT — contingent payment based on post-close performance
 - CVR — contingent value right
+- CONTINGENT_CONSIDERATION — consideration the source states is contingent,
+  deferred, or milestone-based, where neither EARNOUT nor CVR is established.
 - DEBT_ASSUMED — target debt assumed by the acquirer
 - RETAINED_EQUITY — equity rolled over by target shareholders (common in PE deals)
 - OTHER — any other form (preferred stock, exchangeable shares, notes). Use description to specify.
+
+CONTINGENT CONSIDERATION — use the most specific form the source supports:
+
+- The source names an earnout, or describes a payment tied to post-close
+  performance metrics -> EARNOUT.
+- The source names a contingent value right, or a CVR -> CVR.
+- The source states the consideration is contingent, deferred, or
+  milestone-based, but establishes neither of the above -> CONTINGENT_CONSIDERATION.
+
+Do NOT reach for CONTINGENT_CONSIDERATION when the source supports EARNOUT or CVR;
+it is the fallback for genuinely unspecified contingency, not a substitute for
+reading which kind it is. Equally, do not promote a vague "additional payment" to
+EARNOUT because earnouts are common — if the mechanism is not established, the
+generic form is the honest answer.
+
+A contingent component is ADDITIVE. It never replaces the base consideration: a
+deal paying cash at closing plus a contingent amount has BOTH a CASH component and
+a contingent one. Record the stated contingent amount in the component's `amount`
+field, exactly as for any other form; null when no amount is stated.
 
 EARNOUT components:
 
@@ -153,9 +175,6 @@ Do NOT output any "all_cash" or "includes_stock" boolean flags. The orchestrator
 DEAL CHARACTERISTIC FLAGS:
 
 Extract features of the deal that are not directly derivable from the consideration array.
-
-Earnout presence:
-- includes_earnout — boolean: true if any earnout or CVR component is present. (Yes, this is derivable from the components array, but it's a prominent enough feature that we capture it explicitly for easy filtering.)
 
 Attitude / approach / competitive signals:
 
@@ -228,7 +247,6 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     }
   ],
   "flags": {
-    "includes_earnout": true,
     "deal_attitude": null,
     "approach_type": null,
     "competing_bid": false,
@@ -290,7 +308,6 @@ Extract advisors, consideration components, and deal characteristic flags.
     }
   ],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": null,
     "approach_type": null,
     "competing_bid": false,
@@ -349,7 +366,6 @@ Output:
     {"form": "CASH", "amount": 500000000, "percentage": 100.0, "description": "All-cash at closing"}
   ],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": "FRIENDLY",
     "approach_type": null,
     "competing_bid": false,
@@ -391,7 +407,6 @@ Output:
     {"form": "EARNOUT", "amount": 200000000, "percentage": 25.0, "description": "Up to $200M earnout over 3 years based on revenue"}
   ],
   "flags": {
-    "includes_earnout": true,
     "deal_attitude": null,
     "approach_type": null,
     "competing_bid": false,
@@ -431,7 +446,6 @@ Output:
     {"form": "CASH", "amount": 4500000000, "percentage": 100.0, "description": "$45.00 per share cash aggregate equity consideration"}
   ],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": "FRIENDLY",
     "approach_type": null,
     "competing_bid": false,
@@ -472,7 +486,6 @@ Output:
     {"form": "EARNOUT", "amount": 4000000, "percentage": 7.4, "description": "up to $4M tied to revenue performance years 1-2 post-close"}
   ],
   "flags": {
-    "includes_earnout": true,
     "deal_attitude": null,
     "approach_type": null,
     "competing_bid": false,
@@ -516,7 +529,6 @@ Output:
     {"form": "CVR", "amount": null, "percentage": null, "description": "non-tradeable CVR of up to $5.00 per share; FDA approval of ABC-123 by 2027-12-31"}
   ],
   "flags": {
-    "includes_earnout": true,
     "deal_attitude": "FRIENDLY",
     "approach_type": null,
     "competing_bid": false,
@@ -554,7 +566,6 @@ Output:
   "advisors": [],
   "consideration_components": [],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": null,
     "approach_type": null,
     "competing_bid": false,
@@ -612,7 +623,6 @@ Output:
     {"form": "CASH", "amount": 657700000, "percentage": 100.0, "description": "$24.55 cash per share for 100% of the company"}
   ],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": null,
     "approach_type": "UNSOLICITED",
     "competing_bid": false,
@@ -673,7 +683,6 @@ Output:
   "advisors": [],
   "consideration_components": [],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": null,
     "approach_type": "UNSOLICITED",
     "competing_bid": false,
@@ -710,7 +719,6 @@ Output:
   "advisors": [],
   "consideration_components": [],
   "flags": {
-    "includes_earnout": false,
     "deal_attitude": "HOSTILE",
     "approach_type": "UNSOLICITED",
     "competing_bid": false,
@@ -777,3 +785,4 @@ initiated a process to find one.
 | 0.4 | 2026-05-02 | Added EARNOUT and CVR component-type guidance to consideration_components extraction. Components are additive to primary consideration; do not change consideration_type. Added few-shot examples for both (Examples 4, 5). Updated RESPONSE FORMAT to show earnout component. |
 | 0.5 | 2026-07-28 | V2 alignment. Input schema updated: `deal_type` → `v2_event_type` (deal_type retained as alias); `event_type` → `event_history_type` (ANNOUNCED/CLOSED/AMENDED/TERMINATED); `target_type` values lowercased (V2 vocabulary). User template updated. All examples updated to V2 field names. Note: LC extraction logic is deal-type-agnostic — advisors, consideration components, and flags are extracted regardless of whether the event is M&A or funding. No taxonomy changes required. |
 | 0.6 | 2026-08-20 | **V3 attitude/approach split (§T11).** The fused `hostile` boolean is removed and replaced by two independent nullable dimensions: `deal_attitude` (`FRIENDLY`/`HOSTILE`/null) and `approach_type` (`SOLICITED`/`UNSOLICITED`/null). `hostile` conflated three facts — posture, approach and proxy contest — and its false-by-default handling made "unstated" indistinguishable from "friendly"; both new fields are null when the source does not establish the fact, and **absence of hostile evidence is not `FRIENDLY`**. `FRIENDLY` requires positive support/recommendation/agreement evidence, not merely that negotiations occurred. **Proxy contest is deliberately not carried forward** — §T11.1 does not promote it to V3, and `hostile`'s third clause was its only capture. `competing_bid` is unchanged and remains a boolean. Examples set `deal_attitude` only where the example's own body establishes posture. **Example 7 added** from real source text (Business News Australia, TPG/EQT Holdings, 2026-08-18), demonstrating `approach_type = UNSOLICITED` with `deal_attitude = null` — unsolicited is neither hostile nor friendly, and a board that "will evaluate" has not agreed. **Examples 8 and 9 added** from real source text (Seer, 13 and 27 April 2026) as a deliberate pair: the same unsolicited bidder, `deal_attitude` moving from null to `HOSTILE` while `approach_type` stays `UNSOLICITED` — the counterexample that separates approach from posture. `approach_type` is set only when the source clearly states or establishes an unsolicited bid or a solicited process; **neither value is inferred from the absence of the other**, and null is a first-class outcome and the most common one. `HOSTILE` is rejection with a continuing bidder, or an explicitly hostile characterisation. **A worked `SOLICITED` example is still pending** — no source establishing a target-initiated process is available yet. |
+| 0.7 | 2026-08-20 | **Contingent consideration made explicit; `includes_earnout` retired (V3 §T12-adjacent consideration cleanup).** `CONTINGENT_CONSIDERATION` added to the component form enum for consideration the source states is contingent, deferred or milestone-based where neither `EARNOUT` nor `CVR` is established — that fact was previously lost or forced into a wrong subtype. A most-specific-supported-form rule is stated explicitly, in both directions: do not fall back to the generic form when the source supports a subtype, and do not promote a vague additional payment to `EARNOUT` because earnouts are common. Contingent components are **additive** — they never replace base consideration. **`includes_earnout` is removed entirely**: it was defined as "earnout OR CVR", a wider scope than the field it appeared to shortcut, so it was a third differently-scoped signal for two facts. `consideration_components` is the authoritative structured extraction; `has_earnout` derives only from `EARNOUT` and `has_cvr` only from `CVR`. |
