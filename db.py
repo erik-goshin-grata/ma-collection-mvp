@@ -313,6 +313,11 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         conn.executescript((_mig_dir / "002_v2_prompt_alignment.sql").read_text(encoding="utf-8"))
     if "round_size" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "003_funding_path.sql").read_text(encoding="utf-8"))
+    # 004 (V3 §T11 attitude/approach) — adds deal_attitude / approach_type to
+    # staging_extraction and transaction_record. Same sentinel-guarded pattern: this
+    # directory is NOT globbed, so a migration without a block here never runs.
+    if "deal_attitude" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "004_v3_attitude_approach.sql").read_text(encoding="utf-8"))
 
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction

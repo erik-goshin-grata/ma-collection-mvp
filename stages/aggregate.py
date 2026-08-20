@@ -119,7 +119,9 @@ _FIELDS = [
     ("financials_disclosure_status", "string"),
     ("consideration_components", "json"),
     ("includes_earnout", "boolean"),
-    ("hostile", "boolean"),
+    ("hostile", "boolean"),          # legacy; no longer written by Stage 7 (V3 §T11)
+    ("deal_attitude", "string"),     # FRIENDLY | HOSTILE | null
+    ("approach_type", "string"),     # SOLICITED | UNSOLICITED | null
     ("competing_bid", "boolean"),
     ("regulatory_approvals_required", "boolean"),
     ("has_go_shop", "boolean"),
@@ -1393,6 +1395,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.financials_currency,
                se.consideration_components,
                se.includes_earnout, se.hostile, se.competing_bid,
+               se.deal_attitude, se.approach_type,
                se.regulatory_approvals_required,
                se.has_go_shop, se.go_shop_period_days,
                se.target_fee_amount, se.target_fee_percentage,
@@ -1681,6 +1684,8 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "consideration_components",
     "includes_earnout",
     "hostile",
+    "deal_attitude",
+    "approach_type",
     "competing_bid",
     "regulatory_approvals_required",
     "has_go_shop",
@@ -2048,6 +2053,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("consideration_components"),
                     field_values.get("includes_earnout"),
                     field_values.get("hostile"),
+                    field_values.get("deal_attitude"),
+                    field_values.get("approach_type"),
                     field_values.get("competing_bid"),
                     field_values.get("regulatory_approvals_required"),
                     field_values.get("has_go_shop"),

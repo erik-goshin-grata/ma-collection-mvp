@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.5 (V2 alignment)
+**Version:** 0.6 (V3 attitude/approach split)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -18,7 +18,7 @@ Extract fields that are frequently absent, inconsistently stated, or require nua
 Three field groups:
 1. **Advisors** — financial and legal advisors on either side.
 2. **Consideration components** — the composition of deal consideration (cash / stock / earnout / etc.) as an array of components. The orchestrator derives a single `consideration_type` classification downstream from these components.
-3. **Deal characteristic flags** — deal features that are NOT derivable from the consideration array. Termination fees (split by party), go-shop, earnout presence, hostile nature, regulatory approvals.
+3. **Deal characteristic flags** — deal features that are NOT derivable from the consideration array. Termination fees (split by party), go-shop, earnout presence, board posture and how the offer arrived, competing bids, regulatory approvals.
 
 Runs on every row where high-confidence extraction completed.
 
@@ -157,8 +157,29 @@ Extract features of the deal that are not directly derivable from the considerat
 Earnout presence:
 - includes_earnout — boolean: true if any earnout or CVR component is present. (Yes, this is derivable from the components array, but it's a prominent enough feature that we capture it explicitly for easy filtering.)
 
-Hostile / competitive signals:
-- hostile — boolean: true if the deal is described as hostile, unsolicited, or subject to a proxy contest
+Attitude / approach / competitive signals:
+
+These are three independent facts. Do not let one imply another — a transaction may be
+unsolicited and also friendly or board-recommended.
+
+- deal_attitude — enum or null: FRIENDLY | HOSTILE | null. The target board's posture
+  toward the approach.
+    FRIENDLY requires positive evidence that the target or target board supports,
+      recommends, approves, or has agreed to the transaction — e.g. "the Board unanimously
+      recommends", "entered into a definitive agreement", "the Board approved".
+      Do NOT infer FRIENDLY merely because discussions or negotiations occurred.
+    HOSTILE when the target or target board rejects the bid or proposal and the bidder
+      continues with a new or improved unsolicited bid, or when the source explicitly
+      characterises the bid as hostile.
+    null otherwise. Absence of hostile evidence is NOT FRIENDLY.
+- approach_type — enum or null: SOLICITED | UNSOLICITED | null. How the approach arose.
+    UNSOLICITED when the source clearly states or establishes an unsolicited bid or
+      proposal.
+    SOLICITED when the source clearly states or establishes a solicited process — a sale
+      process, auction, strategic review or outreach, or an invitation to bid.
+    null otherwise. null is a first-class outcome and will be the most common one.
+    Do not infer either value from the absence of the other.
+    approach_type is independent of deal_attitude.
 - competing_bid — boolean: true if a competing or "topping" bid is referenced
 
 Regulatory:
@@ -208,7 +229,8 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   ],
   "flags": {
     "includes_earnout": true,
-    "hostile": false,
+    "deal_attitude": null,
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -269,7 +291,8 @@ Extract advisors, consideration components, and deal characteristic flags.
   ],
   "flags": {
     "includes_earnout": false,
-    "hostile": false,
+    "deal_attitude": null,
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -327,7 +350,8 @@ Output:
   ],
   "flags": {
     "includes_earnout": false,
-    "hostile": false,
+    "deal_attitude": "FRIENDLY",
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -368,7 +392,8 @@ Output:
   ],
   "flags": {
     "includes_earnout": true,
-    "hostile": false,
+    "deal_attitude": null,
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -407,7 +432,8 @@ Output:
   ],
   "flags": {
     "includes_earnout": false,
-    "hostile": false,
+    "deal_attitude": "FRIENDLY",
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": true
   },
@@ -447,7 +473,8 @@ Output:
   ],
   "flags": {
     "includes_earnout": true,
-    "hostile": false,
+    "deal_attitude": null,
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -490,7 +517,8 @@ Output:
   ],
   "flags": {
     "includes_earnout": true,
-    "hostile": false,
+    "deal_attitude": "FRIENDLY",
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -527,7 +555,8 @@ Output:
   "consideration_components": [],
   "flags": {
     "includes_earnout": false,
-    "hostile": false,
+    "deal_attitude": null,
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -543,6 +572,183 @@ Output:
   "prompt_version": "low_confidence_extraction:0.4"
 }
 ```
+
+---
+
+**Example 7 — Unsolicited approach, board evaluating (real source):**
+
+*Source: Business News Australia, 18 August 2026 — "TPG swoops on EQT Holdings with $658m
+takeover bid after First Guardian fallout hammers shares."
+`businessnewsaustralia.com/articles/tpg-swoops-on-eqt-holdings-with-658m-takeover-bid-after-first-guardian-fallout-hammers-shares.html`
+Body text below is **verbatim** from the source, including its own typo ("First Guarrdian")
+and grammar — real releases are not clean, and the extraction must not depend on their being so.*
+
+Input:
+```
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
+DEAL VALUE: 657700000 AUD (TRANSACTION_VALUE)
+
+TITLE: TPG swoops on EQT Holdings with $658m takeover bid after First Guardian fallout hammers shares.
+BODY: Private equity group TPG Global has swooped on the depressed share price of EQT Holdings (ASX: EQT) in the wake of the First Guarrdian collapse to launch a takeover $657.7 million takeover bid for the Melbourne-based financial services group.
+
+The unsolicited offer for 100 per cent of the company is priced a $24.55 cash per share, a healthy premium to the company's closing price of $17.31 yesterday.
+
+The non-binding bid lands after a torrid stretch for EQT's share price, which plunged from $34.50 a year ago to a low of $14.70 earlier this year as the company grappled with the fallout from the First Guardian Master Fund collapse.
+
+TPG's proposal is conditional on completion of due diligence as well as clearances from the Foreign Investment Review Board, the Australian Competition and Consumer Commission and the Australian Prudential Regulation Authority.
+
+"TPG has requested a period of exclusivity to conduct due diligence and negotiate transaction documentation," says EQT.
+
+"The board of EQT, together with its advisers, will evaluate the proposal and will update shareholders in due course."
+```
+
+Output:
+```json
+{
+  "advisors": [],
+  "consideration_components": [
+    {"form": "CASH", "amount": 657700000, "percentage": 100.0, "description": "$24.55 cash per share for 100% of the company"}
+  ],
+  "flags": {
+    "includes_earnout": false,
+    "deal_attitude": null,
+    "approach_type": "UNSOLICITED",
+    "competing_bid": false,
+    "regulatory_approvals_required": true
+  },
+  "go_shop": {"has_go_shop": false, "go_shop_period_days": null},
+  "termination_fees": {
+    "target_fee_amount": null,
+    "target_fee_percentage": null,
+    "acquirer_fee_amount": null,
+    "acquirer_fee_percentage": null
+  },
+  "model_confidence": "HIGH",
+  "notes": "approach_type UNSOLICITED on the source's own word. deal_attitude null: the board will evaluate the proposal and has not supported, recommended, approved or agreed to it."
+}
+```
+
+**Why this example matters — the two dimensions are independent.**
+
+`approach_type = UNSOLICITED` and `deal_attitude = null` on the same transaction.
+
+- **Unsolicited is not hostile.** Nothing here is rejected or opposed. The target has not taken
+  a posture at all — it says it "will evaluate the proposal". Setting `deal_attitude = HOSTILE`
+  because the offer was unsolicited would be reading one dimension off the other, which is
+  exactly the conflation this version removes.
+- **Nor is it friendly.** Requesting exclusivity to "negotiate transaction documentation" is a
+  negotiation, not agreement. Per the rule above, discussions and negotiations do **not**
+  support `FRIENDLY`; only support, recommendation, approval or agreement does.
+- **`advisors` is empty** even though the source says the board is acting "together with its
+  advisers". No firm is named, so there is nothing to extract — an unnamed adviser is not an
+  advisor record.
+- **`regulatory_approvals_required` is true** because FIRB, the ACCC and APRA are called out
+  by name.
+
+---
+
+**Examples 8 and 9 — the same bidder, the same target, two weeks apart (real source).**
+
+*Read these as a pair. The approach does not change between them; the board's posture does.
+Body text is the excerpt as supplied, ellipses included.*
+
+**Example 8 — Unsolicited proposal, board will review (Seer, 13 April 2026):**
+
+Input:
+```
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
+DEAL VALUE: null null (UNDISCLOSED)
+
+TITLE: Seer Confirms Receipt of Unsolicited Proposal
+BODY: Seer... confirmed that it has received a highly contingent, non-binding and unsolicited proposal from Bradley L. Radoff and Michael Torok... Consistent with its fiduciary duties... the Seer Board of Directors will carefully review and consider the Proposal...
+```
+
+Output:
+```json
+{
+  "advisors": [],
+  "consideration_components": [],
+  "flags": {
+    "includes_earnout": false,
+    "deal_attitude": null,
+    "approach_type": "UNSOLICITED",
+    "competing_bid": false,
+    "regulatory_approvals_required": false
+  },
+  "go_shop": {"has_go_shop": false, "go_shop_period_days": null},
+  "termination_fees": {
+    "target_fee_amount": null,
+    "target_fee_percentage": null,
+    "acquirer_fee_amount": null,
+    "acquirer_fee_percentage": null
+  },
+  "model_confidence": "HIGH",
+  "notes": "approach_type UNSOLICITED on the source's own word. deal_attitude null: a board that will review and consider a proposal has taken no posture — reviewing is neither support nor opposition."
+}
+```
+
+**Example 9 — The same proposal, revised and rejected (Seer, 27 April 2026):**
+
+Input:
+```
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: AMENDED
+DEAL VALUE: null null (UNDISCLOSED)
+
+TITLE: Seer Board Rejects Revised Unsolicited Proposal
+BODY: Seer... announced that its Board of Directors has thoroughly reviewed and unanimously rejected the revised unsolicited, non-binding proposal...
+```
+
+Output:
+```json
+{
+  "advisors": [],
+  "consideration_components": [],
+  "flags": {
+    "includes_earnout": false,
+    "deal_attitude": "HOSTILE",
+    "approach_type": "UNSOLICITED",
+    "competing_bid": false,
+    "regulatory_approvals_required": false
+  },
+  "go_shop": {"has_go_shop": false, "go_shop_period_days": null},
+  "termination_fees": {
+    "target_fee_amount": null,
+    "target_fee_percentage": null,
+    "acquirer_fee_amount": null,
+    "acquirer_fee_percentage": null
+  },
+  "model_confidence": "HIGH",
+  "notes": "deal_attitude HOSTILE: the board unanimously rejected the proposal and the bidder continued with a further improved unsolicited proposal. approach_type stays UNSOLICITED — a revised proposal from the same unsolicited bidder is still unsolicited."
+}
+```
+
+**What the pair teaches.**
+
+`approach_type` is **identical** in both — `UNSOLICITED`. `deal_attitude` moves from `null` to
+`HOSTILE`. Same bidder, same target, two weeks apart.
+
+- **`UNSOLICITED` does not imply `HOSTILE`.** On 13 April the proposal was already unsolicited
+  and the board had taken no posture. Had `deal_attitude` been read off the approach, Example 8
+  would have been labelled hostile two weeks before the board decided anything. V2's single
+  `hostile` boolean did exactly that: its definition made "unsolicited" sufficient to set the bit.
+- **A board reviewing an offer is not a posture.** "Will carefully review and consider",
+  offered "consistent with its fiduciary duties", is what a board is obliged to do on receipt of
+  any proposal. It is not support, and it is not opposition.
+- **Rejection plus a continuing bidder establishes `HOSTILE`** — "thoroughly reviewed and
+  unanimously rejected", with the bidder returning with a further improved unsolicited proposal.
+- **The approach label does not move.** A revised proposal from the same unsolicited bidder is
+  still unsolicited. Do not relabel `approach_type` because the posture resolved.
+
+**Still missing: a worked `SOLICITED` example.** No source establishing a target-initiated
+process is available yet. Note that "strategic review" alone does not qualify — a review of
+operations is not a solicitation of buyers; the language must establish that the **target**
+initiated a process to find one.
 
 ---
 
@@ -570,3 +776,4 @@ Output:
 | 0.3 | 2026-04-23 | Added RESPONSE FORMAT block inline in system prompt section to ensure model receives schema definition at load time. |
 | 0.4 | 2026-05-02 | Added EARNOUT and CVR component-type guidance to consideration_components extraction. Components are additive to primary consideration; do not change consideration_type. Added few-shot examples for both (Examples 4, 5). Updated RESPONSE FORMAT to show earnout component. |
 | 0.5 | 2026-07-28 | V2 alignment. Input schema updated: `deal_type` → `v2_event_type` (deal_type retained as alias); `event_type` → `event_history_type` (ANNOUNCED/CLOSED/AMENDED/TERMINATED); `target_type` values lowercased (V2 vocabulary). User template updated. All examples updated to V2 field names. Note: LC extraction logic is deal-type-agnostic — advisors, consideration components, and flags are extracted regardless of whether the event is M&A or funding. No taxonomy changes required. |
+| 0.6 | 2026-08-20 | **V3 attitude/approach split (§T11).** The fused `hostile` boolean is removed and replaced by two independent nullable dimensions: `deal_attitude` (`FRIENDLY`/`HOSTILE`/null) and `approach_type` (`SOLICITED`/`UNSOLICITED`/null). `hostile` conflated three facts — posture, approach and proxy contest — and its false-by-default handling made "unstated" indistinguishable from "friendly"; both new fields are null when the source does not establish the fact, and **absence of hostile evidence is not `FRIENDLY`**. `FRIENDLY` requires positive support/recommendation/agreement evidence, not merely that negotiations occurred. **Proxy contest is deliberately not carried forward** — §T11.1 does not promote it to V3, and `hostile`'s third clause was its only capture. `competing_bid` is unchanged and remains a boolean. Examples set `deal_attitude` only where the example's own body establishes posture. **Example 7 added** from real source text (Business News Australia, TPG/EQT Holdings, 2026-08-18), demonstrating `approach_type = UNSOLICITED` with `deal_attitude = null` — unsolicited is neither hostile nor friendly, and a board that "will evaluate" has not agreed. **Examples 8 and 9 added** from real source text (Seer, 13 and 27 April 2026) as a deliberate pair: the same unsolicited bidder, `deal_attitude` moving from null to `HOSTILE` while `approach_type` stays `UNSOLICITED` — the counterexample that separates approach from posture. `approach_type` is set only when the source clearly states or establishes an unsolicited bid or a solicited process; **neither value is inferred from the absence of the other**, and null is a first-class outcome and the most common one. `HOSTILE` is rejection with a continuing bidder, or an explicitly hostile characterisation. **A worked `SOLICITED` example is still pending** — no source establishing a target-initiated process is available yet. |

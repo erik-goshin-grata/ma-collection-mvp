@@ -8,7 +8,8 @@ gone through Stage 5/6 (e.g., resume after partial run).
 
 Populates on success (status → LC_EXTRACTED):
   - consideration_components (JSON array on staging_extraction)
-  - flags: includes_earnout, hostile, competing_bid, regulatory_approvals_required
+  - flags: includes_earnout, deal_attitude, approach_type, competing_bid,
+    regulatory_approvals_required
   - go_shop: has_go_shop, go_shop_period_days
   - termination_fees: target_fee_amount/percentage, acquirer_fee_amount/percentage
   - lc_prompt_version
@@ -24,6 +25,8 @@ Schema validation:
   - go_shop.has_go_shop=false with go_shop_period_days non-null → SCHEMA_VIOLATION
   - Per-advisor: invalid type or advised_party values are skipped with a warning
     rather than failing the entire row
+  - deal_attitude / approach_type: null is valid and meaningful (fact not established);
+    an out-of-vocabulary non-null value is a SCHEMA_VIOLATION
 
 Spec references: prompts/low_confidence_extraction.md,
                  specs/pipeline.md §2 (Stage 7)
@@ -42,7 +45,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "low_confidence_extraction"
-_VERSION = "0.5"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -51,6 +54,10 @@ _REQUIRED_KEYS = frozenset({
 })
 _VALID_ADVISOR_TYPES = frozenset({"FINANCIAL", "LEGAL", "OTHER"})
 _VALID_ADVISED_PARTIES = frozenset({"TARGET", "ACQUIRER", "PARENT_SELLER", "BOTH", "UNKNOWN"})
+# V3 §T11 — two independent nullable dimensions replacing the fused `hostile` boolean.
+# null is a valid, meaningful value for both: the source did not establish the fact.
+_VALID_DEAL_ATTITUDE = frozenset({"FRIENDLY", "HOSTILE"})
+_VALID_APPROACH_TYPE = frozenset({"SOLICITED", "UNSOLICITED"})
 _SLEEP = 1.0  # conservative Opus throttle
 
 
@@ -69,6 +76,12 @@ def _validate(result: dict) -> str | None:
     go_shop = result.get("go_shop") or {}
     if not go_shop.get("has_go_shop", False) and go_shop.get("go_shop_period_days") is not None:
         return "go_shop_period_days must be null when has_go_shop is false"
+    flags = result.get("flags") or {}
+    for key, vocab in (("deal_attitude", _VALID_DEAL_ATTITUDE),
+                       ("approach_type", _VALID_APPROACH_TYPE)):
+        value = flags.get(key)
+        if value is not None and value not in vocab:
+            return f"invalid {key}: {value!r}"
     return None
 
 
@@ -203,7 +216,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 status = 'LC_EXTRACTED',
                 consideration_components = ?,
                 includes_earnout = ?,
-                hostile = ?,
+                deal_attitude = ?,
+                approach_type = ?,
                 competing_bid = ?,
                 regulatory_approvals_required = ?,
                 has_go_shop = ?,
@@ -221,7 +235,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             (
                 json.dumps(result.get("consideration_components") or []),
                 1 if flags.get("includes_earnout") else 0,
-                1 if flags.get("hostile") else 0,
+                # V3 §T11: three-state. None must stay None — "not established" is not
+                # "friendly". Do NOT coerce these to a default the way the flags below are.
+                flags.get("deal_attitude"),
+                flags.get("approach_type"),
+                # competing_bid stays a coerced boolean by decision: it names a single fact
+                # whose prompt contract is "false otherwise", unlike the two fields above.
                 1 if flags.get("competing_bid") else 0,
                 1 if flags.get("regulatory_approvals_required") else 0,
                 1 if go_shop.get("has_go_shop") else 0,
