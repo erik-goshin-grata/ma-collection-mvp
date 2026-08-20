@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.10 (spinco removed; target_type is purely structural)
+**Version:** 0.11 (transaction form alone does not determine target_type)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -261,6 +261,12 @@ For all deal types that have a target, classify target_type:
   rather than a going-concern unit. When in doubt between business_unit and
   assets: if the target has employees, customers, and revenue as a unit, use
   business_unit; if it's a discrete asset set being transferred, use assets.
+
+Transaction form alone does not determine target type. Do not classify a transaction as
+`assets` solely because the source calls it an "asset purchase" or says the buyer acquired
+"the assets of" a company. Use the full source to determine whether the transaction is for
+a discrete asset or asset set (`assets`) or for an operating business (`business_unit`).
+Researcher review can resolve genuinely ambiguous cases.
 
 There is no `spinco` value. SPIN_OFF and SPLIT_OFF are recorded on v2_event_type; they
 say what kind of event happened, and target_type independently answers what structural
@@ -997,3 +1003,4 @@ Output:
 | 0.8 | 2026-08-18 | PIPE added as a recognized, unprofiled type (11 → 12 types; UNKNOWN renumbered to 12). Used only when the source explicitly identifies the structure by the term "PIPE" or the phrase "private investment in public equity" — a recognition, not an inference. Carries an explicit negative list (private placement, convertible notes or preferred, registered direct, ATM/underwritten offering) so a new bucket does not become a catch-all for private capital into public issuers; those still route to UNKNOWN. PIPE is terminal: Stage 3 stamps `RECOGNIZED_NOT_PROFILED` and no extraction, clustering or aggregation follows, so no round_size, transaction_size or valuation is derived. See `lib/pipe_recognition.py`. |
 | 0.9 | 2026-08-20 | **Merger family becomes `combination_structure` (V3 §T2).** `MERGER` and `REVERSE_MERGER` are removed as `v2_event_type` values and are now **invalid output**; both are structures of an acquisition, not separate events. New field `combination_structure` ∈ `MERGER` / `REVERSE_MERGER` / `DE_SPAC` / null, hierarchical (`DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`), valid **only** when `v2_event_type = ACQUISITION` and null for every other type — which is what keeps Spin/Split, JV, Recap, Funding, PIPE and UNKNOWN untouched by this change. Return the most specific supported value; ambiguity resolves upward. **A share or asset purchase does not establish a combination structure** — absent other evidence it is null. Merger-of-equals is unchanged: still extracted downstream from the source, never signalled here. The `REVERSE_MERGER` target_type rule re-keys onto `combination_structure`. Examples 15-17 added (merger, de-SPAC, share-purchase null). |
 | 0.10 | 2026-08-20 | **`spinco` removed from `target_type` (V3 §T3).** It named an event/role, not a structure, and duplicated what `v2_event_type` already says. `target_type` now answers one question consistently — what structural thing is being transacted — so a SPIN_OFF or SPLIT_OFF is typed on the distributed entity's own merits: `subsidiary`, `business_unit`, `assets`, or null when the source does not establish it. **Not `standalone_company`** merely because it becomes standalone after the distribution. Examples 4 and 5 re-typed to `subsidiary`; Example 18 added for the division case. New output naming `spinco` is a schema violation. |
+| 0.11 | 2026-08-20 | **Transaction form alone does not determine `target_type`.** Gate 2 established one narrow failure: the classifier selected `assets` from asset-purchase wording ("acquired the assets of") on a source whose substance was the acquisition of a continuing operating business. One principle added to TARGET TYPE — do not classify as `assets` **solely** because of transaction-form language; read the full source to decide between a discrete asset set and an operating business. Deliberately minimal: no parsing rule, no evidence checklist, no decision tree, no new values, and the four-value taxonomy and its definitions are otherwise unchanged. "Solely" is load-bearing — the point is to remove a mechanical cue, not to install another one. Researcher review remains available for genuinely ambiguous cases. |
