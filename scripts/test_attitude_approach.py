@@ -29,11 +29,25 @@ model against real source text, which is a separate gate.
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import importlib
+import sqlite3 as _sqlite3
+import tempfile
+from datetime import datetime, timezone
+
+import config as config_module
+import stages.aggregate as aggregate
+from db import get_connection, init_db
+from lib.observation_writer import (
+    LC_SCALAR_FIELDS,
+    write_staging_observations_for_extraction,
+)
 from stages.low_confidence_extract import (
     _VALID_APPROACH_TYPE,
     _VALID_DEAL_ATTITUDE,
@@ -274,6 +288,150 @@ def _test_stage_source_guard(failures: list[str]) -> None:
                         "decision, not a three-state field")
 
 
+
+# ---------------------------------------------------------------------------
+# 6. The observation boundary, end to end
+#
+# S-A originally shipped without this, and a real defect went out on f5f5b1b: Stage 7
+# stored both fields correctly, but `LC_SCALAR_FIELDS` still named `hostile` and neither
+# new field, so no observation was ever written for them. Stage 9 reads observations by
+# default (DEFAULT_AGGREGATION_READ_SOURCE == "observation"), so canonical
+# transaction_record.deal_attitude / approach_type were NULL for every transaction no
+# matter what the model extracted.
+#
+# The Gate 1 suite passed throughout, because it asserted only that aggregate.py DECLARED
+# the columns and that the upsert placeholders aligned — the write half of a two-sided
+# contract. This test walks the whole chain instead:
+#
+#     Stage 7 stored value -> transaction_field_observation -> Stage 9 (observation read)
+#     -> canonical transaction_record value
+#
+# Run it against f5f5b1b and it fails at the observation step.
+# ---------------------------------------------------------------------------
+
+_REQUIRED_ENV = {
+    "ANTHROPIC_API_KEY": "test-key",
+    "SEC_API_KEY": "test-key",
+    "OPERATOR_CONTACT_EMAIL": "test@example.test",
+}
+_TXN_ID = "tc_attitude_boundary"
+
+
+def _default_read_source():
+    """The real default, taken from config — never hardcoded to 'observation' here."""
+    saved = {k: os.environ.get(k) for k in set(_REQUIRED_ENV) | {"AGGREGATION_READ_SOURCE"}}
+    try:
+        os.environ.pop("AGGREGATION_READ_SOURCE", None)
+        os.environ.update(_REQUIRED_ENV)
+        module = importlib.reload(config_module)
+        return module.load_config().aggregation_read_source
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        importlib.reload(config_module)
+
+
+def _test_observation_boundary(failures: list[str]) -> None:
+    # The field list is the thing that broke. Assert it directly as well as behaviourally,
+    # so a regression names itself instead of surfacing as a mystery NULL.
+    for field in ("deal_attitude", "approach_type"):
+        if field not in LC_SCALAR_FIELDS:
+            failures.append(f"observation/LC_SCALAR_FIELDS: {field} missing — Stage 7 will "
+                            f"store it but write no observation, and Stage 9 reads "
+                            f"observations by default")
+    if "hostile" in LC_SCALAR_FIELDS:
+        failures.append("observation/LC_SCALAR_FIELDS: `hostile` is still observed, but "
+                        "Stage 7 no longer writes that column (§T11)")
+
+    # Stage 7's linkage to the writer. Without include_lc=True the list above is moot.
+    lc_src = open(LC_STAGE_PATH, encoding="utf-8").read()
+    if "include_lc=True" not in lc_src:
+        failures.append("observation: Stage 7 does not request include_lc=True")
+
+    read_source = _default_read_source()
+    tmpdir = tempfile.mkdtemp(prefix="attitude_boundary_")
+    db_path = os.path.join(tmpdir, "t.db")
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO source_raw (source_type, source_tier, url, title, published_date,"
+            " clean_text, source_status, fetched_at)"
+            " VALUES ('PR_NEWSWIRE','T1','u://attitude','t','2026-08-18','body','RELEVANT',?)",
+            (now,),
+        )
+        srid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # Post-Stage-7, post-Stage-8 state: LC values stored, cluster assigned.
+        conn.execute(
+            """INSERT INTO staging_extraction (
+                   source_raw_id, status, deal_type, v2_event_type, event_history_type,
+                   target_status, target_type, target_type_v2, target_name, acquirer_name,
+                   acquirer_type, acquirer_type_v2, announced_date, announced_date_precision,
+                   financials_disclosure_status, model_confidence, dt_prompt_version,
+                   hc_prompt_version, lc_prompt_version, transaction_cluster_id,
+                   deal_attitude, approach_type, competing_bid
+               ) VALUES (?, 'CLUSTERED', 'ACQUISITION', 'ACQUISITION', 'ANNOUNCED',
+                         'PUBLIC', 'standalone_company', 'standalone_company', 'T Inc', 'A Inc',
+                         'unknown', 'unknown', '2026-08-18', 'exact', 'UNKNOWN', 'HIGH',
+                         '0.8', '0.18', ?, ?, 'HOSTILE', 'UNSOLICITED', 1)""",
+            (srid, _VERSION, _TXN_ID),
+        )
+        eid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+        # The production observation write, with the production flags.
+        write_staging_observations_for_extraction(
+            conn, eid, observation_source_stage="LC_EXTRACT",
+            include_stage3=True, include_hc=True, include_lc=True,
+        )
+        conn.commit()
+
+        observed = {
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT field_name FROM transaction_field_observation "
+                "WHERE transaction_id = ?", (_TXN_ID,)
+            )
+        }
+        for field in ("deal_attitude", "approach_type"):
+            if field not in observed:
+                failures.append(f"observation: no transaction_field_observation row for "
+                                f"{field} — Stage 9 cannot read what was never observed")
+        if "competing_bid" not in observed:
+            failures.append("observation: competing_bid lost its observation — existing "
+                            "behaviour must be preserved")
+
+        def _no_conflict(field_name, *_a, **_kw):
+            raise AssertionError(f"unexpected aggregation conflict on {field_name!r}")
+
+        run_cfg = SimpleNamespace(log_level="ERROR", aggregation_read_source=read_source)
+        original = aggregate._call_agg_prompt
+        aggregate._call_agg_prompt = _no_conflict
+        try:
+            aggregate.run(conn, run_cfg, "attitude_boundary_test")
+        finally:
+            aggregate._call_agg_prompt = original
+
+        row = conn.execute(
+            "SELECT deal_attitude, approach_type, competing_bid FROM transaction_record "
+            "WHERE transaction_id = ?", (_TXN_ID,)
+        ).fetchone()
+        if row is None:
+            failures.append("observation: Stage 9 produced no transaction_record row")
+        else:
+            _assert_equal(failures, f"canonical/deal_attitude (read_source={read_source})",
+                          row["deal_attitude"], "HOSTILE")
+            _assert_equal(failures, f"canonical/approach_type (read_source={read_source})",
+                          row["approach_type"], "UNSOLICITED")
+            _assert_equal(failures, "canonical/competing_bid", row["competing_bid"], 1)
+    finally:
+        conn.close()
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def main() -> int:
     failures: list[str] = []
     _test_validator(failures)
@@ -281,6 +439,7 @@ def main() -> int:
     _test_aggregation_wiring(failures)
     _test_prompt_contract(failures)
     _test_stage_source_guard(failures)
+    _test_observation_boundary(failures)
 
     if failures:
         for failure in failures:

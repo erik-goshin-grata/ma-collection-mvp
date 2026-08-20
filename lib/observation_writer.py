@@ -80,9 +80,14 @@ HC_FIELDS = (
     "financials_disclosure_status",
 )
 
+# `hostile` was removed here on 2026-08-20 (V3 §T11). Stage 7 no longer writes that
+# column, so observing it produced a permanent NULL. Its replacements are the two typed
+# dimensions below. This governs NEW Stage 7 observation writing only — the historical
+# `hostile` column and existing rows are untouched.
 LC_SCALAR_FIELDS = (
     "includes_earnout",
-    "hostile",
+    "deal_attitude",
+    "approach_type",
     "competing_bid",
     "regulatory_approvals_required",
     "has_go_shop",
