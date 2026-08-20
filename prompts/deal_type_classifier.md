@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.8 (PIPE as a recognized, unprofiled type)
+**Version:** 0.9 (merger family becomes combination_structure)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -64,57 +64,52 @@ DEAL TYPES (v2_event_type):
    Parent's business unit or subsidiary by a third party. Default type for
    "Company X acquires Company Y" when no more specific type fits.
 
-2. MERGER — Two entities combine into a single surviving entity. Distinct from
-   ACQUISITION only when both parties frame the transaction as a combination of
-   equals and the structural language emphasizes combination rather than one
-   party buying the other. When unclear, default to ACQUISITION. Two-step
-   merger structures (tender offer followed by squeeze-out merger) are
-   classified by economic substance — usually ACQUISITION.
+   ACQUISITION is the broad event and now also covers transactions previously
+   typed MERGER or REVERSE_MERGER, including de-SPAC business combinations. The
+   structure through which the acquisition is effected is recorded separately in
+   `combination_structure` — see COMBINATION STRUCTURE below. Do NOT return
+   MERGER or REVERSE_MERGER as a deal type; they are no longer valid values.
 
-3. SPIN_OFF — A Parent company distributes shares of a subsidiary (SpinCo) to
+2. SPIN_OFF — A Parent company distributes shares of a subsidiary (SpinCo) to
    its existing shareholders pro-rata. No third-party buyer. No cash
    consideration to the Parent. Parent retains a residual minority stake
    (typically capped at 20% for IRS Section 355 tax-free treatment). Default
    when the spin/split type is ambiguous.
 
-4. SPLIT_OFF — A Parent company distributes shares of a subsidiary to
+3. SPLIT_OFF — A Parent company distributes shares of a subsidiary to
    shareholders who elect to tender their Parent shares in exchange (exchange
    offer mechanism). Parent distributes 100% of SpinCo, retaining zero equity.
    Identifiable by language like "exchange offer," "tender Parent shares," or
    "election period." In prior versions this was SPIN_SPLIT with
    distribution_mechanism = EXCHANGE_OFFER.
 
-5. REVERSE_MERGER — A private operating company merges with a public shell or
-   smaller public company, resulting in the private company becoming publicly
-   traded without a traditional IPO. Includes SPAC mergers (De-SPAC).
-
-6. JOINT_VENTURE — Two or more parties form a new, jointly owned entity to
+4. JOINT_VENTURE — Two or more parties form a new, jointly owned entity to
    pursue a business activity. Distinct from ACQUISITION because no existing
    entity is being purchased.
 
-7. RECAPITALIZATION — A company restructures its capital structure without a
+5. RECAPITALIZATION — A company restructures its capital structure without a
    change of control. Includes dividend recaps, equity recaps, leveraged
    recaps, and sponsor recaps. When deal_type = RECAPITALIZATION, also
    populate recap_type (see discriminators below).
 
-8. VC_ROUND — A priced or unpriced venture capital funding round. Seed through
+6. VC_ROUND — A priced or unpriced venture capital funding round. Seed through
    Series N, angel, crowdfunding, convertible notes as primary funding
    instrument. The company raising capital is the target; the investors are
    the capital providers. No change of control.
 
-9. GROWTH_EQUITY — A growth equity investment by a growth equity or late-stage
+7. GROWTH_EQUITY — A growth equity investment by a growth equity or late-stage
     investor. Distinct from VC_ROUND by investor type and company maturity:
     growth equity investors (e.g., General Atlantic, Summit Partners, TA
     Associates) taking a minority stake in a profitable or near-profitable
     company. When unclear between VC_ROUND and GROWTH_EQUITY, use VC_ROUND.
 
-10. VENTURE_DEBT — A debt facility to a venture-backed or growth-stage company.
+8. VENTURE_DEBT — A debt facility to a venture-backed or growth-stage company.
     Includes venture lending, revenue-based financing, convertible notes used
     primarily as debt instruments, and bridge facilities to venture-backed
     companies. Distinct from RECAPITALIZATION by company stage (early/growth
     stage, not mature/PE-backed).
 
-11. PIPE — A private investment in public equity: privately negotiated primary
+9. PIPE — A private investment in public equity: privately negotiated primary
     issuance of already-public equity (or securities convertible into it) to
     selected investors, outside a registered public offering.
 
@@ -136,7 +131,7 @@ DEAL TYPES (v2_event_type):
     round size, valuation, or consideration. Return the type, the parties you can
     identify, and notes. Getting the type right is the whole job.
 
-12. UNKNOWN — The release clearly describes a transaction event but the type
+10. UNKNOWN — The release clearly describes a transaction event but the type
     cannot be determined from the text alone.
 
 OUT OF SCOPE (not classifiable under this prompt):
@@ -208,6 +203,46 @@ recap_type:
 
 For all other deal types, recap_type must be null.
 
+COMBINATION STRUCTURE:
+
+combination_structure records how an acquisition is structured. It applies ONLY when
+v2_event_type = ACQUISITION; for every other deal type it must be null.
+
+- MERGER — the transaction is explicitly structured or effected as a merger or
+  combination of the two entities. Merger-of-equals framing is NOT required: an
+  ordinary acquisition effected through a merger is MERGER.
+- REVERSE_MERGER — a private operating company merges with a public shell or smaller
+  public company, becoming publicly traded without a traditional IPO.
+- DE_SPAC — a REVERSE_MERGER in which the public vehicle is a special purpose
+  acquisition company. Often described as a "business combination" with a SPAC.
+- null — the source does not establish any of the three.
+
+The values are HIERARCHICAL, not three peers: DE_SPAC is a kind of REVERSE_MERGER,
+which is a kind of MERGER.
+
+- Return the MOST SPECIFIC value the source supports. A SPAC business combination is
+  DE_SPAC, not REVERSE_MERGER.
+- Ambiguity resolves UPWARD. A reverse merger with no established SPAC shell stays
+  REVERSE_MERGER; a combination with no established reverse-merger structure stays
+  MERGER.
+- Downstream answers broader questions by implication, never by equality, so returning
+  the most specific value loses nothing.
+
+What does NOT establish a combination structure:
+
+- A share or stock purchase agreement, or an asset purchase agreement. Absent separate
+  merger, reverse-merger or de-SPAC evidence, these are combination_structure = null.
+- The mere fact that the transaction is large, friendly, or between similar-sized
+  parties.
+
+Two-step structures (a tender offer followed by a squeeze-out merger) remain classified
+by economic substance — usually ACQUISITION. Set combination_structure = MERGER when the
+source establishes the second-step merger; the offer mechanics themselves are recorded
+elsewhere and are not this field's concern.
+
+Merger-of-equals is a separate characteristic extracted downstream from the source, not
+by this prompt. Do not attempt to signal it here.
+
 TARGET TYPE:
 
 For all deal types that have a target, classify target_type:
@@ -237,7 +272,7 @@ When target_type is subsidiary, business_unit, or assets, parent_seller must
 exist (extracted by a later prompt). Flag in notes if the Parent is ambiguous.
 
 For JOINT_VENTURE, target_type is null.
-For REVERSE_MERGER, target_type = standalone_company unless stated otherwise.
+For combination_structure = REVERSE_MERGER or DE_SPAC, target_type = standalone_company unless stated otherwise.
 For minority stake purchases and funding rounds, use target_type =
 standalone_company unless stated otherwise.
 
@@ -306,6 +341,7 @@ code fences, no preamble.
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -351,6 +387,7 @@ target status.
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -368,7 +405,8 @@ target status.
 
 | Field | Type | Values |
 | :--- | :--- | :--- |
-| `v2_event_type` | enum | `ACQUISITION`, `MERGER`, `SPIN_OFF`, `SPLIT_OFF`, `REVERSE_MERGER`, `JOINT_VENTURE`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `PIPE`, `UNKNOWN` |
+| `v2_event_type` | enum | `ACQUISITION`, `SPIN_OFF`, `SPLIT_OFF`, `JOINT_VENTURE`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `PIPE`, `UNKNOWN` |
+| `combination_structure` | enum\|null | `MERGER`, `REVERSE_MERGER`, `DE_SPAC`, `null`. Only when `v2_event_type = ACQUISITION`; null for every other type. Most specific value; ambiguity resolves upward. |
 | `deal_type` | enum | Same as `v2_event_type` — transitional alias, deprecated in future version |
 | `spin_split_type` | enum or null | `SPIN_OFF`, `SPLIT_OFF`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `distribution_mechanism` | enum or null | `PRO_RATA`, `EXCHANGE_OFFER`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
@@ -400,6 +438,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -429,6 +468,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -457,6 +497,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -487,6 +528,7 @@ Output:
 {
   "v2_event_type": "SPIN_OFF",
   "deal_type": "SPIN_OFF",
+  "combination_structure": null,
   "spin_split_type": "SPIN_OFF",
   "distribution_mechanism": "PRO_RATA",
   "recap_type": null,
@@ -516,6 +558,7 @@ Output:
 {
   "v2_event_type": "SPLIT_OFF",
   "deal_type": "SPLIT_OFF",
+  "combination_structure": null,
   "spin_split_type": "SPLIT_OFF",
   "distribution_mechanism": "EXCHANGE_OFFER",
   "recap_type": null,
@@ -545,6 +588,7 @@ Output:
 {
   "v2_event_type": "JOINT_VENTURE",
   "deal_type": "JOINT_VENTURE",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -573,6 +617,7 @@ Output:
 {
   "v2_event_type": "RECAPITALIZATION",
   "deal_type": "RECAPITALIZATION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": "DIVIDEND",
@@ -601,6 +646,7 @@ Output:
 {
   "v2_event_type": "VC_ROUND",
   "deal_type": "VC_ROUND",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -631,6 +677,7 @@ Output:
 {
   "v2_event_type": "GROWTH_EQUITY",
   "deal_type": "GROWTH_EQUITY",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -661,6 +708,7 @@ Output:
 {
   "v2_event_type": "VENTURE_DEBT",
   "deal_type": "VENTURE_DEBT",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -688,6 +736,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -715,6 +764,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -744,6 +794,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -772,6 +823,7 @@ Output:
 {
   "v2_event_type": "ACQUISITION",
   "deal_type": "ACQUISITION",
+  "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
@@ -782,6 +834,89 @@ Output:
   "model_confidence": "HIGH",
   "notes": "Separate later completion release explicitly references a previously announced acquisition.",
   "prompt_version": "deal_type_classifier:0.7"
+}
+```
+
+---
+
+**Example 15 — Acquisition effected through a merger:**
+
+Input:
+```
+TITLE: Acme Corp to Acquire Beta Industries in All-Cash Merger
+BODY: Acme Corp today announced that it has entered into a definitive agreement under which Beta Industries (NASDAQ: BETA) will merge with a wholly owned subsidiary of Acme, with Beta surviving as a wholly owned subsidiary of Acme. Beta shareholders will receive $32.00 per share in cash.
+```
+
+Output:
+```json
+{
+  "v2_event_type": "ACQUISITION",
+  "deal_type": "ACQUISITION",
+  "combination_structure": "MERGER",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "recap_type": null,
+  "target_type": "standalone_company",
+  "event_history_type": "ANNOUNCED",
+  "target_status": "PUBLIC",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "Acquisition effected through a merger. combination_structure = MERGER; merger-of-equals framing is not required and is not claimed here.",
+  "prompt_version": "deal_type_classifier:0.9"
+}
+```
+
+**Example 16 — De-SPAC business combination:**
+
+Input:
+```
+TITLE: Orbit Systems to Become Publicly Traded via Business Combination with Summit Acquisition Corp
+BODY: Orbit Systems, a privately held satellite communications company, and Summit Acquisition Corp (NASDAQ: SMAC), a special purpose acquisition company, today announced a definitive business combination agreement. Upon closing, the combined company will trade on the NASDAQ under a new ticker.
+```
+
+Output:
+```json
+{
+  "v2_event_type": "ACQUISITION",
+  "deal_type": "ACQUISITION",
+  "combination_structure": "DE_SPAC",
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "recap_type": null,
+  "target_type": "standalone_company",
+  "event_history_type": "ANNOUNCED",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "Public vehicle is a SPAC, so the most specific value applies: DE_SPAC, not REVERSE_MERGER. Broader merger questions are answered by implication.",
+  "prompt_version": "deal_type_classifier:0.9"
+}
+```
+
+**Example 17 — Share purchase acquisition establishes no combination structure:**
+
+Input:
+```
+TITLE: Acme Corp Acquires Delta Systems
+BODY: Acme Corp today announced it has acquired Delta Systems through the purchase of all outstanding shares of Delta from its founders. Terms were not disclosed.
+```
+
+Output:
+```json
+{
+  "v2_event_type": "ACQUISITION",
+  "deal_type": "ACQUISITION",
+  "combination_structure": null,
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "recap_type": null,
+  "target_type": "standalone_company",
+  "event_history_type": "ANNOUNCED",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "A share purchase is not a combination structure. Absent merger, reverse-merger or de-SPAC evidence, combination_structure is null.",
+  "prompt_version": "deal_type_classifier:0.9"
 }
 ```
 
@@ -815,3 +950,4 @@ Output:
 | 0.6 | 2026-07-28 | V2 alignment. `deal_type` → `v2_event_type` (deal_type retained as transitional alias). `event_type` → `event_history_type` (eliminates V2 field name collision). SPIN_SPLIT split into SPIN_OFF and SPLIT_OFF as top-level types; SPLIT renamed SPLIT_OFF. RECAPITALIZATION added with recap_type discriminator. VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT added as classifiable types — previously routed to UNKNOWN. target_type values lowercased; spinco added for spin/split targets. ANNOUNCED/CLOSED replace ANNOUNCEMENT/CLOSE in event_history_type. Examples expanded to 14 — added recap (7), VC_ROUND (8), GROWTH_EQUITY (9), VENTURE_DEBT (10). Funding extraction handled by separate funding HC prompt (future workstream). |
 | 0.7 | 2026-08-12 | Removed MINORITY_INVESTMENT from core classifier output vocabulary. Minority status routes to the underlying economic event and is derived downstream as `is_minority`. |
 | 0.8 | 2026-08-18 | PIPE added as a recognized, unprofiled type (11 → 12 types; UNKNOWN renumbered to 12). Used only when the source explicitly identifies the structure by the term "PIPE" or the phrase "private investment in public equity" — a recognition, not an inference. Carries an explicit negative list (private placement, convertible notes or preferred, registered direct, ATM/underwritten offering) so a new bucket does not become a catch-all for private capital into public issuers; those still route to UNKNOWN. PIPE is terminal: Stage 3 stamps `RECOGNIZED_NOT_PROFILED` and no extraction, clustering or aggregation follows, so no round_size, transaction_size or valuation is derived. See `lib/pipe_recognition.py`. |
+| 0.9 | 2026-08-20 | **Merger family becomes `combination_structure` (V3 §T2).** `MERGER` and `REVERSE_MERGER` are removed as `v2_event_type` values and are now **invalid output**; both are structures of an acquisition, not separate events. New field `combination_structure` ∈ `MERGER` / `REVERSE_MERGER` / `DE_SPAC` / null, hierarchical (`DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`), valid **only** when `v2_event_type = ACQUISITION` and null for every other type — which is what keeps Spin/Split, JV, Recap, Funding, PIPE and UNKNOWN untouched by this change. Return the most specific supported value; ambiguity resolves upward. **A share or asset purchase does not establish a combination structure** — absent other evidence it is null. Merger-of-equals is unchanged: still extracted downstream from the source, never signalled here. The `REVERSE_MERGER` target_type rule re-keys onto `combination_structure`. Examples 15-17 added (merger, de-SPAC, share-purchase null). |

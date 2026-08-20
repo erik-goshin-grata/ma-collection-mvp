@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.9 (V2 alignment)
+**Version:** 0.10 (V2 alignment)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -48,6 +48,7 @@ values are lowercase. `SPIN_SPLIT` replaced by `SPIN_OFF` / `SPLIT_OFF`.
   "spin_split_type": null,
   "distribution_mechanism": null,
   "recap_type": null,
+  "combination_structure": null,
   "event_history_type": "ANNOUNCED",
   "target_type": "standalone_company",
   "target_status": "PRIVATE",
@@ -108,6 +109,10 @@ values are lowercase. `SPIN_SPLIT` replaced by `SPIN_OFF` / `SPLIT_OFF`.
   by party. Null if no advisors extracted.
 - `target_revenue_period`, `target_ebitda_period` — pre-formatted human-readable
   period strings (e.g., `"FY2025"`, `"LTM 2025-12-31"`, `"NTM 2026-12-31"`).
+- `combination_structure` — how an ACQUISITION is structured: `MERGER`, `REVERSE_MERGER`,
+  `DE_SPAC`, or null. Hierarchical (`DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`) and carried at
+  the most specific value, so test it by implication, not equality. Null means no special
+  combination structure — frame the deal as an ordinary acquisition.
 - `recap_type` — discriminator for RECAPITALIZATION events: `DIVIDEND`, `EQUITY`,
   `LEVERAGED`, `SPONSOR_RECAP`.
 
@@ -163,7 +168,7 @@ WRITING PRINCIPLES
 
 9. Closing context. End with timing, advisors, and conditions when present.
 
-DEAL TYPE FRAMING (V2 event types)
+DEAL TYPE FRAMING (V2 event types + combination structure)
 
 - ACQUISITION + acquirer_type = pe_portfolio: add-on. Frame explicitly with
   sponsor relationship.
@@ -171,13 +176,18 @@ DEAL TYPE FRAMING (V2 event types)
 - ACQUISITION + target_type = business_unit or subsidiary: divestiture. Frame
   as "[Parent] divested its [Unit] to [Acquirer]." Do NOT use "carve-out."
 - ACQUISITION + target_type = assets: asset purchase. Specify assets.
-- MERGER: stock combination. Frame symmetrically.
 - SPIN_OFF: parent distributing subsidiary shares pro-rata to shareholders.
   Reference distribution_mechanism when populated.
 - SPLIT_OFF: parent distributing subsidiary shares via exchange offer.
   Reference exchange offer mechanism.
-- REVERSE_MERGER: private company merging into public shell. Include de-SPAC
-  framing when acquirer is a SPAC.
+- ACQUISITION + combination_structure = MERGER: effected as a merger. Frame the
+  combination, symmetrically when the source itself frames it that way. Merger structure
+  alone does not make it a merger of equals — say so only when is_merger_of_equals is set.
+- ACQUISITION + combination_structure = REVERSE_MERGER: private company merging into a
+  public shell and becoming publicly traded without a traditional IPO.
+- ACQUISITION + combination_structure = DE_SPAC: reverse merger with a SPAC. Use de-SPAC
+  framing. Because the values are hierarchical, DE_SPAC also satisfies any
+  reverse-merger or merger framing above — do not apply all three.
 - JOINT_VENTURE: parties forming or contributing to a JV.
 - MINORITY_INVESTMENT: minority stake. State percentage when known.
 - RECAPITALIZATION: capital structure restructuring without change of control.
@@ -234,6 +244,7 @@ V2 EVENT TYPE: {v2_event_type}
 SPIN SPLIT TYPE: {spin_split_type}
 DISTRIBUTION MECHANISM: {distribution_mechanism}
 RECAP TYPE: {recap_type}
+COMBINATION STRUCTURE: {combination_structure}
 EVENT HISTORY TYPE: {event_history_type}
 TARGET TYPE: {target_type}
 TARGET STATUS: {target_status}
@@ -448,3 +459,4 @@ Output:
 | 0.7 | 2026-05-01 | Date format enforcement — "On [Month DD, YYYY]" opening required |
 | 0.8 | 2026-07-22 | flags.is_take_private passed directly from Stage 9 |
 | 0.9 | 2026-07-28 | V2 alignment. Input field names updated: deal_type → v2_event_type, event_type → event_history_type, target_type values lowercased, acquirer_type values lowercased. SPIN_SPLIT replaced by SPIN_OFF / SPLIT_OFF. RECAPITALIZATION added with recap_type. NTM multiples added to input schema and framing rule. User template updated. Four examples updated to V2 field names; spin-off and dividend recap examples added. |
+| 0.10 | 2026-08-20 | **Consumer update for V3 §T2 (S-B).** `MERGER` and `REVERSE_MERGER` are no longer emitted as event types, which would have left the two framing rules keyed on them permanently dead and silently dropped de-SPAC framing. Both are re-keyed onto `combination_structure`, and `DE_SPAC` framing is added. `combination_structure` added to the input schema and user template. The hierarchy is stated so framing is chosen by implication rather than by equality. Merger structure does **not** imply merger-of-equals — that stays driven by `is_merger_of_equals`, which is unchanged. |

@@ -17,6 +17,11 @@ STAGE3_FIELDS = (
     "v2_event_type",
     "event_history_type",
     "recap_type",
+    # V3 §T2 (2026-08-20). Stage 3 writes no observations of its own — this group is
+    # written when Stage 4 runs with include_stage3=True, stamped with dt_prompt_version.
+    # Omitting a classifier field here strands it on staging_extraction: Stage 9 reads
+    # observations by default, so the canonical column would stay NULL forever.
+    "combination_structure",
     "spin_split_type",
     # Observation coverage (2026-08-11): _v2 classifier fields previously written
     # to transaction_record as perpetual NULL (absent from _FIELDS/observation).

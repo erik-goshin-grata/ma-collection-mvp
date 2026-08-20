@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.9"
+_VERSION = "0.10"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0
@@ -161,6 +161,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             v2_event_type=_f(tr["v2_event_type"]),
             event_history_type=_f(tr["event_history_type"]),
             recap_type=_f(tr["recap_type"]),
+            combination_structure=_f(tr["combination_structure"]),
             spin_split_type=_f(tr["spin_split_type"]),
             distribution_mechanism=_f(tr["distribution_mechanism"]),
             event_type=_f(tr["event_type"]),

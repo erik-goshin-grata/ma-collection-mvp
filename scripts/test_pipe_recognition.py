@@ -255,13 +255,17 @@ def _end_to_end() -> list[str]:
          "Arcade.dev today announced it has raised $60 million in Series B funding led "
          "by Redpoint Ventures.",
          "VC_ROUND"),
-        # A de-SPAC whose release carries standard concurrent-PIPE language. The
-        # classifier's REVERSE_MERGER verdict must survive: this is a real deal.
+        # A de-SPAC whose release carries standard concurrent-PIPE language. Its verdict
+        # must survive: this is a real deal. Under classifier 0.9 (V3 §T2) a de-SPAC
+        # arrives as ACQUISITION with combination_structure = DE_SPAC, so ACQUISITION is
+        # the seat the concurrent PIPE must not take. The protection is unchanged in
+        # substance -- PIPE_OVERRIDABLE_EVENT_TYPES is an allowlist, and neither the old
+        # nor the new value is in it.
         (4, "PR_NEWSWIRE",
          "Summit Acquisition Corp announces business combination with Orbit Systems",
          "Summit Acquisition Corp announced a business combination with Orbit Systems, "
          "supported by a $150 million PIPE at $10.00 per share.",
-         "REVERSE_MERGER"),
+         "ACQUISITION"),
         # Same structure, different provider, and the classifier mis-seats it into the
         # funding family rather than UNKNOWN. Both differences must be irrelevant.
         (5, "WEB_URL", "Calder Bio announces financing",
@@ -321,8 +325,8 @@ def _end_to_end() -> list[str]:
     _check(failures, "VC row status", rows[3]["status"], "CLASSIFIED")
     _check(failures, "VC row type", rows[3]["v2_event_type"], "VC_ROUND")
     _check(failures, "de-SPAC row status", rows[4]["status"], "CLASSIFIED")
-    _check(failures, "de-SPAC keeps REVERSE_MERGER", rows[4]["v2_event_type"],
-           "REVERSE_MERGER")
+    _check(failures, "de-SPAC keeps its ACQUISITION seat", rows[4]["v2_event_type"],
+           "ACQUISITION")
     # The second PIPE: different provider, different mis-seating, same outcome.
     _check(failures, "WEB_URL PIPE status", rows[5]["status"], PIPE_EXCLUDED_STATUS)
     _check(failures, "WEB_URL PIPE type", rows[5]["v2_event_type"], PIPE_EVENT_TYPE)
@@ -464,11 +468,13 @@ def main() -> None:
             _check(failures, f"{label} status untouched", outcome["status"], "CLASSIFIED")
             _check(failures, f"{label} no provenance written", outcome["provenance"], None)
 
-    # The de-SPAC case stated in full: a concurrent PIPE inside a real REVERSE_MERGER.
-    despac = resolve_classification("REVERSE_MERGER", "Summit announces combination",
+    # The de-SPAC case stated in full: a concurrent PIPE inside a real de-SPAC, which
+    # classifier 0.9 seats as ACQUISITION. The legacy REVERSE_MERGER seat is still
+    # asserted non-overridable in _OVERRIDE_CASES above, for stored rows.
+    despac = resolve_classification("ACQUISITION", "Summit announces combination",
                                     _DESPAC_TEXT)
-    _check(failures, "de-SPAC PIPE does not displace the REVERSE_MERGER",
-           despac["v2_event_type"], "REVERSE_MERGER")
+    _check(failures, "de-SPAC PIPE does not displace the acquisition",
+           despac["v2_event_type"], "ACQUISITION")
     _check(failures, "de-SPAC row still extracts", despac["status"], "CLASSIFIED")
 
     # --- 3. Unchanged paths -----------------------------------------------

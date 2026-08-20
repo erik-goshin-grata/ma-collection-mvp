@@ -57,12 +57,21 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_type_classifier"
-_VERSION = "0.8"
+_VERSION = "0.9"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 # V2 EventType enum values
+# `MERGER` and `REVERSE_MERGER` are NOT here (V3 §T2, prompt 0.9). They are structures
+# of an acquisition, not separate events, and now live in `combination_structure`.
+#
+# This set validates NEW classifier output only, so it is deliberately strict: a 0.9
+# response naming either value is a SCHEMA_VIOLATION, not something to quietly accept.
+# Legacy tolerance lives where legacy rows are READ — `_MA_EVENT_TYPES` and
+# `_CONTROL_DEFAULT_TYPES` in stages/aggregate.py still carry both values so stored
+# rows keep their behaviour. Readability of old data must never widen what the model
+# is allowed to emit.
 _VALID_V2_EVENT_TYPES = frozenset({
-    "ACQUISITION", "MERGER", "SPIN_OFF", "SPLIT_OFF", "REVERSE_MERGER",
+    "ACQUISITION", "SPIN_OFF", "SPLIT_OFF",
     "JOINT_VENTURE", "RECAPITALIZATION",
     "VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT",
     # Recognized, not profiled. Accepted here so the value validates whichever way it
@@ -85,6 +94,11 @@ _VALID_TARGET_STATUSES = frozenset({
     "PUBLIC", "PRIVATE", "SUBSIDIARY_OF_PUBLIC", "SUBSIDIARY_OF_PRIVATE", "UNKNOWN",
 })
 _VALID_RECAP_TYPES = frozenset({"DIVIDEND", "EQUITY", "LEVERAGED", "SPONSOR_RECAP"})
+
+# V3 §T2 — hierarchical: DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER. Store the most specific
+# supported value; query broader questions by implication, never by equality. null means
+# the source does not establish any of the three, which is the ordinary acquisition.
+_VALID_COMBINATION_STRUCTURE = frozenset({"MERGER", "REVERSE_MERGER", "DE_SPAC"})
 _VALID_SPIN_SPLIT_TYPES = frozenset({"SPIN_OFF", "SPLIT_OFF", "SPLIT"})  # SPLIT accepted during rollout
 
 # V2 lowercase target_type values
@@ -214,6 +228,16 @@ def _validate(result: dict) -> str | None:
             return "spin_split_type must be null for non-spin types"
         if result.get("distribution_mechanism") is not None:
             return "distribution_mechanism must be null for non-spin types"
+
+    # combination_structure — subordinate to ACQUISITION. Gating it here is what keeps
+    # the merger-family collapse from leaking into Spin/Split, JV, Recap, Funding, PIPE
+    # or UNKNOWN: those events cannot carry a combination structure at all.
+    combo = result.get("combination_structure")
+    if combo is not None:
+        if v2et != "ACQUISITION":
+            return f"combination_structure must be null for v2_event_type={v2et!r}"
+        if combo not in _VALID_COMBINATION_STRUCTURE:
+            return f"invalid combination_structure: {combo!r}"
 
     # target_type — accept both legacy uppercase and V2 lowercase
     tt = result.get("target_type")
@@ -380,11 +404,12 @@ def _insert(
              spin_split_type, spin_split_type_v2,
              distribution_mechanism,
              recap_type,
+             combination_structure,
              target_type, target_type_v2,
              event_type, event_history_type,
              target_status,
              model_confidence, dt_prompt_version, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             source_raw_id, status,
@@ -398,6 +423,8 @@ def _insert(
             r.get("distribution_mechanism"),
             # recap_type — new field
             r.get("recap_type"),
+            # combination_structure — V3 §T2; null for ordinary acquisitions
+            r.get("combination_structure"),
             # target_type legacy + V2 lowercase
             r.get("target_type"), target_type_v2,
             # event_type legacy + event_history_type new

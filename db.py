@@ -318,6 +318,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     # directory is NOT globbed, so a migration without a block here never runs.
     if "deal_attitude" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "004_v3_attitude_approach.sql").read_text(encoding="utf-8"))
+    # 005 (V3 §T2 combination structure) — same sentinel-guarded pattern.
+    if "combination_structure" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "005_v3_combination_structure.sql").read_text(encoding="utf-8"))
 
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
