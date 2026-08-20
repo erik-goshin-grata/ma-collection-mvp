@@ -30,6 +30,7 @@ The tests below pin four things:
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -319,9 +320,20 @@ def _test_other_event_types_untouched(failures: list[str]) -> None:
 
 def _test_prompt_contract(failures: list[str]) -> None:
     clf = open(os.path.join(ROOT, "prompts", "deal_type_classifier.md"), encoding="utf-8").read()
-    _eq(failures, "classifier/stage version parity", dtc._VERSION, "0.9")
-    if "**Version:** 0.9" not in clf:
-        failures.append("classifier prompt: version line is not 0.9")
+    # Pin the invariant, not the number. An exact-version assertion says "this prompt is
+    # frozen", which is false and breaks on the next slice's legitimate bump. What must
+    # hold is that prompt and stage agree, and that neither predates the release which
+    # introduced combination_structure. Compare numerically -- these are dotted decimals,
+    # so "0.10" > "0.9" and a string comparison gets it backwards.
+    m = re.search(r"^\*\*Version:\*\* (\d+)\.(\d+)", clf, re.M)
+    if m is None:
+        failures.append("classifier prompt: no parseable version line")
+    else:
+        _eq(failures, "classifier/prompt-stage version parity",
+            f"{m.group(1)}.{m.group(2)}", dtc._VERSION)
+        if (int(m.group(1)), int(m.group(2))) < (0, 9):
+            failures.append(f"classifier prompt: version {m.group(0)!r} predates the "
+                            f"release that introduced combination_structure (0.9)")
     if "combination_structure" not in clf:
         failures.append("classifier prompt: combination_structure absent")
     if '"combination_structure": "DE_SPAC"' not in clf:
@@ -342,7 +354,15 @@ def _test_prompt_contract(failures: list[str]) -> None:
     if "{combination_structure}" not in summ:
         failures.append("deal_summary: user template does not receive combination_structure")
     import stages.summarize as summarize
-    _eq(failures, "deal_summary/stage version parity", summarize._VERSION, "0.10")
+    ms = re.search(r"^\*\*Version:\*\* (\d+)\.(\d+)", summ, re.M)
+    if ms is None:
+        failures.append("deal_summary: no parseable version line")
+    else:
+        _eq(failures, "deal_summary/prompt-stage version parity",
+            f"{ms.group(1)}.{ms.group(2)}", summarize._VERSION)
+        if (int(ms.group(1)), int(ms.group(2))) < (0, 10):
+            failures.append(f"deal_summary: version {ms.group(0)!r} predates the "
+                            f"consumer update for combination_structure (0.10)")
 
 
 def main() -> int:

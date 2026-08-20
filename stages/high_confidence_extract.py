@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.18"
+_VERSION = "0.19"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -67,6 +67,14 @@ _VALID_PERIOD_TYPES_V2 = frozenset({"LTM", "NTM", "ANNUAL", "QUARTERLY", "INTERI
 _VALID_DATE_PRECISIONS = frozenset({"exact", "month", "quarter", "year"})
 _VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
 _VALID_CONSIDERATION_TYPES = frozenset({"cash", "stock", "cash_and_stock", "election", "other"})
+# V3 §T13 — subordinate to target_type = assets. Answers what kind of asset is being
+# transacted, NOT the target's sector: a pipeline is INFRASTRUCTURE because that is the
+# thing transacted, whoever buys it. Settled and extensible; do not widen speculatively.
+_VALID_ASSET_TYPES = frozenset({
+    "REAL_ESTATE", "INFRASTRUCTURE", "ENERGY", "NATURAL_RESOURCES",
+    "INTELLECTUAL_PROPERTY", "DATA", "FACILITY", "EQUIPMENT",
+    "CONTRACTS_OR_RIGHTS", "BRAND_OR_PRODUCT", "OTHER",
+})
 _VALID_STAKE_TRANSITION_TYPES = frozenset({
     "NEW_MINORITY_STAKE",
     "NEW_MAJORITY_STAKE",
@@ -172,6 +180,12 @@ def _validate(result: dict) -> str | None:
     stt = (result.get("deal") or {}).get("stake_transition_type")
     if stt is not None and stt not in _VALID_STAKE_TRANSITION_TYPES:
         return f"invalid deal.stake_transition_type: {stt!r}"
+
+    # asset_type — vocabulary check here; the subordination rule (null unless
+    # target_type = assets) is enforced at the write, where target_type is in scope.
+    at = (result.get("target") or {}).get("asset_type")
+    if at is not None and at not in _VALID_ASSET_TYPES:
+        return f"invalid target.asset_type: {at!r}"
 
     # date_precision fields — optional but must be valid if present
     dates = result.get("dates") or {}
@@ -368,6 +382,21 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             if hc_notes:
                 nd["hc"] = hc_notes
 
+            # asset_type is subordinate to target_type = assets (V3 §T13). Enforce it here
+            # rather than in _validate: the validator sees only the model response, while
+            # target_type comes from Stage 3 on the row. A value supplied for any other
+            # target type is dropped and logged -- the same treatment the prompt's own
+            # parser rules give sponsor_name on a non-sponsor acquirer.
+            effective_target_type = row["target_type_v2"] or row["target_type"]
+            asset_type = t.get("asset_type")
+            if asset_type is not None and effective_target_type != "assets":
+                log.warning(
+                    "extraction_id/source_raw_id=%s asset_type=%r supplied for "
+                    "target_type=%r — clearing; asset_type is valid only for assets",
+                    row["source_raw_id"], asset_type, effective_target_type,
+                )
+                asset_type = None
+
             # Normalize V2 fields
             acquirer_type_raw = a.get("type")
             acquirer_type_v2 = _normalize_acquirer_type(acquirer_type_raw)
@@ -376,7 +405,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
             params = (
                 t.get("name"), t.get("domain"), t.get("ticker"),
-                t.get("description"),
+                t.get("description"), asset_type,
                 a.get("name"), a.get("domain"), a.get("ticker"),
                 acquirer_type_raw,   # acquirer_type — legacy column, keep as-is
                 acquirer_type_v2,    # acquirer_type_v2 — new V2 column
@@ -425,7 +454,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     UPDATE staging_extraction SET
                         status = 'HC_EXTRACTED',
                         target_name = ?,  target_domain = ?,  target_ticker = ?,
-                        target_description = ?,
+                        target_description = ?,  asset_type = ?,
                         acquirer_name = ?,  acquirer_domain = ?,  acquirer_ticker = ?,
                         acquirer_type = ?,  acquirer_type_v2 = ?,
                         acquirer_description = ?,
@@ -479,7 +508,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         event_type, event_history_type,
                         target_status,
                         target_name, target_domain, target_ticker,
-                        target_description,
+                        target_description, asset_type,
                         acquirer_name, acquirer_domain, acquirer_ticker,
                         acquirer_type, acquirer_type_v2,
                         acquirer_description,
@@ -512,7 +541,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

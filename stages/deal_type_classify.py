@@ -57,7 +57,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_type_classifier"
-_VERSION = "0.9"
+_VERSION = "0.10"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 # V2 EventType enum values
@@ -101,9 +101,15 @@ _VALID_RECAP_TYPES = frozenset({"DIVIDEND", "EQUITY", "LEVERAGED", "SPONSOR_RECA
 _VALID_COMBINATION_STRUCTURE = frozenset({"MERGER", "REVERSE_MERGER", "DE_SPAC"})
 _VALID_SPIN_SPLIT_TYPES = frozenset({"SPIN_OFF", "SPLIT_OFF", "SPLIT"})  # SPLIT accepted during rollout
 
-# V2 lowercase target_type values
+# V2 lowercase target_type values.
+#
+# `spinco` is NOT here (V3 §T3, prompt 0.10). It named an event/role rather than a
+# structure and duplicated what v2_event_type already says, so a SPIN_OFF or SPLIT_OFF is
+# now typed on the distributed entity's own structural merits. As with the merger family
+# in 0.9, this set governs NEW output only: naming `spinco` is a schema violation.
+# Stored rows keep their value untouched.
 _VALID_TARGET_TYPES_V2 = frozenset({
-    "standalone_company", "business_unit", "subsidiary", "assets", "spinco",
+    "standalone_company", "business_unit", "subsidiary", "assets",
 })
 # Legacy uppercase accepted during rollout
 _VALID_LEGACY_TARGET_TYPES = frozenset({

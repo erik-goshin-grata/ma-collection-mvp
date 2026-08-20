@@ -44,6 +44,10 @@ HC_FIELDS = (
     "parent_seller_name",
     "parent_seller_ticker",
     "target_description",
+    # V3 §T13 (2026-08-20). Subordinate to target_type = assets. Stage 4 writes this
+    # group itself via include_hc=True; omitting a field here strands it on
+    # staging_extraction, since Stage 9 reads observations by default.
+    "asset_type",
     "acquirer_description",
     "acquirer_sponsor_name",
     "parent_seller_description",

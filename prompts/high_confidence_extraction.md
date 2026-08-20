@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.18 (equity scope: EQUITY_VALUE is stake-level only; MARKET_CAPITALIZATION split out)
+**Version:** 0.19 (asset_type, subordinate to target_type = assets)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -121,6 +121,35 @@ target:
   not stated or target is private.
 - description: 1-2 sentence description of what the target does, its size, and
   where it operates. Use the source's own language. Null if insufficient info.
+- asset_type: What KIND of asset is being transacted. Populate this ONLY when the
+  TARGET TYPE supplied in the user prompt is `assets`. For every other target type it
+  MUST be null — it is a sub-classification of an asset purchase, not a description of
+  the target's industry or sector.
+
+  Values:
+    REAL_ESTATE           — property acquired principally as real estate
+    INFRASTRUCTURE        — infrastructure assets (pipelines, towers, terminals, grids)
+    ENERGY                — energy assets (generation, storage, energy production)
+    NATURAL_RESOURCES     — mineral, timber, water or similar resource assets
+    INTELLECTUAL_PROPERTY — patents, licences, technology rights
+    DATA                  — data assets or datasets
+    FACILITY              — an operating plant, mill, yard or similar facility
+    EQUIPMENT             — machinery, fleet, or equipment portfolios
+    CONTRACTS_OR_RIGHTS   — contracts, customer agreements, operating rights
+    BRAND_OR_PRODUCT      — a brand, product line, or product portfolio
+    OTHER                 — a discrete asset set none of the above describes
+    null                  — target type is not `assets`, or the kind is not established
+
+  FACILITY is deliberately distinct from REAL_ESTATE: an operating plant or mill is a
+  different transaction object from property acquired principally as real estate.
+
+  Asset type is NOT sector. It describes the thing transacted; the target's industry
+  remains a separate classification. A pipeline bought by an energy company is
+  INFRASTRUCTURE because a pipeline is the asset, not because the buyer is in energy.
+
+  Single-valued. A portfolio of several assets of the same kind is one asset_type. If a
+  transaction genuinely mixes asset classes such that one value loses material
+  information, choose the predominant one and say so in notes.
 
 acquirer:
 - name: Acquiring entity name as stated
@@ -485,7 +514,8 @@ code fences, no preamble.
         "name": "Beta Industries",
         "domain": "betaindustries.com",
         "ticker": null,
-        "description": "a privately-held manufacturer of specialty valves for the oil and gas industry, headquartered in Dallas, Texas"
+        "description": "a privately-held manufacturer of specialty valves for the oil and gas industry, headquartered in Dallas, Texas",
+        "asset_type": null
       },
       "acquirer": {
         "name": "Acme Corp",
@@ -588,7 +618,8 @@ Extract all transactions from this source.
         "name": "string | null",
         "domain": "string | null",
         "ticker": "string | null",
-        "description": "string | null"
+        "description": "string | null",
+        "asset_type": "enum | null — only when TARGET TYPE is `assets`; null otherwise"
       },
       "acquirer": {
         "name": "string | null",
@@ -692,7 +723,8 @@ Output:
         "name": "Beta Industries",
         "domain": null,
         "ticker": null,
-        "description": "a privately held manufacturer of specialty valves for the oil and gas industry headquartered in Dallas, Texas"
+        "description": "a privately held manufacturer of specialty valves for the oil and gas industry headquartered in Dallas, Texas",
+        "asset_type": null
       },
       "acquirer": {
         "name": "Acme Corp",
@@ -787,7 +819,8 @@ Output:
         "name": "PublicCo",
         "domain": null,
         "ticker": "NYSE: PUB",
-        "description": null
+        "description": null,
+        "asset_type": null
       },
       "acquirer": {
         "name": "Zenith Capital Partners",
@@ -880,7 +913,8 @@ Output:
         "name": "Armistead Mechanical, Inc.",
         "domain": null,
         "ticker": null,
-        "description": "a privately held HVAC and mechanical services contractor headquartered in New Jersey"
+        "description": "a privately held HVAC and mechanical services contractor headquartered in New Jersey",
+        "asset_type": null
       },
       "acquirer": {
         "name": "PremiStar, LLC",
@@ -965,7 +999,8 @@ Output:
         "name": "Industrial Coatings Division",
         "domain": null,
         "ticker": null,
-        "description": "the industrial coatings division of MegaCorp"
+        "description": "the industrial coatings division of MegaCorp",
+        "asset_type": null
       },
       "acquirer": {
         "name": "Delta Holdings",
@@ -1058,7 +1093,8 @@ Output:
         "name": "Delta Software",
         "domain": null,
         "ticker": null,
-        "description": null
+        "description": null,
+        "asset_type": null
       },
       "acquirer": {
         "name": "Alpha Capital Partners",
@@ -1106,7 +1142,8 @@ Output:
         "name": "Omega Systems",
         "domain": null,
         "ticker": null,
-        "description": null
+        "description": null,
+        "asset_type": null
       },
       "acquirer": {
         "name": "Gamma Corp",
@@ -1184,7 +1221,7 @@ Output:
 {
   "transactions": [
     {
-      "target": {"name": null, "domain": null, "ticker": null, "description": null},
+      "target": {"name": null, "domain": null, "ticker": null, "description": null, "asset_type": null},
       "acquirer": {"name": null, "domain": null, "ticker": null, "type": "unknown", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
       "deal": {"pct_acquired": null},
@@ -1250,7 +1287,7 @@ Output:
 {
   "transactions": [
     {
-      "target": {"name": "BÉIS, LLC", "domain": null, "ticker": null, "description": null},
+      "target": {"name": "BÉIS, LLC", "domain": null, "ticker": null, "description": null, "asset_type": null},
       "acquirer": {"name": "Samsonite Group S.A.", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
       "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE"},
@@ -1311,6 +1348,49 @@ Output:
 
 ---
 
+**Example 8 — Asset purchase: asset_type populated, and it is not the sector:**
+
+Input:
+```
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: assets
+EVENT HISTORY TYPE: ANNOUNCED
+
+TITLE: Cascade Midstream Acquires Gulf Coast Pipeline System from Meridian Energy
+BODY: Cascade Midstream Partners today announced it has agreed to acquire a 240-mile
+refined products pipeline system and two associated storage terminals on the Gulf Coast
+from Meridian Energy Corp for $310 million in cash. The transaction does not include
+Meridian's marketing business or personnel.
+```
+
+Output:
+```json
+{
+  "transactions": [
+    {
+      "target": {
+        "name": "Gulf Coast pipeline system and associated storage terminals",
+        "domain": null,
+        "ticker": null,
+        "description": "a 240-mile refined products pipeline system with two associated storage terminals on the Gulf Coast",
+        "asset_type": "INFRASTRUCTURE"
+      },
+      "acquirer": {"name": "Cascade Midstream Partners", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
+      "parent_seller": {"name": "Meridian Energy Corp", "ticker": null, "description": null},
+      "deal": {"pct_acquired": null, "stake_transition_type": null},
+      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "notes": "TARGET TYPE is assets, so asset_type is populated. A pipeline system is INFRASTRUCTURE because that is the thing transacted, not ENERGY, which would describe the parties' sector. No employees or going-concern unit transfer, consistent with an asset purchase rather than a business unit."
+    }
+  ]
+}
+```
+
+**Why asset_type is null in the other examples.** In Examples 1-7 the TARGET TYPE supplied
+is `standalone_company`, so asset_type is null in each. It is subordinate to the target
+type, not an independent judgement about what the target does.
+
+---
+
 ## 8. Failure Modes
 
 | Failure | Handling |
@@ -1340,3 +1420,4 @@ Output:
 | 0.14 | 2026-08-12 | Added nullable `deal.stake_transition_type` for explicit ownership-transition cases. |
 | 0.15 | 2026-08-14 | Added required `value_observations` array for independently typed deal-value facts. |
 | 0.16 | 2026-08-14 | Added explicit-evidence `features` object for platform investment, secondary buyout, and merger-of-equals flags. |
+| 0.19 | 2026-08-20 | **`asset_type` added (V3 §T13), subordinate to `target_type = assets`.** Eleven values plus null, answering *what kind of asset is being transacted* — **not** the target's sector or industry, which remains a separate classification. `FACILITY` is deliberately distinct from `REAL_ESTATE`: an operating plant is a different transaction object from property held principally as real estate. Single-valued; a portfolio of like assets is one value. **Null for every target type other than `assets`**, enforced in the stage validator — it is a sub-classification of an asset purchase, not an independent judgement. Example 8 added; all ten existing example target blocks carry `asset_type: null`. |

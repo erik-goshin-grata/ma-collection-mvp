@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.9 (merger family becomes combination_structure)
+**Version:** 0.10 (spinco removed; target_type is purely structural)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -261,12 +261,25 @@ For all deal types that have a target, classify target_type:
   rather than a going-concern unit. When in doubt between business_unit and
   assets: if the target has employees, customers, and revenue as a unit, use
   business_unit; if it's a discrete asset set being transferred, use assets.
-- spinco — The entity being distributed in a SPIN_OFF or SPLIT_OFF. Always
-  use spinco when v2_event_type is SPIN_OFF or SPLIT_OFF.
+
+There is no `spinco` value. SPIN_OFF and SPLIT_OFF are recorded on v2_event_type; they
+say what kind of event happened, and target_type independently answers what structural
+thing is being transacted. Classify the distributed entity on its own structural merits,
+from source evidence:
+
+- an existing subsidiary being distributed   -> subsidiary
+- a division or operating business           -> business_unit
+- a discrete asset set                       -> assets
+- structure not established by the source    -> null
+
+Do NOT use standalone_company merely because the distributed entity will be standalone
+after the distribution completes. target_type describes what is being transacted now, not
+what it becomes.
 
 Note: target_type values are lowercase in V2. Legacy uppercase values
 (STANDALONE_COMPANY, BUSINESS_UNIT, SUBSIDIARY, ASSETS) are no longer valid
-— use lowercase equivalents.
+— use lowercase equivalents. `spinco` is no longer a valid value at all: it named an
+event/role rather than a structure, and duplicated what v2_event_type already says.
 
 When target_type is subsidiary, business_unit, or assets, parent_seller must
 exist (extracted by a later prompt). Flag in notes if the Parent is ambiguous.
@@ -411,7 +424,7 @@ target status.
 | `spin_split_type` | enum or null | `SPIN_OFF`, `SPLIT_OFF`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `distribution_mechanism` | enum or null | `PRO_RATA`, `EXCHANGE_OFFER`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `recap_type` | enum or null | `DIVIDEND`, `EQUITY`, `LEVERAGED`, `SPONSOR_RECAP`, or null if v2_event_type ≠ RECAPITALIZATION |
-| `target_type` | enum or null | `standalone_company`, `subsidiary`, `business_unit`, `assets`, `spinco`, or null for JVs |
+| `target_type` | enum or null | `standalone_company`, `subsidiary`, `business_unit`, `assets`, or null for JVs and when structure is not established. **`spinco` is not a valid value.** |
 | `event_history_type` | enum | `ANNOUNCED`, `CLOSED`, `AMENDED`, `TERMINATED` |
 | `target_status` | enum | `PUBLIC`, `PRIVATE`, `SUBSIDIARY_OF_PUBLIC`, `SUBSIDIARY_OF_PRIVATE`, `UNKNOWN` |
 | `overrides_relevancy_hint` | boolean | True if v2_event_type disagrees with the relevancy reason_code |
@@ -532,7 +545,7 @@ Output:
   "spin_split_type": "SPIN_OFF",
   "distribution_mechanism": "PRO_RATA",
   "recap_type": null,
-  "target_type": "spinco",
+  "target_type": "subsidiary",
   "event_history_type": "ANNOUNCED",
   "target_status": "SUBSIDIARY_OF_PUBLIC",
   "overrides_relevancy_hint": false,
@@ -562,7 +575,7 @@ Output:
   "spin_split_type": "SPLIT_OFF",
   "distribution_mechanism": "EXCHANGE_OFFER",
   "recap_type": null,
-  "target_type": "spinco",
+  "target_type": "subsidiary",
   "event_history_type": "ANNOUNCED",
   "target_status": "SUBSIDIARY_OF_PUBLIC",
   "overrides_relevancy_hint": false,
@@ -922,6 +935,38 @@ Output:
 
 ---
 
+**Example 18 — Spin-off of a division (target_type is structural, not the event):**
+
+Input:
+```
+TITLE: Northwind Industries to Spin Off Its Packaging Division
+BODY: Northwind Industries (NYSE: NWI) announced that its board has approved the
+spin-off of its packaging division as a separate publicly traded company. The division,
+which is not currently a separate legal entity, will be incorporated prior to the
+distribution. Northwind shareholders will receive shares pro rata.
+```
+
+Output:
+```json
+{
+  "v2_event_type": "SPIN_OFF",
+  "deal_type": "SPIN_OFF",
+  "combination_structure": null,
+  "spin_split_type": "SPIN_OFF",
+  "distribution_mechanism": "PRO_RATA",
+  "recap_type": null,
+  "target_type": "business_unit",
+  "event_history_type": "ANNOUNCED",
+  "target_status": "SUBSIDIARY_OF_PUBLIC",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "A division, not a separate legal entity, so target_type = business_unit. The spin-off itself is carried by v2_event_type; target_type says what structural thing is being transacted. It is not standalone_company merely because it becomes standalone after the distribution.",
+  "prompt_version": "deal_type_classifier:0.10"
+}
+```
+
+---
+
 ## 8. Failure Modes
 
 | Failure | Handling |
@@ -951,3 +996,4 @@ Output:
 | 0.7 | 2026-08-12 | Removed MINORITY_INVESTMENT from core classifier output vocabulary. Minority status routes to the underlying economic event and is derived downstream as `is_minority`. |
 | 0.8 | 2026-08-18 | PIPE added as a recognized, unprofiled type (11 → 12 types; UNKNOWN renumbered to 12). Used only when the source explicitly identifies the structure by the term "PIPE" or the phrase "private investment in public equity" — a recognition, not an inference. Carries an explicit negative list (private placement, convertible notes or preferred, registered direct, ATM/underwritten offering) so a new bucket does not become a catch-all for private capital into public issuers; those still route to UNKNOWN. PIPE is terminal: Stage 3 stamps `RECOGNIZED_NOT_PROFILED` and no extraction, clustering or aggregation follows, so no round_size, transaction_size or valuation is derived. See `lib/pipe_recognition.py`. |
 | 0.9 | 2026-08-20 | **Merger family becomes `combination_structure` (V3 §T2).** `MERGER` and `REVERSE_MERGER` are removed as `v2_event_type` values and are now **invalid output**; both are structures of an acquisition, not separate events. New field `combination_structure` ∈ `MERGER` / `REVERSE_MERGER` / `DE_SPAC` / null, hierarchical (`DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`), valid **only** when `v2_event_type = ACQUISITION` and null for every other type — which is what keeps Spin/Split, JV, Recap, Funding, PIPE and UNKNOWN untouched by this change. Return the most specific supported value; ambiguity resolves upward. **A share or asset purchase does not establish a combination structure** — absent other evidence it is null. Merger-of-equals is unchanged: still extracted downstream from the source, never signalled here. The `REVERSE_MERGER` target_type rule re-keys onto `combination_structure`. Examples 15-17 added (merger, de-SPAC, share-purchase null). |
+| 0.10 | 2026-08-20 | **`spinco` removed from `target_type` (V3 §T3).** It named an event/role, not a structure, and duplicated what `v2_event_type` already says. `target_type` now answers one question consistently — what structural thing is being transacted — so a SPIN_OFF or SPLIT_OFF is typed on the distributed entity's own merits: `subsidiary`, `business_unit`, `assets`, or null when the source does not establish it. **Not `standalone_company`** merely because it becomes standalone after the distribution. Examples 4 and 5 re-typed to `subsidiary`; Example 18 added for the division case. New output naming `spinco` is a schema violation. |

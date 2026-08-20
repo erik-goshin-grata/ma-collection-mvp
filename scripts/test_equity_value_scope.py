@@ -29,6 +29,7 @@ scaled value.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -120,8 +121,15 @@ def _check_taxonomy(failures: list[str]) -> None:
     if "MARKET_CAPITALIZATION" not in text:
         failures.append("prompt does not define a MARKET_CAPITALIZATION value type")
 
-    if "**Version:** 0.18" not in text:
-        failures.append("HC prompt version not bumped to 0.18 for the taxonomy change")
+    # The invariant is that the version moved to or past the release that introduced
+    # MARKET_CAPITALIZATION -- not that the prompt is frozen there. Compare numerically:
+    # these are dotted decimals, so "0.10" > "0.9" and any string comparison is wrong.
+    m = re.search(r"^\*\*Version:\*\* (\d+)\.(\d+)", text, re.M)
+    if m is None:
+        failures.append("HC prompt has no parseable version line")
+    elif (int(m.group(1)), int(m.group(2))) < (0, 18):
+        failures.append(f"HC prompt version {m.group(0)!r} predates the taxonomy change "
+                        f"that introduced MARKET_CAPITALIZATION (0.18)")
 
 
 # --------------------------------------------------------------------------

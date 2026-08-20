@@ -11,7 +11,7 @@ are logged to aggregation_conflict_log.
 
 After field resolution:
   - consideration_type is derived from consideration_components
-  - is_take_private / is_minority / is_add_on / is_divestiture are derived from deal context
+  - is_take_private / is_minority / is_add_on are derived from deal context
   - A transaction_record row is upserted (INSERT or UPDATE in place)
   - transaction_source rows are inserted linking the transaction to its sources
   - All cluster members transition to status = AGGREGATED
@@ -81,6 +81,7 @@ _FIELDS = [
     ("parent_seller_name", "string"),
     ("parent_seller_ticker", "string"),
     ("target_description", "string"),
+    ("asset_type", "string"),   # subordinate to target_type = assets (§T13)
     ("acquirer_description", "string"),
     ("acquirer_sponsor_name", "string"),
     ("parent_seller_description", "string"),
@@ -280,7 +281,6 @@ def _derive_flags(fields: dict) -> dict:
         "is_take_private": _derive_is_take_private(fields),
         "is_minority": _derive_is_minority(fields),
         "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
-        "is_divestiture": int(target_type in ("BUSINESS_UNIT", "SUBSIDIARY", "ASSETS")),
         "is_platform_investment": _explicit_flag(fields.get("is_platform_investment")),
         "is_secondary_buyout": _derive_is_secondary_buyout(fields),
         "is_merger_of_equals": _explicit_flag(fields.get("is_merger_of_equals")),
@@ -1386,6 +1386,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.acquirer_name, se.acquirer_domain, se.acquirer_ticker, se.acquirer_type,
                se.parent_seller_name, se.parent_seller_ticker,
                se.target_description, se.acquirer_description, se.acquirer_sponsor_name, se.parent_seller_description,
+               se.asset_type,
                se.announced_date, se.closed_date, se.signing_date,
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
                se.stake_transition_type,
@@ -1651,6 +1652,7 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "parent_seller_name",
     "parent_seller_ticker",
     "target_description",
+    "asset_type",
     "acquirer_description",
     "acquirer_sponsor_name",
     "parent_seller_description",
@@ -1699,7 +1701,6 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "is_take_private",
     "is_minority",
     "is_add_on",
-    "is_divestiture",
     "is_platform_investment",
     "is_secondary_buyout",
     "is_merger_of_equals",
@@ -2020,6 +2021,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("parent_seller_name"),
                     field_values.get("parent_seller_ticker"),
                     field_values.get("target_description"),
+                    field_values.get("asset_type"),
                     field_values.get("acquirer_description"),
                     field_values.get("acquirer_sponsor_name"),
                     field_values.get("parent_seller_description"),
@@ -2068,7 +2070,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     derived["is_take_private"],
                     derived["is_minority"],
                     derived["is_add_on"],
-                    derived["is_divestiture"],
                     derived["is_platform_investment"],
                     derived["is_secondary_buyout"],
                     derived["is_merger_of_equals"],
