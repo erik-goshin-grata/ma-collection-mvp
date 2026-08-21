@@ -196,19 +196,12 @@ def main() -> None:
         if actual != expected:
             failed.append((name, expected, actual))
 
+    # The two is_platform_investment cases that stood here were retired with the field
+    # (V3 §T7, S-G). They asserted NEW production authorship of a flag Stage 9 no longer
+    # writes, so keeping them would pin behaviour the decision removed. Their subject matter
+    # -- platform evidence -- now lives in scripts/test_sponsor_transaction_role.py, and the
+    # retained is_platform_investment column and its stored rows are untouched by this.
     feature_cases = [
-        (
-            "platform_explicit_true",
-            _case(is_platform_investment=1, acquirer_type="PRIVATE_EQUITY"),
-            "is_platform_investment",
-            1,
-        ),
-        (
-            "platform_pe_buyer_alone_false",
-            _case(acquirer_type="PRIVATE_EQUITY"),
-            "is_platform_investment",
-            0,
-        ),
         (
             "secondary_explicit_true",
             _case(is_secondary_buyout=1, acquirer_type="PRIVATE_EQUITY"),

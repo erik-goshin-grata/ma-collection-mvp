@@ -66,7 +66,10 @@ HC_FIELDS = (
     # resolved by ordinary tier logic. Omitting this line strands the field on
     # staging_extraction, since Stage 9 reads observations by default.
     "offer_mechanism",
-    "is_platform_investment",
+    # is_platform_investment left this group in the same change (V3 §T7, S-G): Stage 4 no
+    # longer writes that column, so observing it would produce a permanent NULL. Governs NEW
+    # observation writing only -- the historical column and existing rows are untouched.
+    "sponsor_transaction_role",
     "is_secondary_buyout",
     "is_merger_of_equals",
     "target_revenue",

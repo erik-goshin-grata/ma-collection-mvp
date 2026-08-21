@@ -11,7 +11,9 @@ are logged to aggregation_conflict_log.
 
 After field resolution:
   - consideration_type is derived from consideration_components
-  - is_take_private / is_minority / is_add_on are derived from deal context
+  - is_take_private / is_minority are derived from deal context. is_add_on and
+    is_platform_investment are NOT: V3 §T7 replaces both with the extracted
+    sponsor_transaction_role, and their columns are retained but unwritten.
   - A transaction_record row is upserted (INSERT or UPDATE in place)
   - transaction_source rows are inserted linking the transaction to its sources
   - All cluster members transition to status = AGGREGATED
@@ -100,7 +102,8 @@ _FIELDS = [
     ("pct_acquired", "number"),
     ("stake_transition_type", "string"),
     ("offer_mechanism", "string"),   # TENDER_OFFER | null (V3 §T12)
-    ("is_platform_investment", "boolean"),
+    ("is_platform_investment", "boolean"),   # legacy; no longer written by Stage 4 (V3 §T7)
+    ("sponsor_transaction_role", "string"),  # PLATFORM | ADD_ON | null (§T7)
     ("is_secondary_buyout", "boolean"),
     ("is_merger_of_equals", "boolean"),
     ("target_revenue", "number"),
@@ -295,14 +298,11 @@ def _derive_is_secondary_buyout(fields: dict) -> int:
 
 
 def _derive_flags(fields: dict) -> dict:
-    acquirer_type = fields.get("acquirer_type")
-    target_type = fields.get("target_type")
-    deal_type = fields.get("deal_type")
+    # The three locals that stood here were read only by the is_add_on derivation, which
+    # V3 §T7 removes. Every surviving entry takes `fields` directly.
     return {
         "is_take_private": _derive_is_take_private(fields),
         "is_minority": _derive_is_minority(fields),
-        "is_add_on": int(acquirer_type == "PE_PORTFOLIO"),
-        "is_platform_investment": _explicit_flag(fields.get("is_platform_investment")),
         "is_secondary_buyout": _derive_is_secondary_buyout(fields),
         "is_merger_of_equals": _explicit_flag(fields.get("is_merger_of_equals")),
     }
@@ -1466,6 +1466,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
                se.stake_transition_type, se.offer_mechanism,
                se.is_platform_investment, se.is_secondary_buyout, se.is_merger_of_equals,
+               se.sponsor_transaction_role,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
                se.financials_currency,
@@ -1775,8 +1776,7 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "acquirer_fee_percentage",
     "is_take_private",
     "is_minority",
-    "is_add_on",
-    "is_platform_investment",
+    "sponsor_transaction_role",
     "is_secondary_buyout",
     "is_merger_of_equals",
     "has_earnout",
@@ -2147,8 +2147,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("acquirer_fee_percentage"),
                     derived["is_take_private"],
                     derived["is_minority"],
-                    derived["is_add_on"],
-                    derived["is_platform_investment"],
+                    field_values.get("sponsor_transaction_role"),
                     derived["is_secondary_buyout"],
                     derived["is_merger_of_equals"],
                     _derive_has_earnout(field_values.get("consideration_components")),

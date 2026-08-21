@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.20"
+_VERSION = "0.21"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -78,6 +78,10 @@ _VALID_ASSET_TYPES = frozenset({
 # V3 §T12 — deliberately one value plus null. MANDATORY_OFFER, SCHEME_OF_ARRANGEMENT,
 # ONE_STEP_MERGER and TWO_STEP_MERGER are excluded by that decision, not pending.
 _VALID_OFFER_MECHANISM = frozenset({"TENDER_OFFER"})
+# V3 §T7 (S-G). Two values plus null, by decision. Vocabulary only -- there is deliberately
+# no cross-field guard: this is independent of acquirer.type and must never be derived from
+# it, and it may coexist with is_secondary_buyout, which stays orthogonal.
+_VALID_SPONSOR_TRANSACTION_ROLE = frozenset({"PLATFORM", "ADD_ON"})
 _VALID_STAKE_TRANSITION_TYPES = frozenset({
     "NEW_MINORITY_STAKE",
     "NEW_MAJORITY_STAKE",
@@ -165,7 +169,9 @@ def _validate(result: dict) -> str | None:
     features = result.get("features")
     if not isinstance(features, dict):
         return "invalid features: expected object"
-    for feature_name in ("is_platform_investment", "is_secondary_buyout", "is_merger_of_equals"):
+    # is_platform_investment is NOT here (V3 §T7, prompt 0.21). It is replaced by
+    # deal.sponsor_transaction_role; the column is retained and simply stops being written.
+    for feature_name in ("is_secondary_buyout", "is_merger_of_equals"):
         value = features.get(feature_name)
         if value is not None and not isinstance(value, bool):
             return f"invalid features.{feature_name}: expected boolean or null"
@@ -190,6 +196,11 @@ def _validate(result: dict) -> str | None:
     om = (result.get("deal") or {}).get("offer_mechanism")
     if om is not None and om not in _VALID_OFFER_MECHANISM:
         return f"invalid deal.offer_mechanism: {om!r}"
+
+    # sponsor_transaction_role (V3 §T7) -- vocabulary only, same reasoning as above.
+    str_role = (result.get("deal") or {}).get("sponsor_transaction_role")
+    if str_role is not None and str_role not in _VALID_SPONSOR_TRANSACTION_ROLE:
+        return f"invalid deal.sponsor_transaction_role: {str_role!r}"
 
     # asset_type — vocabulary check here; the subordination rule (null unless
     # target_type = assets) is enforced at the write, where target_type is in scope.
@@ -426,7 +437,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 (txn.get("deal") or {}).get("pct_acquired"),
                 (txn.get("deal") or {}).get("stake_transition_type"),
                 (txn.get("deal") or {}).get("offer_mechanism"),
-                features.get("is_platform_investment"),
+                (txn.get("deal") or {}).get("sponsor_transaction_role"),
                 features.get("is_secondary_buyout"),
                 features.get("is_merger_of_equals"),
                 d.get("announced_date"), d.get("closed_date"), d.get("signing_date"),
@@ -473,7 +484,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         parent_seller_name = ?,  parent_seller_ticker = ?,
                         parent_seller_description = ?,
                         pct_acquired = ?,  stake_transition_type = ?,  offer_mechanism = ?,
-                        is_platform_investment = ?,  is_secondary_buyout = ?,  is_merger_of_equals = ?,
+                        sponsor_transaction_role = ?,
+                        is_secondary_buyout = ?,  is_merger_of_equals = ?,
                         announced_date = ?,  closed_date = ?,  signing_date = ?,
                         announced_date_precision = ?,  closed_date_precision = ?,  signing_date_precision = ?,
                         rumor_date = ?,
@@ -527,7 +539,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         parent_seller_name, parent_seller_ticker,
                         parent_seller_description,
                         pct_acquired, stake_transition_type, offer_mechanism,
-                        is_platform_investment, is_secondary_buyout, is_merger_of_equals,
+                        sponsor_transaction_role,
+                        is_secondary_buyout, is_merger_of_equals,
                         announced_date, closed_date, signing_date,
                         announced_date_precision, closed_date_precision, signing_date_precision,
                         rumor_date,

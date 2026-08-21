@@ -142,7 +142,9 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
         raise AssertionError("features must be a required output key")
     invalid_feature = dict(hc_result)
     invalid_feature["features"] = dict(hc_result["features"])
-    invalid_feature["features"]["is_platform_investment"] = "yes"
+    # Keyed on is_secondary_buyout since V3 §T7 retired is_platform_investment from the
+    # features contract. The assertion is unchanged: features values are boolean or null.
+    invalid_feature["features"]["is_secondary_buyout"] = "yes"
     if _validate(invalid_feature) is None:
         raise AssertionError("features values must be boolean or null")
 

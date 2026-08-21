@@ -333,6 +333,11 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "round_price_direction" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "008_v3_funding_round.sql").read_text(encoding="utf-8"))
 
+    # 009 (V3 §T7 sponsor transaction role). Sentinel-guarded like the rest; this directory
+    # is NOT globbed, so a migration without a block here never runs.
+    if "sponsor_transaction_role" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "009_v3_sponsor_transaction_role.sql").read_text(encoding="utf-8"))
+
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
     # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document

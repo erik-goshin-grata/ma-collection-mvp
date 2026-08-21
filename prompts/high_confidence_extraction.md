@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.20 (offer_mechanism — direct offer to securityholders)
+**Version:** 0.21 (sponsor_transaction_role — platform vs add-on)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -173,8 +173,11 @@ acquirer:
     other_financial_sponsor
     unknown — cannot be determined
 - description: 1-2 sentence description. Use source language.
-- sponsor_name: For pe_portfolio acquirers, name the PE sponsor/fund if stated.
-  Null for all other acquirer types. If multiple co-sponsors, comma-delimit.
+- sponsor_name: The PE / private-capital sponsor associated with the acquirer,
+  when the source establishes it. Not gated on any acquirer.type value. Null when
+  the source does not establish a sponsor — do NOT infer an identity merely
+  because the acquirer appears to be sponsor-backed, and do not guess a fund name.
+  If multiple co-sponsors, comma-delimit.
 
 parent_seller:
 - name: Parent company divesting the target (when target_type is subsidiary,
@@ -404,16 +407,40 @@ EBITDA.
   needed. Use qualifier for words like "approximately", "up to", or "subject to
   adjustment".
 
+- sponsor_transaction_role: How this transaction relates to a financial sponsor's
+  platform. Enum or null: PLATFORM | ADD_ON | null.
+    PLATFORM — the source affirmatively establishes that THIS transaction creates
+      or acquires the company as a NEW sponsor platform. Explicit wording ("new
+      platform", "platform investment") or transaction context that establishes
+      it. A PE firm being the buyer does NOT establish this on its own. This is
+      deliberately a higher evidence bar than ADD_ON.
+    ADD_ON — a company that is ALREADY sponsor/PE-backed — a portfolio company or
+      an existing platform — is making this acquisition. Literal "add-on",
+      "bolt-on" or "tuck-in" wording is NOT required, and the sponsor does not
+      have to be named. Establishable from the transaction language, from the
+      source establishing the acquirer's portfolio/platform status, or from the
+      company description supplying that context alongside this acquisition.
+      Ordinary wording qualifies: "X, a portfolio company of Y Capital, acquired
+      Z", or "X, a private-equity-backed company, acquired Z" where current
+      sponsor backing is genuinely established.
+    null — neither is established. Sponsor or PE involvement ALONE is not enough,
+      and null is expected to be common.
+    Generic VC backing is not ADD_ON: the relevant fact is PE/sponsor ownership of
+      an existing operating company, not that the acquirer once raised venture
+      capital. The generic word "platform" describing a company, product or
+      technology is not PLATFORM — it must refer to the sponsor relationship.
+    There is no precedence rule to apply mechanically. PLATFORM requires
+      affirmative new-platform evidence; otherwise an acquisition by an already
+      sponsor-backed portfolio company is ADD_ON.
+    This is a transaction classification, independent of acquirer.type. Do not
+      derive it from any acquirer-type value.
+
 features:
 Use this object for explicit, qualified transaction feature evidence. Return
 null when the source does not provide explicit evidence for a feature. Do not
 infer these flags merely from buyer type, merger structure, company size,
 ownership percentages, board composition, or management roles.
 
-- is_platform_investment: true only with explicit/qualified evidence that a
-  financial sponsor is establishing or acquiring the company as a platform
-  investment or new platform. Do not infer merely because a PE sponsor is the
-  buyer.
 - is_secondary_buyout: true when the source explicitly says a sponsor-backed
   company/business is acquired from another financial sponsor, or otherwise
   explicitly provides that sponsor-to-sponsor ownership context. Do not infer
@@ -544,7 +571,8 @@ code fences, no preamble.
       },
       "deal": {
         "pct_acquired": null,
-        "offer_mechanism": null
+        "offer_mechanism": null,
+        "sponsor_transaction_role": null
       },
       "dates": {
         "announced_date": "2026-04-15",
@@ -573,7 +601,7 @@ code fences, no preamble.
           "evidence": "for $500 million in cash"
         }
       ],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -651,7 +679,7 @@ Extract all transactions from this source.
         "pct_acquired": "number | null",
         "stake_transition_type": "NEW_MINORITY_STAKE | NEW_MAJORITY_STAKE | FULL_ACQUISITION | MINORITY_ACQUIRING_MAJORITY | MAJORITY_ACQUIRE_REMAINING | MINORITY_ACQUIRING_REMAINING | MAJORITY_INCREASING_STAKE | MINORITY_INCREASING_STAKE | null",
         "offer_mechanism": "TENDER_OFFER | null",
-        "offer_mechanism": null
+        "sponsor_transaction_role": "PLATFORM | ADD_ON | null"
       },
       "dates": {
         "announced_date": "YYYY-MM-DD | null",
@@ -681,7 +709,6 @@ Extract all transactions from this source.
         }
       ],
       "features": {
-        "is_platform_investment": "boolean | null",
         "is_secondary_buyout": "boolean | null",
         "is_merger_of_equals": "boolean | null"
       },
@@ -756,7 +783,8 @@ Output:
       },
       "deal": {
         "pct_acquired": null,
-        "offer_mechanism": null
+        "offer_mechanism": null,
+        "sponsor_transaction_role": null
       },
       "dates": {
         "announced_date": "2026-04-15",
@@ -785,7 +813,7 @@ Output:
           "evidence": "for $500 million in cash"
         }
       ],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -853,7 +881,8 @@ Output:
       },
       "deal": {
         "pct_acquired": null,
-        "offer_mechanism": null
+        "offer_mechanism": null,
+        "sponsor_transaction_role": null
       },
       "dates": {
         "announced_date": "2026-04-10",
@@ -882,7 +911,7 @@ Output:
           "evidence": "values PublicCo at approximately $2.1 billion enterprise value"
         }
       ],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -948,7 +977,8 @@ Output:
       },
       "deal": {
         "pct_acquired": null,
-        "offer_mechanism": null
+        "offer_mechanism": null,
+        "sponsor_transaction_role": null
       },
       "dates": {
         "announced_date": "2026-04-23",
@@ -968,7 +998,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1035,7 +1065,8 @@ Output:
       },
       "deal": {
         "pct_acquired": null,
-        "offer_mechanism": null
+        "offer_mechanism": null,
+        "sponsor_transaction_role": null
       },
       "dates": {
         "announced_date": "2026-05-01",
@@ -1064,7 +1095,7 @@ Output:
           "evidence": "to sell its Industrial Coatings Division ... for $1.2 billion in cash"
         }
       ],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1124,7 +1155,7 @@ Output:
         "sponsor_name": null
       },
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": null, "offer_mechanism": null},
+      "deal": {"pct_acquired": null, "offer_mechanism": null, "sponsor_transaction_role": null},
       "dates": {
         "announced_date": "2026-04-30",
         "announced_date_precision": "exact",
@@ -1143,7 +1174,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1173,7 +1204,7 @@ Output:
         "sponsor_name": null
       },
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": null, "offer_mechanism": null},
+      "deal": {"pct_acquired": null, "offer_mechanism": null, "sponsor_transaction_role": null},
       "dates": {
         "announced_date": "2026-04-30",
         "announced_date_precision": "exact",
@@ -1201,7 +1232,7 @@ Output:
           "evidence": "acquisition of Omega Systems for $250 million in cash"
         }
       ],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1243,7 +1274,7 @@ Output:
       "target": {"name": null, "domain": null, "ticker": null, "description": null, "asset_type": null},
       "acquirer": {"name": null, "domain": null, "ticker": null, "type": "unknown", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": null, "offer_mechanism": null},
+      "deal": {"pct_acquired": null, "offer_mechanism": null, "sponsor_transaction_role": null},
       "dates": {
         "announced_date": "2026-06-01",
         "announced_date_precision": "exact",
@@ -1262,7 +1293,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1309,7 +1340,7 @@ Output:
       "target": {"name": "BÉIS, LLC", "domain": null, "ticker": null, "description": null, "asset_type": null},
       "acquirer": {"name": "Samsonite Group S.A.", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
-      "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE", "offer_mechanism": null},
+      "deal": {"pct_acquired": 85.0, "stake_transition_type": "NEW_MAJORITY_STAKE", "offer_mechanism": null, "sponsor_transaction_role": null},
       "dates": {
         "announced_date": "2026-08-13",
         "announced_date_precision": "exact",
@@ -1345,7 +1376,7 @@ Output:
           "evidence": "total enterprise value of approximately $210 million on a cash-free, debt-free basis"
         }
       ],
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1396,8 +1427,8 @@ Output:
       },
       "acquirer": {"name": "Cascade Midstream Partners", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": "Meridian Energy Corp", "ticker": null, "description": null},
-      "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": null},
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": null, "sponsor_transaction_role": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "notes": "TARGET TYPE is assets, so asset_type is populated. A pipeline system is INFRASTRUCTURE because that is the thing transacted, not ENERGY, which would describe the parties' sector. No employees or going-concern unit transfer, consistent with an asset purchase rather than a business unit."
     }
   ]
@@ -1433,7 +1464,7 @@ Output:
       "acquirer": {"name": "Halden Therapeutics", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
       "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": "TENDER_OFFER"},
-      "features": {"is_platform_investment": null, "is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
       "notes": "\"commence a tender offer to purchase all outstanding shares\" is a direct offer to securityholders. The back-end merger is a separate fact recorded as combination_structure by the classifier; it does not compete with offer_mechanism and does not replace it."
     }
   ]
@@ -1480,3 +1511,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.18 | 2026-08-17 | **Equity scope narrowed; `MARKET_CAPITALIZATION` split out** (`454d6d3`). `EQUITY_VALUE` is the equity purchase price for the stake actually acquired — consideration that changed hands, not a valuation of the whole company. A market capitalization is a property of the company rather than of the transaction and becomes its own `value.type`, captured when stated but never used as the deal's consideration. A minority stake bought for $600 million in a company with a $2.2 billion market cap is a $600 million transaction; recording the market cap as the equity value overstates it nearly fourfold. |
 | 0.19 | 2026-08-20 | **`asset_type` added (V3 §T13), subordinate to `target_type = assets`.** Eleven values plus null, answering *what kind of asset is being transacted* — **not** the target's sector or industry, which remains a separate classification. `FACILITY` is deliberately distinct from `REAL_ESTATE`: an operating plant is a different transaction object from property held principally as real estate. Single-valued; a portfolio of like assets is one value. **Null for every target type other than `assets`**, enforced in the stage validator — it is a sub-classification of an asset purchase, not an independent judgement. Example 8 added; all ten existing example target blocks carry `asset_type: null`. |
 | 0.20 | 2026-08-20 | **`offer_mechanism` added (V3 §T12).** `TENDER_OFFER` | null, in the `deal` block. Describes whether the acquisition is effected through an offer made directly to target securityholders; established by tender-offer, exchange-offer or equivalent language. Vocabulary deliberately not expanded — `MANDATORY_OFFER`, `SCHEME_OF_ARRANGEMENT`, `ONE_STEP_MERGER` and `TWO_STEP_MERGER` are excluded by §T12. Two anti-inference rules: a public target is not evidence of a tender offer, and a merger agreement alone is not either. Example 9 added for the two-step case, where `offer_mechanism = TENDER_OFFER` and `combination_structure = MERGER` coexist. Previously this fact existed only as `merger_structure = TENDER_OFFER` on the SEC/agreement path, unreachable for any transaction without a filing; that path is retained as corroborating evidence, not replaced. |
+| 0.21 | 2026-08-21 | **`sponsor_transaction_role` added (V3 §T7); `is_platform_investment` retired.** `PLATFORM` / `ADD_ON` / null in the `deal` block, replacing the v0.4 `is_platform_investment` + `is_add_on` pair. `PLATFORM` needs affirmative evidence that **this** transaction creates a new sponsor platform — a PE buyer alone does not establish it. `ADD_ON` is an acquisition **by** an already sponsor/PE-backed portfolio or platform company; literal add-on/bolt-on/tuck-in wording is **not** required, the sponsor need not be named, and a company description may supply the context. Null is expected to be common: sponsor involvement alone is insufficient and generic VC backing is not `ADD_ON`. **No mechanical precedence rule** — `PLATFORM` requires new-platform evidence, otherwise an acquisition by an already-backed portfolio company is `ADD_ON`. Independent of `acquirer.type`, and never derived from it. `is_secondary_buyout` stays orthogonal. `is_platform_investment` leaves the `features` contract entirely — it accepted only explicit platform wording, which is the narrower half of what §T7 asks. **`sponsor_name` is no longer gated on `pe_portfolio`** (a value §T8 removes): populate it whenever the source establishes the sponsor associated with the acquirer, never inferred from apparent sponsor backing. |

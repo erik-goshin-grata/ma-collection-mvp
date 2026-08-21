@@ -1,0 +1,42 @@
+-- 009_v3_sponsor_transaction_role.sql
+-- V3 slice S-G — Sponsor Transaction Role (inventory §T7).
+--
+-- Whether this transaction establishes a new sponsor platform, or is an acquisition made by
+-- a company that is already sponsor/PE-backed. PLATFORM | ADD_ON | null.
+--
+-- This replaces the v0.4 `is_platform_investment` / `is_add_on` pair, which split one
+-- question across two flags and answered it badly in both halves.
+--
+-- `is_add_on` was `acquirer_type == 'PE_PORTFOLIO'` -- an unconditional proxy with no
+-- evidence contract, reading a vocabulary value §T8 removes. §T7 is explicit that the
+-- defect is not that portfolio-company status cannot support ADD_ON, but that an overloaded
+-- enum value was used as a stand-in for evidence. `is_platform_investment` had the opposite
+-- failing: it accepted only explicit "platform investment" wording, where §T7 allows the
+-- transaction/source context to establish the fact.
+--
+-- Evidence contract, from §T7:
+--   PLATFORM  affirmative evidence that THIS transaction creates or acquires a new sponsor
+--             platform. A PE firm being the buyer does not establish it. Deliberately a
+--             higher bar than ADD_ON.
+--   ADD_ON    an already sponsor/PE-backed portfolio or platform company is making the
+--             acquisition. Literal add-on / bolt-on / tuck-in wording is NOT required, the
+--             sponsor need not be named, and a company description may supply the context.
+--   null      neither is established. Sponsor or PE involvement alone is insufficient, and
+--             null is expected to be common. Generic VC backing is not ADD_ON.
+--
+-- There is no precedence algorithm between the two values, by decision: PLATFORM requires
+-- affirmative new-platform evidence, and otherwise an acquisition by an already
+-- sponsor-backed portfolio company is ADD_ON.
+--
+-- `is_secondary_buyout` remains orthogonal -- a sponsor-to-sponsor deal may legitimately be
+-- both PLATFORM and a secondary buyout, so nothing here may suppress it.
+--
+-- Both retired columns are RETAINED with their stored history and simply stop being
+-- written, matching the standing rule that a kept column is not a claim of continued
+-- authorship. Nothing is backfilled and exports are untouched.
+--
+-- Enums are application-layer (stages/high_confidence_extract.py), not CHECK constraints,
+-- matching every other typed dimension in this schema.
+
+ALTER TABLE staging_extraction ADD COLUMN sponsor_transaction_role TEXT;   -- PLATFORM | ADD_ON | null
+ALTER TABLE transaction_record ADD COLUMN sponsor_transaction_role TEXT;   -- PLATFORM | ADD_ON | null
