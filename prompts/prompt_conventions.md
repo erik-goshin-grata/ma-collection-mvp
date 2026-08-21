@@ -1,6 +1,6 @@
 # Prompt Conventions
 
-**Version:** 0.3 (V2 alignment)
+**Version:** 0.4 (Sonnet tier)
 **Repo path:** `prompts/prompt_conventions.md`
 
 Conventions that apply to every prompt file in this directory. Each individual prompt file references this document by default and only specifies deviations.
