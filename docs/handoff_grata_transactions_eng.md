@@ -385,8 +385,37 @@ Known, deliberately not actioned in this pass. None blocks the items above.
 | **Summary prompt-contract mismatch** | The prompt asks for "the source PR's own framing"; the stage supplies no PR text. Recorded, not redesigned. |
 | `summary.word_count` unenforced | Stored, never validated against the prompt's 80–150 word contract. |
 | No behavioral regression coverage for Stages 12–13 | Neither `summarize.py` nor `rationale_tag.py` is exercised by any test. |
-| `specs/pipeline.md` stage numbering | Still uses a pre-`sec_documents`/`agreement_extract` scheme — it numbers export as Stage 12 where `run.py` has 14. |
+| `specs/pipeline.md` stage numbering | Still uses a pre-`sec_documents`/`agreement_extract` scheme — it numbers export as Stage 12 where `run.py` has 14. The 2026-08-21 prompt-trust re-audit found the log strings disagree too: `summarize.py` logs "Stage 10", `rationale_tag.py` logs "Stage 11", and `export.py:268` logs "Stage 13" while `:287` logs "Stage 14". Three layers, three schemes. |
 | **"Processed, no rationale found" has no durable state** | `rationale_tag.primary_rationale` is `NOT NULL`, so a transaction processed with no source-supported rationale writes no row — and the stage's re-run gate keys on the absence of a current row, so it is re-processed every run. **Not idempotent for that outcome.** An ENG/design consideration, not a defect to patch: writing `OTHER` is forbidden by R9, and no table redesign is proposed. The requirement is only that *not yet processed* and *processed, none found* be distinguishable. Inventory §S2.1. |
+
+
+### Prompt trust re-audit — accepted non-blocking limitations (5)
+
+From the 2026-08-21 re-audit of every live prompt contract, asserted against the **delivered**
+system prompts (`load_prompt_file(...)`), not the Markdown files. Thirteen of fourteen live
+prompts came back CLEAN or explicitly accepted. The one blocker — the relevancy `reason_code`
+vocabulary living in §6 and therefore never reaching the model — was remediated in
+`relevancy_filter` 0.8. These five are **accepted, non-blocking for S-H**, and none affects
+extraction semantics.
+
+| Limitation | Where | Note |
+| --- | --- | --- |
+| Agreement family absent from the model-tier table | `prompts/prompt_conventions.md` §2 | The table lists 7 stages plus a 4b parenthetical. The five `agreement_*` prompts appear only in the OpenAI hierarchy, though they run on `model="opus"` (`stages/agreement_extract.py:417`) — a third of the directory has no tier recorded in the document that governs it. |
+| Surplus legacy `.format()` kwargs | `summarize.py:173`, `low_confidence_extract.py:165` (`deal_type` + `event_type`); `rationale_tag.py:144` (`deal_type`) | No template consumes them; `str.format` ignores extras, so it is silent. Dead since the V2 alignment removed the placeholders. |
+| Unused `_VALID_LEGACY_EVENT_TYPES` | `stages/deal_type_classify.py:91` | Defined, never referenced. `AMENDMENT` and `TERMINATION` appear nowhere in the classifier prompt. |
+| Stage numbering | see the row above | Recorded once, in §6. |
+| Empty fenced JSON block | `prompts/low_confidence_extraction.md:60` | The sole unparseable block of 101 across all prompts. Pre-existing — confirmed byte-identical before the caller-owned-provenance sweep, so not sweep-induced. |
+
+**Method note.** Two findings in this audit — the relevancy vocabulary and the Strategic
+Rationale prompt's Example 3 — share one root cause: `load_prompt_file` delivers only the §4
+and §5 fences, so anything outside them is documentation, and a test asserting on it certifies
+nothing about model behaviour. `test_reason_code_parity.py` returned 24 == 24 for the prompt's
+entire history while the model was shown none of the codes in an authoritative list. **Prompt-
+contract tests must read the delivered string.**
+
+**Strategic Rationale** is tabled as a single implementation item spanning §R7 + §R9 + §S2.1,
+with an open Product question on whose rationale the field represents. Recorded in full at
+`docs/v3_slice_reconciliation.md` §10.
 
 ---
 

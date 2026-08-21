@@ -289,3 +289,121 @@ Stage 12.
 - S-A `SOLICITED` real-text validation.
 - S-E representative funding Gate 2.
 - S-F explicit CVR and generic contingent Gate 2.
+
+---
+
+## 10. Strategic Rationale — tabled implementation item (§R7 + §R9 + §S2.1)
+
+**TABLED — Product-accepted limitation. Not a blocker for S-H.** Recorded here because the
+three inventory decisions it depends on are settled individually and unimplementable
+individually, and that fact previously existed only in conversation.
+
+### Why the three cannot be separated
+
+| | |
+| --- | --- |
+| **§R7** | The three structure-derived defaults are retired: PE acquirer on `ACQUISITION`, `SPIN_OFF`/`SPLIT_OFF`, and `RECAPITALIZATION`, each → `FINANCIAL_OR_ARBITRAGE`. Transaction structure and buyer type must not manufacture rationale. |
+| **§R9** | Settled semantically: `OTHER` means a source-supported rationale exists but fits no named category. No determinable source-supported rationale is **NULL**, not `OTHER`. |
+| **§S2.1** | The physical representation of "processed, none found" is deliberately left to Engineering — a durable marker, a nullable rationale, or a separate processing-state record are all open. |
+
+Retiring the §R7 defaults while leaving the prompt's current `OTHER` rule in place would
+route no-evidence cases into `OTHER` — precisely the missing-information bucket §R9 exists to
+eliminate — converting a removal into a silent relabelling. The defaults were the only thing
+guaranteeing a `rationale_tag` row for the deals that state no rationale, so removing them
+widens the §S2.1 gap rather than causing it.
+
+**Product has not approved** inventing a response-contract sentinel for "no rationale", nor
+knowingly routing no-rationale cases to `OTHER` in order to close the cleanup. Either would
+trade a recorded defect for an unrecorded one.
+
+### The mechanical facts, verified
+
+- `rationale_tag.primary_rationale` is `TEXT NOT NULL` (`schema/001_initial.sql:471`). No
+  migration has altered it. NULL is not storable.
+- `stages/rationale_tag.py::_validate` rejects every null form — `None`, `""`, and an omitted
+  key alike — so the stage `continue`s without inserting. **"No rationale" is row absence, not
+  a NULL value.**
+- The re-run gate is `NOT EXISTS (… rationale_tag … is_current = 1)` (`:99–102`). A transaction
+  that legitimately yields no rationale is therefore reprocessed on **every** subsequent run,
+  paying the model cost indefinitely. **The stage is not idempotent for that outcome**, and
+  *not yet processed* is indistinguishable from *processed, none found*.
+- Both consumers already `LEFT JOIN` (`stages/export.py:260`, `eval/score.py:112`), and
+  `eval/score.py::_compare` scores gold-blank against pipeline-NULL as a match. **No schema
+  migration is required** for NULL semantics at the consumer level; what is missing is a way
+  to *record* the no-rationale outcome.
+- Rationale is not an aggregated field: `grep rationale stages/aggregate.py
+  lib/observation_writer.py` returns nothing. Stage 13 writes `rationale_tag` directly, so the
+  canonical-field structural gate does not apply to this work.
+
+### Open Product question — whose rationale is this?
+
+**Unresolved.** Whether `strategic_rationale` represents **acquirer** rationale,
+**seller/target** rationale, or **overall transaction** rationale has never been decided. It is
+especially material for PE transactions, where much announcement language describes
+seller/target benefits — shareholder value, certainty of consideration, freedom from quarterly
+reporting — rather than buyer motivation. It bears directly on §R7: the retired PE default
+assumed a buyer-motivation reading of language that frequently is not about the buyer at all.
+
+### Tabled consideration — rationale evidence excerpts
+
+When the rationale model is revisited, consider retaining concise source excerpts supporting
+each classified rationale, for researcher review and provenance — including the ability to
+inspect **whose** rationale the quoted language represents. **No storage or extraction design
+is approved.** Recorded as a consideration only; it interacts with §R8's requirement that
+`SOURCE_STATED` carry durable evidence attribution, which the current
+`supporting_excerpt_index` cannot satisfy because it indexes a prompt-time list that is never
+persisted.
+
+### Attached findings — carried with this item, not fixed
+
+- **Summary-only fallback.** When the keyword scan yields no excerpts, `rationale_tag.py:142`
+  substitutes `"(none — classifying from summary only)"` and calls the model anyway,
+  contradicting the prompt's own evidence rule and §R10.
+- **Stale stage labels.** `:109` and `:223` log "Stage 11"; this is Stage 13.
+- **Surplus legacy kwarg.** `:94` selects `tr.deal_type` and `:145` passes `deal_type=` to
+  `.format()`, but §5 has had no `{deal_type}` placeholder since 0.5.
+- **Stale downstream claim.** `docs/funding_path_design.md:400–402` asserts funding events
+  default to `FINANCIAL_OR_ARBITRAGE` "already handled by the PE/sponsor rule" — no funding
+  rule exists, and its stated justification is the rule §R7 retires.
+- **Gold-set coverage.** `eval/gold_set_test.csv` has 3 labelled rows and **no blank-rationale
+  case**, so NULL semantics cannot be validated by the current gold set. Row `source_raw_id=8`
+  (SOLAI going-private) expects `FINANCIAL_OR_ARBITRAGE` from structure-derived framing and is
+  the one row in the affected family.
+- **Unenforced contract.** §6 declares `notes` "Required when rationale is OTHER"; `_validate`
+  does not check it.
+- **Orphaned changelog row.** 0.4 records "Updated take-private note to derived flag
+  reference"; no take-private or `is_take_private` reference survives in the prompt body.
+
+### Also recorded: §7 examples are not delivered to the model
+
+`prompts/base.py::load_prompt_file` extracts only the §4 and §5 fences. The prompt's
+Few-Shot Examples are documentation, not behaviour. Two consequences for this file: Example 3
+("Take-private with PE acquirer, default financial") cannot influence any classification, and
+the failure-mode row claiming "Example 3 addresses" take-private misclassification is false as
+written. Both are documentation corrections belonging to the tabled slice, not defects on
+their own.
+
+**No Strategic Rationale behaviour is implemented or proposed by this record.**
+
+---
+
+## 11. Accepted non-blocking limitations — prompt trust re-audit
+
+The full prompt-contract re-audit found six issues. One — the relevancy `reason_code`
+vocabulary never reaching the model — was remediated in `relevancy_filter` 0.8. The remaining
+five are **accepted as non-blocking for S-H** and belong on the Engineering-handoff cleanup
+list:
+
+| Finding | Where | Disposition |
+| --- | --- | --- |
+| Agreement family has no model-tier row | `prompts/prompt_conventions.md` §2 lists 7 stages plus a 4b note; the five `agreement_*` prompts appear only in the OpenAI list, though they run on `model="opus"` (`stages/agreement_extract.py:417`) | Accepted |
+| Surplus legacy `.format()` kwargs | `summarize.py:173` and `low_confidence_extract.py:165` pass `deal_type` + `event_type`; `rationale_tag.py:144` passes `deal_type`. No template consumes them; `str.format` ignores extras silently | Accepted |
+| Unused `_VALID_LEGACY_EVENT_TYPES` | `stages/deal_type_classify.py:91` — defined, never referenced; `AMENDMENT` and `TERMINATION` appear nowhere in the classifier prompt | Accepted |
+| Stage numbering disagrees across layers | `specs/pipeline.md:33,74,80` calls export Stage 12 and the pipeline 12 stages; docstrings say 12/13/14; `summarize` logs "Stage 10", `rationale_tag` logs "Stage 11", and `export.py:268` logs "Stage 13" while `:287` logs "Stage 14" | Accepted |
+| Empty fenced JSON block | `prompts/low_confidence_extraction.md:60` — the sole unparseable block of 101 across all prompts; pre-existing, confirmed byte-identical before the provenance sweep | Accepted |
+
+**Method note worth keeping.** Both the relevancy finding and the Example 3 finding come from
+the same root cause: content outside the §4/§5 fences is never delivered, and a test that
+asserts on it certifies nothing about model behaviour. `test_reason_code_parity.py` passed on
+24 == 24 for the prompt's entire history while the model was shown none of the codes in an
+authoritative list. Prompt-contract tests must read `load_prompt_file(...)`, not the Markdown.
