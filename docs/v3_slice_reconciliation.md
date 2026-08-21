@@ -124,11 +124,34 @@ is the transferable lesson; the S-C fix worked because it named a *cue* the prom
 addressed, not because it repeated an existing rule more firmly.
 
 **The `approach_type` evidence rule.** `UNSOLICITED` requires the source to state or establish an
-unsolicited bid; `SOLICITED` requires it to state or establish a solicited process — a sale
-process, auction, strategic review, outreach, or an invitation to bid. Neither value is inferred
-from the absence of the other, and **null is a first-class outcome that is expected to be the most
-common one.** `SOLICITED` remains **unexercised** in validation — no source establishing a
-target-initiated process has been supplied.
+unsolicited bid. Neither value is inferred from the absence of the other, and **null is a
+first-class outcome that is expected to be the most common one.**
+
+**`SOLICITED` is evidence-required.** Populate it only where the source **affirmatively
+establishes an organised or invited process**:
+
+- an auction;
+- a formal sale process or strategic review;
+- a bankruptcy, administrator or receiver process;
+- a marketed sale, outreach, or an invitation to bid;
+- explicit solicited language.
+
+**Friendly negotiation, board recommendation, or signing an agreement does not by itself
+establish `SOLICITED`.** Those facts do not establish approach origin. `deal_attitude` remains
+independently determined under its own evidence rule. **NULL is a first-class outcome and is
+expected to be very common.**
+
+**Known gap between this rule and the live prompt, recorded not fixed.**
+`low_confidence_extraction` 0.8 lists *"a sale process, auction, strategic review or outreach, or
+an invitation to bid"* but does **not** name a bankruptcy, administrator or receiver process, and
+carries **no exclusion** for friendly negotiation, recommendation or signing. The prompt is left
+unchanged for now: `SOLICITED` has never been exercised, so there is no observed behaviour to
+remediate, and the 0.8 `approach_type` attempt is direct evidence that adding prose to a rule the
+prompt already states does not by itself change model behaviour. **Future real-text `SOLICITED`
+validation determines whether prompt remediation is necessary.**
+
+`SOLICITED` remains **unexercised** in validation — no source establishing an organised process
+has been supplied.
 
 ---
 
