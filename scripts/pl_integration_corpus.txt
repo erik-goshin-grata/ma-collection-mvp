@@ -1,0 +1,61 @@
+# PL integration corpus — 29 stories, selected 2026-08-21.
+#
+# Drawn from the 745 stories that passed Relevancy 0.8 on natural PredictLeads
+# traffic (2026-08-19 .. 2026-08-21). Selected on source text and the Stage-1
+# result only. PredictLeads' own `category` and generated `summary` were NOT used
+# and are not carried into anything downstream.
+#
+# Excluded by construction: the seven clearly-wrong Stage-1 results, every
+# ambiguous-scope case, all multi-event digests, and any body under ~400 chars.
+#
+# NOT present in this corpus, because the two-day window does not contain them:
+# TAKE_PRIVATE, tender offers, schemes of arrangement, secondary buyouts, and
+# earnout/CVR structures. Those need the curated Gate 2 corpus; this set cannot
+# cover them and does not pretend to.
+#
+# Format: one PL event_id per line. Everything after '#' is a comment.
+# The story's title, URL, body and Stage-1 result are read from the corpus TSV
+# and the Relevancy results JSONL at run time -- nothing is duplicated here.
+
+# --- ordinary acquisitions -------------------------------------------------
+9303657a-a974-475a-bd8b-efbd0ca8518f  # Veralto/Cleanwater1 $465M, 17x LTM EBITDA, net $452M after tax benefits
+7468cce6-1c19-4675-a4b8-6ebb2b541020  # Holcim/Fermacell EUR840M FROM James Hardie -- business unit + parent seller
+b34c7c79-1339-4b41-90b4-ba843254ee8a  # Pontiac/Ottawa Bancorp -- per-share, both boards, named advisor + counsel
+539c9661-1de4-4071-af19-b4cb5897d2d6  # DocGo/Hicuity -- assumed debt $52M + stock to a preferred holder
+5260caf6-0f17-48cf-9bba-a0ed67677cc5  # Kodeon/Breethe $3.25M -- low end of the value distribution
+
+# --- PE / sponsor ----------------------------------------------------------
+86e3e770-c949-4c34-95eb-9da8c2a7c214  # Advent/NZCR $1b majority stake, sellers retain minority
+f525c2e3-cede-42ce-9ee9-a69001527a20  # INVL PE Fund II buys two processors to combine -- platform
+9eebc3ba-8a3f-4f5b-a98e-3787c3d78761  # MarketSphere/Long Ridge -- growth equity, stake deliberately vague
+40c048a8-ad1a-449e-9acf-68798f2aa254  # Life Couriers/JLL Partners 64%, EUR210M revenue, financials undisclosed
+
+# --- funding rounds --------------------------------------------------------
+3fe1baac-253d-4c61-a2c8-96d9fccf464f  # Castelion $1B Series C = $800M equity + $250M revolver (mixed)
+63d963b1-9807-4bf9-b057-a932f4005a25  # Rillet $100M Series C AT $1B valuation
+a8658b24-a5c4-44af-83c6-f5f1cfc4ffd5  # Kynexis EUR40M; total Series A now EUR97M (total raised to date)
+787ec476-7714-431b-b44c-3c6b21c89da9  # Tiger Technology $10M Series A -- "initial closing", partial
+81c16cb1-5d83-401f-a166-552c7e3f9658  # EnerPure  [MULTI-SOURCE 1/2] investor-side framing
+e394e751-d4ae-4535-9181-03a4fa68405b  # EnerPure  [MULTI-SOURCE 2/2] company-side framing, adds ERA C$6.2M
+
+# --- minority investments --------------------------------------------------
+c2c7abed-7f8d-41b4-ac20-dd00b2e2b9e0  # KKR/BookMyShow definitive agreements, INR 2,048 crore
+7fac9a4d-cef4-48f7-8ec1-8e603c291633  # Viridis $120M equity inside a 70/30 debt-equity blend of $449M
+d63f0908-be9f-4118-b8f2-2c84e440c4ba  # TANAKA/Clean Planet [MULTI-SOURCE 1/2] 5,573c
+4a3c908e-4277-4cf8-bbcb-10eefb3b8107  # TANAKA/Clean Planet [MULTI-SOURCE 2/2] 1,901c, machine-translated
+
+# --- asset / business-unit sales -------------------------------------------
+2b2345ec-5f3c-41ed-ab23-8284bc4e5126  # HarperLove/ChromaScape division -- known S-C/S-G control case
+817dd303-1d4c-46f1-a205-5270b8e88686  # Samsung SDI 15.22%->10.22% at 340,000 won via treasury acquisition
+7c0130b3-5666-43b9-8c0a-63931f645862  # EFG/Canaccord [MULTI-SOURCE 1/3] 2,059c, CARVE_OUT at Stage 1
+c60b0263-d4ce-49ae-a66e-9c9f89262ad9  # EFG/Canaccord [MULTI-SOURCE 2/3] 2,658c, seller-side framing
+fda9b3c7-b4a3-4baf-a499-6582d2a2de78  # EFG/Canaccord [MULTI-SOURCE 3/3]   409c, ACQUISITION at Stage 1
+
+# --- merger-structured -----------------------------------------------------
+433893da-41d7-4f03-90db-5064440c2063  # Arcturis/Akrivia GBP140m ALL-SHARE
+f0a9754b-0452-4d3f-955e-202c2a1a845e  # Spectre/NREC three-cornered amalgamation, 1:1 exchange
+8f14efd5-6f50-4ef0-89f9-ccd4039d44ca  # Monte dei Paschi [STRESS: 1 source, 2 potential transactions] 1/2
+1e7d5fc8-1aba-4e19-a297-fe56e5f3b0ec  # Monte dei Paschi [STRESS: 1 source, 2 potential transactions] 2/2
+
+# --- completed -------------------------------------------------------------
+009a050f-945c-41a3-beb3-8d75e46b7a17  # ZenaTech closes 28th DaaS acquisition -- CLOSED status, serial acquirer
