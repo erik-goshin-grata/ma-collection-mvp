@@ -294,8 +294,9 @@ naming convention:
 Values **outside** the merger chain, siblings of `MERGER` rather than members of it:
 
 > **SUPERSEDED by §T2 (2026-08-19).** ~~`SHARE_PURCHASE`~~ and ~~`ASSET_PURCHASE`~~ are
-> **removed from V3**. `ASSET_PURCHASE` duplicated the live `target_type = ASSETS`, which is
-> also the deriving input elsewhere; `SHARE_PURCHASE` carried no fact —
+> **removed from V3**. `ASSET_PURCHASE` recorded a legal purchase form rather than a
+> combination structure (see the corrected rationale in §T2 — it does **not** simply duplicate
+> `target_type = ASSETS`); `SHARE_PURCHASE` carried no fact —
 > `event_type = ACQUISITION` with `combination_structure = NULL` already says it. Only
 > `NULL` survives as a non-chain value.
 
@@ -2203,9 +2204,18 @@ The §A6.1 storage and query rules stand in full: store the most specific suppor
 **query by implication, never equality**; ambiguity resolves **upward**; the implication set
 lives in the dictionary, not per-consumer logic.
 
-- **`SHARE_PURCHASE` and `ASSET_PURCHASE` are removed.** `ASSET_PURCHASE` duplicated
-  `target_type = ASSETS`; `SHARE_PURCHASE` was a named null — `event_type = ACQUISITION`
-  with `combination_structure = NULL` already says it. Supersedes §A1 and §A6.1.
+- **`SHARE_PURCHASE` and `ASSET_PURCHASE` are removed.** `ASSET_PURCHASE` recorded a legal
+  purchase form that is not a combination structure; `SHARE_PURCHASE` was a named null —
+  `event_type = ACQUISITION` with `combination_structure = NULL` already says it. Supersedes
+  §A1 and §A6.1.
+  > **Rationale corrected 2026-08-20.** This bullet originally read *"`ASSET_PURCHASE`
+  > duplicated `target_type = ASSETS`"*. **The decision stands; that reasoning does not.** An
+  > asset purchase and `target_type = ASSETS` are different facts: the first is the legal form
+  > of the transaction, the second is what was structurally transacted. A company can be
+  > acquired *in substance* through an asset purchase, and S-C Gate 2 confirmed exactly that on
+  > real text (GMS / Evergreen), which is why `deal_type_classifier` 0.11 now states that
+  > transaction form alone does not determine `target_type`. Reading the two as equivalent is
+  > the error that produced the only S-C extraction defect.
 - **Detailed SEC/agreement merger mechanics stay outside this decision.** Direct /
   forward-triangular / reverse-triangular are a separate concept, not needed in V3 now.
   They may be added later if a Product or filtering case warrants it; the existing
@@ -2224,6 +2234,33 @@ A single structural dimension answering *what structural thing was transacted?*
   and casing are ENG implementation.
 - Asset classification remains a possible **subordinate** classification of the acquired
   object when `target_type = ASSETS`. **Enum and placement are not decided here.**
+  *(Settled by §T13: eleven values plus null, subordinate to `target_type = ASSETS`.)*
+
+**Per-value definitions (added 2026-08-20).** These were previously carried only by
+`prompts/deal_type_classifier.md`, inherited from V2, and never stated as a decision — which
+left the operative meaning of the field outside the decision record.
+
+| value | what it means |
+| --- | --- |
+| `STANDALONE_COMPANY` | An independent company being acquired. The common case. |
+| `SUBSIDIARY` | A separate legal entity owned by a parent. |
+| `BUSINESS_UNIT` | A division or operating segment of a parent, not a separate legal entity. |
+| `ASSETS` | A discrete set of assets, contracts, products or operating rights that is not a going-concern operating unit. |
+| null | The source does not establish the structure. |
+
+**Transaction form does not determine `target_type` (S-C, 2026-08-20).** `assets` is not
+selected *solely* because a source calls the deal an "asset purchase" or says the buyer
+acquired "the assets of" a company. Where the substance is the acquisition of a continuing
+operating business, the structural answer follows the substance. The word "solely" is
+load-bearing: this removes a mechanical cue, it does not install a replacement rule, and no
+`of`/`from` parsing test, evidence checklist or decision tree is adopted. Researcher review
+resolves genuinely ambiguous cases. See `prompts/deal_type_classifier.md` 0.11.
+
+**Open boundary, not decided.** For an acquisition of substantially an entire operating
+company through an asset purchase — where the business continues but the seller's legal entity
+is not acquired — Product ruled `BUSINESS_UNIT` on the GMS / Evergreen evidence but did **not**
+generalise it. `BUSINESS_UNIT`'s definition above requires a parent and a non-separate legal
+entity, neither of which such a target satisfies, so the general rule remains open.
 
 ## T4. `is_divestiture` — removed from V3
 

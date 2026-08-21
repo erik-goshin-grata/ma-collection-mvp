@@ -160,6 +160,13 @@ All pipeline stages log under a shared `run_id` (UTC timestamp + optional prefix
 
 ## 8. Schema SQL Compatibility
 
+> **PARTIALLY SUPERSEDED by V3 (2026-08-20).** The enumerations below record the Drop 2.1
+> v0.2 state and are kept as history. Live vocabulary now differs in four places:
+> `v2_event_type` no longer contains `MERGER` or `REVERSE_MERGER` (§T2 — they are
+> `combination_structure` values); `target_type` is lowercase and adds `assets` (§T3);
+> `acquirer_type` is lowercase; and `consideration_components.form` adds
+> `CONTINGENT_CONSIDERATION` (S-F). The prompts and stage validators are authoritative.
+
 This pipeline expects the v0.2 schema enumerations from Drop 2.1:
 
 - `deal_type → {ACQUISITION, MERGER, SPIN_SPLIT, REVERSE_MERGER, JOINT_VENTURE, MINORITY_INVESTMENT, UNKNOWN}`

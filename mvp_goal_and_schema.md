@@ -536,7 +536,7 @@ This review is a prerequisite for any v2 securities extraction scoping conversat
 
 **New fields (Drop 3.14/3.15/3.17 / schema v0.5):**
 - `transaction_status TEXT` — deal lifecycle state (`PENDING | CLOSED | TERMINATED | RUMORED | UNKNOWN`). Derived at aggregation from event_type + closed_date. Distinct from event_type (which is the source PR kind). (`transaction_record` only)
-- `is_de_spac INTEGER` — 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC. (`transaction_record` only)
+- `is_de_spac INTEGER` — 1 when deal_type=REVERSE_MERGER AND acquirer_type=SPAC. (`transaction_record` only) **No longer authored (V3 §T2, S-B):** the de-SPAC fact is `combination_structure = DE_SPAC`. The column and its stored values are retained; Stage 9 simply stopped writing it.
 - event_type semantics revised (HC extraction v0.8): same-day announce-and-close PRs now correctly produce event_type=ANNOUNCEMENT + closed_date populated (previously mis-tagged as event_type=CLOSE in v0.4–0.7).
 
 **Earnout and CVR consideration (Drop 3.16 / schema v0.6):**

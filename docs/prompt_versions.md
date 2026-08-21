@@ -15,13 +15,25 @@ July 28, 2026.
 
 | Prompt | File | Current Version | Last Changed | V2 Enum Target | Notes |
 |---|---|---|---|---|---|
-| Deal Type Classifier | `prompts/deal_type_classifier.md` | 0.8 | 2026-08-18 | V2-2026-07-28 + harness minority cleanup | Removes `MINORITY_INVESTMENT` from core output vocabulary; routes minority transactions to underlying core event. **0.8:** adds `PIPE` as a recognized, unprofiled type (12 types) with an explicit negative list; used only when the source names the structure. Terminal — Stage 3 stamps `RECOGNIZED_NOT_PROFILED`, nothing downstream runs |
-| Relevancy Filter | `prompts/relevancy_filter.md` | 0.6 | 2026-08-18 | V2-2026-07-28 | 0.6: adds `PIPE` to the RELEVANT reason_code enum (24 codes), gated on the source naming the structure — RELEVANT so the row reaches Stage 3 and the recognized-exclusion record is created. **Was absent from this table, which is part of why the prompt sat at 0.5 while the stage stamped 0.4; prompt/stage version parity is now asserted by `scripts/test_reason_code_parity.py`.** |
-| High Confidence Extraction | `prompts/high_confidence_extraction.md` | 0.18 | 2026-08-17 | V2-2026-07-28 + equity scope | 0.18: `EQUITY_VALUE` is stake-level consideration only; market capitalization split out as its own `MARKET_CAPITALIZATION` type, retained as a fact but never canonical consideration. 0.17: `total_debt`/`cash_st` with per-figure currency + `balance_sheet_as_of_date`, POINT_IN_TIME framing, source-stated-USD preference. 0.16: transaction feature flags. 0.15: platform/secondary/MOE. 0.14: nullable `deal.stake_transition_type` when explicit. 0.13: capital-raised precondition + `round_size` capture |
-| Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section added; LTM/NTM non-interchangeable rule; period type semantic conflict example |
-| Deal Summary | `prompts/deal_summary.md` | 0.9 | 2026-07-28 | V2-2026-07-28 | Input fields updated to V2 names; RECAPITALIZATION framing added; NTM multiples in framing rule |
-| Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | New prompt — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |
-| Funding HC Extraction | `prompts/funding_hc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | **Validated 2026-08-17: 8/8 on real-source fixtures; no change warranted.** New prompt — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT. Multi-investment source support. Sparse source handling. |
+| Deal Type Classifier | `prompts/deal_type_classifier.md` | **0.11** | 2026-08-20 | V3 §T2/§T3 | 0.11: transaction form alone does not determine `target_type` — `assets` is not chosen *solely* because a source says "asset purchase" (S-C Gate 2). 0.10: `spinco` removed from `target_type`. 0.9: merger family moved to `combination_structure`. 0.8: `PIPE` recognized-not-profiled |
+| Relevancy Filter | `prompts/relevancy_filter.md` | 0.6 | 2026-08-18 | V2-2026-07-28 | 0.6: adds `PIPE` to the RELEVANT reason_code enum (24 codes). Reason codes are a **separate vocabulary** from `v2_event_type` — `MERGER_ANNOUNCEMENT` and `REVERSE_MERGER` remain valid *hints* after §T2 removed them as event types, which is what `overrides_relevancy_hint` exists for. Parity asserted by `scripts/test_reason_code_parity.py` |
+| High Confidence Extraction | `prompts/high_confidence_extraction.md` | **0.20** | 2026-08-20 | V3 §T12/§T13 | 0.20: `offer_mechanism` (`TENDER_OFFER`/null) extracted from ordinary sources, not only SEC filings. 0.19: `asset_type`, subordinate to `target_type = assets` and null for every other target type. 0.18: `EQUITY_VALUE` is stake-level only |
+| Low Confidence Extraction | `prompts/low_confidence_extraction.md` | **0.8** | 2026-08-20 | V3 §T11 | **Was absent from this table.** 0.8: a mandatory/regulatory offer does not by itself establish `approach_type = UNSOLICITED` — see the known-issue note in `docs/v3_slice_reconciliation.md`, this clarification did not change the observed behaviour. 0.7: `CONTINGENT_CONSIDERATION` added, `includes_earnout` retired. 0.6: fused `hostile` split into `deal_attitude` + `approach_type` |
+| Funding HC Extraction | `prompts/funding_hc_extraction.md` | **0.2** | 2026-08-20 | V3 §T14 | 0.2: `round_price_direction` (UP/DOWN/FLAT/null) replaces `is_down_round`, which could only ever record DOWN. 0.1 validated 2026-08-17: 8/8 on real-source fixtures |
+| Funding LC Extraction | `prompts/funding_lc_extraction.md` | 0.1 | 2026-07-28 | V2-2026-07-28 | Advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events |
+| Aggregation (Conflict Resolution) | `prompts/aggregation.md` | 0.4 | 2026-07-28 | V2-2026-07-28 | V2 vocabulary section; LTM/NTM non-interchangeable rule |
+| Deal Summary | `prompts/deal_summary.md` | **0.12** | 2026-08-20 | V3 §T2/§T11 | 0.12: `flags.hostile` replaced by `flags.deal_attitude` + `flags.approach_type` — the retired key had been arriving permanently false. 0.11: `flags.includes_earnout` removed. 0.10: consumer update for `combination_structure` |
+| Strategic Rationale | `prompts/strategic_rationale.md` | 0.5 | 2026-07-28 | V2-2026-07-28 | **Was absent from this table.** Stage 13 (`stages/rationale_tag.py`) |
+| Agreement — Recitals | `prompts/agreement_recitals.md` | 0.2 | — | SEC path | **Was absent from this table.** All five agreement sub-prompts are versioned in `stages/agreement_extract.py::_VERSIONS` |
+| Agreement — Consideration | `prompts/agreement_consideration.md` | 0.1 | — | SEC path | **Was absent from this table.** |
+| Agreement — Capitalization | `prompts/agreement_capitalization.md` | 0.1 | — | SEC path | **Was absent from this table.** |
+| Agreement — Termination | `prompts/agreement_termination.md` | 0.1 | — | SEC path | **Was absent from this table.** |
+| Agreement — Conditions | `prompts/agreement_conditions.md` | 0.1 | — | SEC path | **Was absent from this table.** |
+
+> **Reconciled 2026-08-20** against the live prompt headers and stage `_VERSION` constants.
+> This table had drifted three releases behind on the classifier (0.8 vs 0.11) and omitted
+> seven prompts entirely. Prompt/stage parity is asserted by the test suite; this page is a
+> reading aid, not the source of truth.
 
 ---
 
@@ -29,11 +41,20 @@ July 28, 2026.
 
 | Stage | Prompt | Triggered When |
 |---|---|---|
+| Stage 1 — Relevancy Filter | `relevancy_filter` | Every scraped source row |
 | Stage 3 — Deal Type Classify | `deal_type_classifier` | Every relevant source row |
 | Stage 4 — High Confidence Extract | `high_confidence_extraction` | Every CLASSIFIED row |
+| Stage 4b — Funding HC Extract | `funding_hc_extraction` | Funding-typed rows |
+| Stage 7 — Low Confidence Extract | `low_confidence_extraction` | Every HC_EXTRACTED row |
 | Stage 9 — Aggregate | `aggregation` | Same-tier field conflicts only |
-| Stage 10 — Summarize | `deal_summary` | Each transaction_record with no current summary |
-| Stage 11 — Rationale Tag | `strategic_rationale` | Each transaction_record with a current summary |
+| Stage 11 — Agreement Extract | `agreement_*` (five sub-prompts) | Transactions with unextracted agreement documents |
+| Stage 12 — Summarize | `deal_summary` | Each transaction_record with no current summary |
+| Stage 13 — Rationale Tag | `strategic_rationale` | Each transaction_record with a current summary |
+
+> Stage numbers reconciled against `run.py`, which is authoritative. Summarize is **Stage 12**
+> and Rationale Tag is **Stage 13**; this table previously showed 10 and 11. Note that
+> `stages/summarize.py` still *logs* "Stage 10" — a stale string in executable code, left for a
+> separate commit rather than fixed here.
 
 ---
 

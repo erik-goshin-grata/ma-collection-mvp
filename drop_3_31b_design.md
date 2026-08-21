@@ -221,8 +221,8 @@ Dual-write LC observations for:
   - `consideration.{form}.per_share_amount`
   - `consideration.{form}.amount`
   - `consideration.{form}.exchange_ratio`
-- `includes_earnout`
-- `hostile`
+- `includes_earnout` *(retired — S-F. It meant "earnout OR CVR", a wider scope than the field it appeared to shortcut. `consideration_components` is authoritative; `has_earnout` derives from `EARNOUT` and `has_cvr` from `CVR`.)*
+- `hostile` *(retired — V3 §T11, S-A. Split into `deal_attitude` and `approach_type`. Column retained, no longer written.)*
 - `competing_bid`
 - `regulatory_approvals_required`
 - `has_go_shop`
