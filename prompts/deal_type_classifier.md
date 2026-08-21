@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.11 (transaction form alone does not determine target_type)
+**Version:** 0.12 (active text uses the current lowercase vocabulary)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -145,11 +145,11 @@ IMPORTANT DISTINCTIONS:
 
 - "Take-Private" is NOT a separate type. A PE firm acquiring a publicly traded
   company is ACQUISITION with target_status = PUBLIC and acquirer_type =
-  PRIVATE_EQUITY. Downstream derives the Take-Private flag from this
-  combination.
+  private_equity (extracted downstream). Downstream derives the Take-Private
+  flag from this combination.
 - "Carve-Out" in press language: a Parent selling a business unit or
   subsidiary to a third-party buyer is ACQUISITION with target_type =
-  BUSINESS_UNIT or SUBSIDIARY and parent_seller populated. NOT a separate
+  business_unit or subsidiary and parent_seller populated. NOT a separate
   type.
 - "Divestiture" in press language typically describes what we classify as
   ACQUISITION from the Parent's side. Same deal, different perspective.
@@ -978,7 +978,7 @@ Output:
 | Failure | Handling |
 | :--- | :--- |
 | Model returns v2_event_type not in enum | Parser rejects, marks `PROMPT_FAILED`, logs |
-| Model returns legacy uppercase target_type (e.g. STANDALONE_COMPANY) | Parser rejects — lowercase required in V2 |
+| Model returns legacy uppercase target_type (e.g. STANDALONE_COMPANY) | **Accepted, not rejected** — rollout compatibility. The value is normalized into `target_type_v2`, while the legacy `target_type` column keeps the raw value the model emitted. Tolerance on input does not make uppercase valid output: lowercase is the required current output, and downstream derivations read the raw column. |
 | Model returns legacy event_type field instead of event_history_type | Parser rejects — field rename enforced |
 | Model populates spin_split_type / distribution_mechanism for non-spin types | Parser rejects (schema violation) |
 | Model populates recap_type for non-RECAPITALIZATION types | Parser rejects (schema violation) |
@@ -1004,3 +1004,4 @@ Output:
 | 0.9 | 2026-08-20 | **Merger family becomes `combination_structure` (V3 §T2).** `MERGER` and `REVERSE_MERGER` are removed as `v2_event_type` values and are now **invalid output**; both are structures of an acquisition, not separate events. New field `combination_structure` ∈ `MERGER` / `REVERSE_MERGER` / `DE_SPAC` / null, hierarchical (`DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER`), valid **only** when `v2_event_type = ACQUISITION` and null for every other type — which is what keeps Spin/Split, JV, Recap, Funding, PIPE and UNKNOWN untouched by this change. Return the most specific supported value; ambiguity resolves upward. **A share or asset purchase does not establish a combination structure** — absent other evidence it is null. Merger-of-equals is unchanged: still extracted downstream from the source, never signalled here. The `REVERSE_MERGER` target_type rule re-keys onto `combination_structure`. Examples 15-17 added (merger, de-SPAC, share-purchase null). |
 | 0.10 | 2026-08-20 | **`spinco` removed from `target_type` (V3 §T3).** It named an event/role, not a structure, and duplicated what `v2_event_type` already says. `target_type` now answers one question consistently — what structural thing is being transacted — so a SPIN_OFF or SPLIT_OFF is typed on the distributed entity's own merits: `subsidiary`, `business_unit`, `assets`, or null when the source does not establish it. **Not `standalone_company`** merely because it becomes standalone after the distribution. Examples 4 and 5 re-typed to `subsidiary`; Example 18 added for the division case. New output naming `spinco` is a schema violation. |
 | 0.11 | 2026-08-20 | **Transaction form alone does not determine `target_type`.** Gate 2 established one narrow failure: the classifier selected `assets` from asset-purchase wording ("acquired the assets of") on a source whose substance was the acquisition of a continuing operating business. One principle added to TARGET TYPE — do not classify as `assets` **solely** because of transaction-form language; read the full source to decide between a discrete asset set and an operating business. Deliberately minimal: no parsing rule, no evidence checklist, no decision tree, no new values, and the four-value taxonomy and its definitions are otherwise unchanged. "Solely" is load-bearing — the point is to remove a mechanical cue, not to install another one. Researcher review remains available for genuinely ambiguous cases. |
+| 0.12 | 2026-08-21 | **Active text brought onto the current lowercase vocabulary, and the failure-mode table corrected to describe the parser that exists.** IMPORTANT DISTINCTIONS instructed `target_type = BUSINESS_UNIT or SUBSIDIARY` and `acquirer_type = PRIVATE_EQUITY` while this same prompt declared uppercase target types no longer valid — one file asking for a value it forbids. Both are now lowercase, with `acquirer_type` marked as extracted downstream, since it is not an output of this prompt at all. `target_status = PUBLIC` is unchanged and correct: that vocabulary is genuinely uppercase. Separately, the failure-mode table claimed the parser **rejects** legacy uppercase `target_type`; it accepts it for rollout compatibility (`_VALID_LEGACY_TARGET_TYPES`) and normalizes it into `target_type_v2`, leaving the raw value on the legacy column that Stage 9 derivations read. The row now says so, and keeps the distinction that matters: **lowercase is valid current output, uppercase is tolerated legacy input and is not.** No parser change — the tolerance is deliberate, and `scripts/test_asset_type.py` now pins it behaviourally so ending it has to be an explicit decision. |

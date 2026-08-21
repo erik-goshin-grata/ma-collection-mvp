@@ -293,6 +293,90 @@ def _test_target_type(failures: list[str]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 3b. Classifier casing: lowercase is output, uppercase is tolerated input
+# ---------------------------------------------------------------------------
+#
+# Two different facts that are easy to collapse into one:
+#
+#   lowercase  = the valid CURRENT OUTPUT vocabulary. What the model must emit.
+#   uppercase  = tolerated LEGACY INPUT, accepted for rollout compatibility and
+#                normalized into target_type_v2. Never valid new output.
+#
+# The prompt had drifted on both halves. Its IMPORTANT DISTINCTIONS block instructed
+# `target_type = BUSINESS_UNIT or SUBSIDIARY` while the same file declared uppercase no
+# longer valid, and its failure-mode table claimed the parser REJECTS uppercase, which it
+# does not. That combination is how uppercase reaches the raw `target_type` column -- the
+# column every Stage 9 derivation reads, and the one that made is_take_private return 0 for
+# every transaction until the comparison was case-folded.
+
+# Text that legitimately names uppercase target types: the labelled legacy sentence and the
+# failure-mode row that describes tolerance. Everything else is instruction to the model.
+_LEGACY_LINE_MARKERS = (
+    "Legacy uppercase values",
+    "legacy uppercase target_type",
+)
+
+# `\s*` spans newlines deliberately. The two sites this guards are line-wrapped --
+# "acquirer_type =" ends one line and "PRIVATE_EQUITY" begins the next -- so a per-line
+# scan sees neither, which is exactly how they survived the audit's first pass.
+_UPPER_TARGET_TYPE = re.compile(
+    r"target_type\s*=\s*`?(STANDALONE_COMPANY|BUSINESS_UNIT|SUBSIDIARY|ASSETS)\b", re.S)
+_UPPER_ACQUIRER_TYPE = re.compile(r"acquirer_type\s*=\s*`?([A-Z][A-Z_]{3,})\b", re.S)
+
+
+def _flag_uppercase(failures: list[str], body: str, pattern, field: str, why: str) -> None:
+    for m in pattern.finditer(body):
+        span = body[m.start():m.end()]
+        line_start = body.rfind("\n", 0, m.start()) + 1
+        context = body[line_start:m.end() + 60]
+        if any(marker in context for marker in _LEGACY_LINE_MARKERS):
+            continue
+        lineno = body[:m.start()].count("\n") + 1
+        failures.append(f"classifier prompt L{lineno}: active text instructs "
+                        f"{field} = {m.group(1)} ({span.split('=')[-1].strip()!r}) — {why}")
+
+
+def _test_classifier_casing(failures: list[str]) -> None:
+    clf = open(os.path.join(ROOT, "prompts", "deal_type_classifier.md"), encoding="utf-8").read()
+    body = clf.split("## 9. Versioning")[0]
+
+    # (a) No uppercase target_type / acquirer_type in active instruction text.
+    _flag_uppercase(failures, body, _UPPER_TARGET_TYPE, "target_type",
+                    "uppercase is tolerated legacy INPUT, not valid current output, so the "
+                    "prompt must not ask the model for it")
+    _flag_uppercase(failures, body, _UPPER_ACQUIRER_TYPE, "acquirer_type",
+                    "that vocabulary is lowercase and is extracted downstream by "
+                    "high_confidence_extraction, not emitted by this prompt")
+
+    # (b) The failure-mode row must describe what the parser does.
+    if "Parser rejects — lowercase required in V2" in clf:
+        failures.append("classifier prompt: the failure-mode table still claims the parser "
+                        "REJECTS legacy uppercase target_type. It accepts it — see "
+                        "_VALID_LEGACY_TARGET_TYPES — so the table documents a guard that "
+                        "does not exist")
+    if "target_type_v2" not in clf.split("## 9. Versioning")[0]:
+        failures.append("classifier prompt: the active body never mentions target_type_v2, so "
+                        "it cannot explain where a tolerated legacy value actually lands")
+
+    # (c) Pin the tolerance BEHAVIOURALLY, in both directions. Ending rollout compatibility
+    #     is a decision, and this assertion forces it to be an explicit one rather than a
+    #     quiet tightening that leaves the prompt describing the old world.
+    for legacy, expected in (("STANDALONE_COMPANY", "standalone_company"),
+                             ("BUSINESS_UNIT", "business_unit"),
+                             ("SUBSIDIARY", "subsidiary"),
+                             ("ASSETS", "assets")):
+        if dtc._validate(_clf(target_type=legacy)) is not None:
+            failures.append(f"parser: legacy uppercase {legacy} is now REJECTED. If rollout "
+                            "compatibility was deliberately ended, update this test and the "
+                            "prompt's failure-mode row together")
+        got = dtc._normalize_target_type_v2(legacy)
+        _eq(failures, f"normalization/{legacy}", got, expected)
+        # ...and the current lowercase form must survive normalization untouched.
+        _eq(failures, f"normalization/{expected} idempotent",
+            dtc._normalize_target_type_v2(expected), expected)
+
+
+# ---------------------------------------------------------------------------
 # 4. is_divestiture no longer authored, column retained
 # ---------------------------------------------------------------------------
 
@@ -339,6 +423,7 @@ def main() -> int:
     _test_canonical_path(failures)
     _test_subordination(failures)
     _test_target_type(failures)
+    _test_classifier_casing(failures)
     _test_is_divestiture_removed(failures)
     _test_hc_contract(failures)
 
