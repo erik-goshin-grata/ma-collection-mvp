@@ -1422,7 +1422,11 @@ def _log_conflict(
                 result.get("conflict_severity"),
                 1 if result.get("flagged_for_review") else 0,
                 result.get("reasoning"),
-                result.get("prompt_version"),
+                # Provenance is caller-owned. The model is never told which prompt version
+                # ran -- no user template supplies it -- so its answer could only come from
+                # a worked example, which is how this column came to record aggregation:0.4
+                # while the prompt was at 0.5.
+                _FULL_VERSION,
                 result.get("notes"),
             ),
         )

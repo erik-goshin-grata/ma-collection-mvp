@@ -25,7 +25,10 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 _PROMPT_NAME = "deal_summary"
 _VERSION = "0.14"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
-_REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
+# prompt_version is NOT here: provenance is caller-owned, stamped from _FULL_VERSION
+# below. Requiring it rejected otherwise valid responses for omitting a field the
+# model should not be authoring.
+_REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes"})
 _SLEEP = 1.0
 
 

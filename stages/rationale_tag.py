@@ -26,9 +26,10 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 _PROMPT_NAME = "strategic_rationale"
 _VERSION = "0.5"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
+# prompt_version is NOT here: provenance is caller-owned, stamped from _FULL_VERSION.
 _REQUIRED_KEYS = frozenset({
     "rationale", "secondary_rationales", "supporting_excerpt_index",
-    "model_confidence", "notes", "prompt_version",
+    "model_confidence", "notes",
 })
 _VALID_RATIONALES = frozenset({
     "SCALE_CONSOLIDATION", "GEOGRAPHIC_EXPANSION", "PRODUCT_OR_TECH_CAPABILITY",

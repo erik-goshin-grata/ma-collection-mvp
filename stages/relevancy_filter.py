@@ -268,7 +268,8 @@ def _write(
             "reason_code": result.get("reason_code"),
             "model_confidence": result.get("model_confidence"),
             "notes": result.get("notes"),
-            "prompt_version": result.get("prompt_version"),
+            # Caller-owned, for the same reason as the aggregation audit row.
+            "prompt_version": _FULL_VERSION,
         }
 
     conn.execute(
