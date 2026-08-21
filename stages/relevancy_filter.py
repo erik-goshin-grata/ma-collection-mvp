@@ -18,7 +18,7 @@ relevancy result is nested under "relevancy":
         "reason_code": "ACQUISITION_ANNOUNCEMENT",
         "model_confidence": "HIGH",
         "notes": null,
-        "prompt_version": "relevancy_filter:0.7"
+        "prompt_version": "relevancy_filter:0.8"
       }
     }
 
@@ -43,7 +43,7 @@ from prompts.base import (
 )
 
 _PROMPT_NAME = "relevancy_filter"
-_VERSION = "0.7"
+_VERSION = "0.8"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _VALID_CLASSIFICATIONS = frozenset({"RELEVANT", "NOT_RELEVANT"})
 _VALID_REASON_CODES = frozenset({

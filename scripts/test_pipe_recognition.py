@@ -48,6 +48,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from prompts.base import load_prompt_file  # noqa: E402
 from lib.pipe_recognition import (  # noqa: E402
     PIPE_EVENT_TYPE, PIPE_EXCLUDED_STATUS, PIPE_OVERRIDABLE_EVENT_TYPES,
     recognize_pipe, resolve_classification,
@@ -659,18 +660,25 @@ def main() -> None:
     # Relevancy: PIPE is a RELEVANT reason code. It must stay on the RELEVANT side —
     # marking it NOT_RELEVANT would drop the row before Stage 3 and destroy the very
     # provenance the exclusion is supposed to preserve.
-    rel_prompt = ROOT.joinpath("prompts/relevancy_filter.md").read_text()
-    block = re.search(r"REASON_CODES_START(.*?)REASON_CODES_END", rel_prompt, re.S)
+    # Read the DELIVERED system prompt, not the Markdown file. Before 0.8 this anchored on
+    # a REASON_CODES_START/END block in §6, which load_prompt_file never sends -- so it
+    # certified a side assignment the model was never shown. §4 and §5 are the only
+    # sections delivered.
+    rel_system = load_prompt_file("relevancy_filter")["system"]
+    block = re.search(
+        r"REASON CODES — RELEVANT side:(.*?)(?=\n(?!REASON CODES)[A-Z][A-Z ]{3,}|\Z)",
+        rel_system, re.S,
+    )
     if not block:
-        failures.append("relevancy prompt lost its REASON_CODES block")
+        failures.append("relevancy system prompt no longer delivers its REASON CODES lists")
     else:
         relevant_side, _, not_relevant_side = block.group(1).partition("NOT_RELEVANT side")
-        if "`PIPE`" not in relevant_side:
-            failures.append("PIPE is not declared on the RELEVANT side of the relevancy enum")
-        if "`PIPE`" in not_relevant_side:
+        if "PIPE" not in relevant_side:
+            failures.append("PIPE is not declared on the delivered RELEVANT side of the relevancy enum")
+        if "PIPE" in not_relevant_side:
             failures.append(
-                "PIPE is on the NOT_RELEVANT side — that drops the row before Stage 3 "
-                "and loses the recognized-exclusion record entirely"
+                "PIPE is on the delivered NOT_RELEVANT side — that drops the row before "
+                "Stage 3 and loses the recognized-exclusion record entirely"
             )
     _check(failures, "relevancy stage accepts PIPE", "PIPE" in rf._VALID_REASON_CODES, True)
 

@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.7 (provenance is caller-owned)
+**Version:** 0.8 (reason_code vocabulary delivered to the model)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -83,9 +83,37 @@ EDGE CASES:
 - If a release is about a rumored deal without a definitive agreement, classify as NOT_RELEVANT (rumor coverage is out of MVP scope).
 - If a release is about a company being added to an index, going IPO, or completing a direct listing, classify as NOT_RELEVANT (IPOs are not in MVP scope).
 
+REASON CODES — RELEVANT side:
+- ACQUISITION_ANNOUNCEMENT
+- MERGER_ANNOUNCEMENT
+- CARVE_OUT_OR_DIVESTITURE
+- SPIN_OFF_OR_SPLIT
+- TAKE_PRIVATE
+- REVERSE_MERGER
+- JOINT_VENTURE
+- MINORITY_INVESTMENT
+- VC_ROUND_OR_FUNDING — VC round, growth equity investment, or venture debt facility
+- RECAPITALIZATION — dividend recap, equity recap, leveraged recap, or sponsor recap
+- PIPE — private investment in public equity, where the source explicitly names the structure. RELEVANT so the event is recorded and recognized downstream; the deal-type classifier marks it as recognized-but-not-profiled.
+- DEAL_CLOSE_OR_COMPLETION
+- DEAL_AMENDMENT_OR_TERMINATION
+- AMBIGUOUS_BUT_LIKELY_DEAL — use when release references an in-scope event but framing is unclear
+
+REASON CODES — NOT_RELEVANT side:
+- PRODUCT_OR_COMMERCIAL
+- PERSONNEL
+- EARNINGS_OR_FINANCIAL_REPORTING
+- BUYBACK_OR_DIVIDEND
+- DEBT_OR_NON_DEAL_FINANCING
+- REGULATORY_OR_COMPLIANCE
+- MARKETING_OR_COMMENTARY
+- RUMOR_OR_SPECULATION
+- IPO_OR_DIRECT_LISTING
+- OTHER_NOT_RELEVANT
+
 CRITICAL — reason_code MUST be chosen from the enum list
 
-The reason_code field must be exactly one of the 24 values listed in the in-scope and out-of-scope enumerations above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
+The reason_code field must be exactly one of the 24 values in the REASON CODES lists above. Do not invent new values. Do not adapt existing values with suffixes or prefixes. Do not substitute synonyms or more descriptive labels.
 
 If no listed value fits perfectly:
 - For RELEVANT classifications, use AMBIGUOUS_BUT_LIKELY_DEAL
@@ -159,41 +187,9 @@ Classify this release.
 | Field | Type | Values |
 | :--- | :--- | :--- |
 | `classification` | enum | `RELEVANT`, `NOT_RELEVANT` |
-| `reason_code` | enum | See below |
+| `reason_code` | enum | See the REASON CODES lists in §4 |
 | `model_confidence` | enum | `HIGH`, `MEDIUM`, `LOW` |
 | `notes` | string or null | Brief explanation if notable |
-
-<!-- REASON_CODES_START — authoritative reason_code enum. tests/test_reason_code_parity.py
-     parses this block; every code here must be covered by stages/relevancy_filter.py
-     _VALID_REASON_CODES (directly or as an alias target). Keep the two in sync. -->
-**`reason_code` values (RELEVANT side):**
-- `ACQUISITION_ANNOUNCEMENT`
-- `MERGER_ANNOUNCEMENT`
-- `CARVE_OUT_OR_DIVESTITURE`
-- `SPIN_OFF_OR_SPLIT`
-- `TAKE_PRIVATE`
-- `REVERSE_MERGER`
-- `JOINT_VENTURE`
-- `MINORITY_INVESTMENT`
-- `VC_ROUND_OR_FUNDING` — VC round, growth equity investment, or venture debt facility
-- `RECAPITALIZATION` — dividend recap, equity recap, leveraged recap, or sponsor recap
-- `PIPE` — private investment in public equity, where the source explicitly names the structure. RELEVANT so the event is recorded and recognized downstream; the deal-type classifier marks it as recognized-but-not-profiled.
-- `DEAL_CLOSE_OR_COMPLETION`
-- `DEAL_AMENDMENT_OR_TERMINATION`
-- `AMBIGUOUS_BUT_LIKELY_DEAL` — use when release references an in-scope event but framing is unclear
-
-**`reason_code` values (NOT_RELEVANT side):**
-- `PRODUCT_OR_COMMERCIAL`
-- `PERSONNEL`
-- `EARNINGS_OR_FINANCIAL_REPORTING`
-- `BUYBACK_OR_DIVIDEND`
-- `DEBT_OR_NON_DEAL_FINANCING`
-- `REGULATORY_OR_COMPLIANCE`
-- `MARKETING_OR_COMMENTARY`
-- `RUMOR_OR_SPECULATION`
-- `IPO_OR_DIRECT_LISTING`
-- `OTHER_NOT_RELEVANT`
-<!-- REASON_CODES_END -->
 
 ---
 
@@ -317,3 +313,4 @@ Output:
 | 0.5 | 2026-07-28 | V2 alignment. Added VC/funding events to IN SCOPE: VC funding rounds, growth equity investments, venture debt, recapitalizations. Added `VC_ROUND_OR_FUNDING` and `RECAPITALIZATION` to reason_code enum (23 total, up from 21). Updated OUT OF SCOPE debt note to distinguish venture debt (in scope) from corporate bond issuances (out of scope). Added Example 4 (VC round). Updated CRITICAL block with invented-value examples for funding types. |
 | 0.6 | 2026-08-18 | Added `PIPE` to the RELEVANT reason_code enum (24 total, up from 23) and to IN SCOPE, gated on the source explicitly naming the structure. RELEVANT rather than NOT_RELEVANT on purpose: marking it not-relevant would drop the row before deal-type classification and lose the recognized-exclusion record. Added invented-value mappings for PIPE_FINANCING / PIPE_TRANSACTION / PIPE_OFFERING / PRIVATE_INVESTMENT_IN_PUBLIC_EQUITY. |
 | 0.7 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.8 | 2026-08-21 | **The reason_code vocabulary is now delivered to the model.** The authoritative 24-code list moved from §6 into the §4 system prompt; §4 and §5 are the only sections `load_prompt_file` sends, so the list previously reached nothing. The prompt asserted the codes were "listed in the in-scope and out-of-scope enumerations above" — prose category descriptions containing no enum values — so the model saw codes only incidentally, as the right-hand side of the invented-value correction list. Ten codes, including the in-scope `MERGER_ANNOUNCEMENT`, `SPIN_OFF_OR_SPLIT`, `REVERSE_MERGER` and `JOINT_VENTURE`, were never delivered at all; eight of those have no alias path and folded into the catch-alls. Taxonomy, side assignments, glosses, alias table and relevancy semantics are unchanged — this delivers the existing vocabulary, it does not redefine it. |
