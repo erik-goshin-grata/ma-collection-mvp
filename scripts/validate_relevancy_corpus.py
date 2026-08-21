@@ -396,9 +396,13 @@ def main() -> int:
     log = get_logger("relevancy_corpus_validation", "validation", level=cfg.log_level)
     # Scratch DB. call_prompt writes extraction_failure_log on failure and needs a
     # connection; it must not be the pipeline database.
+    # Order and argument type follow db.py's contract and run.py:236-237: init_db
+    # takes a PATH and opens its own connection to run the DDL, then get_connection
+    # returns the connection to use. Handing init_db an open Connection raises
+    # TypeError inside pathlib before a single row is read.
     scratch = os.path.join(args.out_dir, "_scratch.db")
+    init_db(scratch)
     conn = get_connection(scratch)
-    init_db(conn)
 
     run_id = f"relevancy_val_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     out = open(jsonl_path, "a", encoding="utf-8")
