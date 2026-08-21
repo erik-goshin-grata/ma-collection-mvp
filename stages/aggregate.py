@@ -153,21 +153,24 @@ _FIELDS = [
 _FIELD_NAMES = {f for f, _ in _FIELDS}
 _FIELD_TYPE = {f: t for f, t in _FIELDS}
 _CONTEXT_FIELDS = ("target_name", "acquirer_name", "deal_type", "announced_date")
+# Acquirer types that leave a public target in private hands. Membership is expressed in
+# the V2 lowercase vocabulary because that is what Stage 4 stores; the comparison
+# lowercases its input, so rows still carrying the legacy uppercase form match too.
 _PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES = frozenset({
-    "PRIVATE_EQUITY",
-    "PE_PORTFOLIO",
-    "VENTURE_CAPITAL",
-    "SOVEREIGN_WEALTH_FUND",
-    "PENSION_FUND",
-    "HEDGE_FUND",
-    "FAMILY_OFFICE",
-    "INDIVIDUAL",
-    "MANAGEMENT",
-    "EMPLOYEE_GROUP",
-    "CONSORTIUM",
-    "OTHER_FINANCIAL_SPONSOR",
+    "private_equity",
+    "pe_portfolio",
+    "venture_capital",
+    "sovereign_wealth_fund",
+    "pension_fund",
+    "hedge_fund",
+    "family_office",
+    "individual",
+    "management",
+    "employee_group",
+    "consortium",
+    "other_financial_sponsor",
 })
-_PRIVATE_STRATEGIC_ACQUIRER_TYPES = frozenset({"STRATEGIC_CORPORATE"})
+_PRIVATE_STRATEGIC_ACQUIRER_TYPES = frozenset({"strategic_corporate"})
 
 
 # ---------------------------------------------------------------------------
@@ -198,15 +201,32 @@ def _has_value(value: Any) -> bool:
     return bool(str(value or "").strip())
 
 
+def _lower(value: Any) -> str:
+    """Case-fold one value for comparison. Local to the comparison, by design.
+
+    `target_type` and `acquirer_type` are stored as the model emitted them -- Stage 3 and
+    Stage 4 each write the raw value to the legacy-named column and the normalized value to
+    the `_v2` column. Under the V2 vocabulary that raw value is lowercase, while stored rows
+    from before the lowercasing carry the uppercase form. Folding here matches both without
+    mutating the aggregated `field_values`, which other derivations and the canonical write
+    read in their stored form.
+    """
+    return str(value or "").strip().lower()
+
+
 def _derive_is_take_private(fields: dict) -> int:
+    # deal_type and target_status are UPPERCASE in production and are compared as stored.
+    # Only target_type and acquirer_type are case-folded -- those are the two the V2
+    # vocabulary lowercased, and comparing them against uppercase literals returned 0 for
+    # every transaction.
     if fields.get("deal_type") != "ACQUISITION":
         return 0
     if fields.get("target_status") != "PUBLIC":
         return 0
-    if fields.get("target_type") != "STANDALONE_COMPANY":
+    if _lower(fields.get("target_type")) != "standalone_company":
         return 0
 
-    acquirer_type = fields.get("acquirer_type")
+    acquirer_type = _lower(fields.get("acquirer_type"))
     if _has_value(fields.get("acquirer_ticker")):
         return 0
     if acquirer_type in _PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES:
