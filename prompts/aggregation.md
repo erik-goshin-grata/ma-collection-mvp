@@ -1,6 +1,6 @@
 # Aggregation Prompt (Conflict Resolution)
 
-**Version:** 0.4 (V2 alignment)
+**Version:** 0.5 (V3 field vocabulary)
 **Repo path:** `prompts/aggregation.md`
 
 ---
@@ -86,20 +86,64 @@ You are a data aggregation model for an M&A data collection pipeline. When
 multiple sources report different values for the same field of the same
 transaction, you determine which value should become the canonical value.
 
-FIELD VOCABULARY (V2)
+FIELD VOCABULARY
 
-deal_type context values: ACQUISITION, MERGER, SPIN_OFF, SPLIT_OFF,
-REVERSE_MERGER, JOINT_VENTURE, MINORITY_INVESTMENT, RECAPITALIZATION
+You are only ever asked to choose between two or more values that were actually
+observed, and never to decide whether a field should be populated. Null
+observations are removed upstream, so a value in front of you was extracted by
+a stage that already applied its own evidence rules. Your job is which observed
+value is canonical — not whether the fact is established.
 
-event_history_type context values: ANNOUNCED, CLOSED, AMENDED, TERMINATED
+<!-- AGG_VOCAB_START — machine-checked against the owning stages' frozensets by
+     scripts/test_aggregation_vocabulary_parity.py. Every list below must match the
+     enum the owning stage validates; add a field here when a slice adds one. -->
+- v2_event_type: ACQUISITION | SPIN_OFF | SPLIT_OFF | JOINT_VENTURE | RECAPITALIZATION | VC_ROUND | GROWTH_EQUITY | VENTURE_DEBT | PIPE | UNKNOWN
+- legacy_read_only: MERGER | REVERSE_MERGER | MINORITY_INVESTMENT
+- event_history_type: ANNOUNCED | CLOSED | AMENDED | TERMINATED
+- combination_structure: MERGER | REVERSE_MERGER | DE_SPAC
+- target_type: standalone_company | subsidiary | business_unit | assets
+- asset_type: REAL_ESTATE | INFRASTRUCTURE | ENERGY | NATURAL_RESOURCES | INTELLECTUAL_PROPERTY | DATA | FACILITY | EQUIPMENT | CONTRACTS_OR_RIGHTS | BRAND_OR_PRODUCT | OTHER
+- offer_mechanism: TENDER_OFFER
+- sponsor_transaction_role: PLATFORM | ADD_ON
+- deal_attitude: FRIENDLY | HOSTILE
+- approach_type: SOLICITED | UNSOLICITED
+- round_price_direction: UP | DOWN | FLAT
+- value_type: EQUITY_VALUE | TRANSACTION_VALUE | ENTERPRISE_VALUE | MARKET_CAPITALIZATION | UNDISCLOSED
+- acquirer_type: strategic_corporate | private_equity | pe_portfolio | venture_capital | growth_equity | sovereign_wealth_fund | pension_fund | hedge_fund | family_office | individual | management | employee_group | spac | consortium | other_financial_sponsor | unknown
+- consideration_components.form: CASH | ACQUIRER_STOCK | TARGET_STOCK | EARNOUT | CVR | CONTINGENT_CONSIDERATION | DEBT_ASSUMED | RETAINED_EQUITY | OTHER
+<!-- AGG_VOCAB_END -->
 
-acquirer_type values (lowercase): strategic_corporate, private_equity,
-pe_portfolio, venture_capital, growth_equity, sovereign_wealth_fund,
-pension_fund, hedge_fund, family_office, individual, management,
-employee_group, spac, consortium, other_financial_sponsor, unknown
+`legacy_read_only` values appear on historical rows and may be observed. They are
+NEVER valid new output: MERGER and REVERSE_MERGER are combination structures of an
+ACQUISITION, not event types, and minority status is derived downstream rather than
+typed. If observations disagree between a legacy value and a current one for the same
+fact, prefer the current representation.
 
-value_type values: EQUITY_VALUE, TRANSACTION_VALUE, ENTERPRISE_VALUE,
-UNDISCLOSED
+RESOLVING TYPED DIMENSIONS
+
+Most fields resolve on tier, confidence and specificity. These do not, and treating
+them as ordinary strings loses or invents a fact:
+
+- combination_structure is HIERARCHICAL: DE_SPAC ⊂ REVERSE_MERGER ⊂ MERGER. Two
+  sources saying DE_SPAC and MERGER are not in conflict — they state the same fact at
+  different specificity. Choose the most specific value the sources support, resolve
+  ambiguity UPWARD, and do not flag this as MATERIAL.
+- asset_type is subordinate to target_type = assets. Never resolve the pair into a
+  combination where asset_type is populated for any other target type.
+- sponsor_transaction_role: PLATFORM is NOT a more specific ADD_ON. It carries a
+  higher evidence bar, so a source asserting PLATFORM does not outrank one asserting
+  ADD_ON merely by naming a stronger claim. Resolve on tier and confidence.
+- deal_attitude and approach_type are INDEPENDENT dimensions. Resolving one must not
+  influence the other; a transaction may be unsolicited and also board-recommended.
+- round_price_direction: FLAT means the source stated the valuation was unchanged. It
+  is not the "nothing established" answer, so never resolve a disagreement into FLAT
+  as a compromise.
+- offer_mechanism has one value plus null by decision. MANDATORY_OFFER,
+  SCHEME_OF_ARRANGEMENT, ONE_STEP_MERGER and TWO_STEP_MERGER are excluded; never
+  choose a value outside the list above.
+- consideration_components.form: prefer the most specific form the sources support.
+  CONTINGENT_CONSIDERATION is the fallback for contingency whose kind is not
+  established — do not choose it over EARNOUT or CVR when a source establishes which.
 
 Value model:
 - transaction_value is Tier 1 as-transacted transaction size/value.
@@ -144,8 +188,9 @@ CORE PRINCIPLES
    period type, flag as SEMANTIC conflict.
 
 5. For acquirer_type: T1 is authoritative. If T1 does not state acquirer type,
-   T2 wins. Prefer the more specific classification (pe_portfolio over
-   private_equity when sponsor name is present).
+   T2 wins. Do not prefer pe_portfolio on the strength of a sponsor name — whether
+   a transaction is sponsor-backed is carried by sponsor_transaction_role, not by
+   the acquirer's type.
 
 6. Same-tier tiebreak (in order):
    - Higher model_confidence first
@@ -384,3 +429,4 @@ Output:
 | 0.2 | 2026-04-23 | Added RESPONSE FORMAT block inline |
 | 0.3 | 2026-07-22 | Updated take-private note to derived flag reference |
 | 0.4 | 2026-07-28 | V2 alignment. Added FIELD VOCABULARY section documenting all V2 enum values the prompt may encounter. Updated deal_type context to V2 event types. event_type → event_history_type in vocabulary. acquirer_type values lowercased. period_type values added (LTM, NTM, ANNUAL, QUARTERLY, INTERIM_YTD). Principle 4 added: LTM and NTM are not interchangeable in conflict resolution — period type disagreement is SEMANTIC, not MINOR. Example 4 added for period type semantic conflict. |
+| 0.5 | 2026-08-21 | **V3 field vocabulary (§T2, §T3, §T7, §T11–T14).** This prompt reasons about every canonical field — Stage 9 calls it once per disputed field — and had not been opened by any V3 slice, so it still enumerated `MERGER` and `REVERSE_MERGER` as event types, lacked `MARKET_CAPITALIZATION`, and had no vocabulary at all for `combination_structure`, `asset_type`, `offer_mechanism`, `deal_attitude`, `approach_type`, `sponsor_transaction_role` or `round_price_direction`. Vocabularies are now in a marker-delimited block checked against the owning stages' frozensets by `scripts/test_aggregation_vocabulary_parity.py`. Retired event types move to a labelled `legacy_read_only` line: observable on stored rows, never valid new output. A typed-dimension section states the tie-breaks that plain string resolution gets wrong — `combination_structure` is hierarchical and DE_SPAC vs MERGER is not a conflict; `asset_type` is subordinate to `target_type = assets`; `PLATFORM` is not a more specific `ADD_ON`; attitude and approach are independent; `FLAT` is not a compromise between disagreeing price directions. The `pe_portfolio` specificity preference is removed — §T7 forbids acquirer type as a sponsor-status proxy and §T8 removes the value. Deliberately compact: no extraction rules, evidence bars or null policy, because `_pick_value` drops nulls before escalating and this prompt only ever chooses between observed non-null values. |
