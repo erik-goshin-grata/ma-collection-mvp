@@ -110,15 +110,16 @@ def _run_stage12(conn, txn_id: str) -> dict:
     return json.loads(m.group(1))
 
 
-def _seed(conn, txn_id: str, deal_attitude, approach_type) -> None:
+def _seed(conn, txn_id: str, deal_attitude, approach_type, sponsor_role=None) -> None:
     conn.execute(
         """INSERT INTO transaction_record
                (transaction_id, is_current, deal_type, v2_event_type, target_name,
-                acquirer_name, announced_date, deal_attitude, approach_type, hostile,
+                acquirer_name, acquirer_type, announced_date, deal_attitude, approach_type,
+                sponsor_transaction_role, hostile,
                 competing_bid, regulatory_approvals_required, is_take_private, has_go_shop)
            VALUES (?, 1, 'ACQUISITION', 'ACQUISITION', 'Verity Biosciences',
-                   'Halden Therapeutics', '2026-08-18', ?, ?, 1, 0, 0, 0, 0)""",
-        (txn_id, deal_attitude, approach_type),
+                   'Halden Therapeutics', 'pe_portfolio', '2026-08-18', ?, ?, ?, 1, 0, 0, 0, 0)""",
+        (txn_id, deal_attitude, approach_type, sponsor_role),
     )
     conn.commit()
 
@@ -137,6 +138,43 @@ CASES = [
     ("null_approach_stays_null",      "HOSTILE",  None),
     ("both_null_stay_null",           None,       None),
 ]
+
+
+# `acquirer_type` is seeded as 'pe_portfolio' on every row above, deliberately. Under the
+# V2 rule that value alone meant "add-on"; V3 §T7 removes that derivation, so a row where the
+# acquirer type would have implied ADD_ON while sponsor_transaction_role says otherwise is the
+# only way to prove the summary reads the canonical field and not the proxy.
+_SPONSOR_CASES = [
+    ("sponsor_add_on_reaches_prompt", "ADD_ON"),
+    ("sponsor_platform_reaches_prompt", "PLATFORM"),
+    ("sponsor_null_stays_null", None),
+]
+
+
+def _test_sponsor_role_transport(failures: list[str]) -> None:
+    for name, role in _SPONSOR_CASES:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "t.db")
+            init_db(path)
+            conn = get_connection(path)
+            txn = f"tc_sum_{name}"
+            _seed(conn, txn, "FRIENDLY", None, sponsor_role=role)
+            try:
+                flags = _run_stage12(conn, txn)
+            except AssertionError as exc:
+                failures.append(str(exc))
+                conn.close()
+                continue
+
+            _eq(failures, f"{name}/sponsor_transaction_role",
+                flags.get("sponsor_transaction_role", "<missing>"), role)
+            if role is None and flags.get("sponsor_transaction_role") is False:
+                failures.append(f"{name}: a null sponsor role was coerced to false — null means "
+                                "no role is established, not that one is denied")
+            if role is None and flags.get("sponsor_transaction_role") not in (None, "<missing>"):
+                failures.append(f"{name}: a sponsor role appeared where the canonical value is "
+                                "null — §T7 forbids deriving it from acquirer_type")
+            conn.close()
 
 
 def _test_transport(failures: list[str]) -> None:
@@ -213,18 +251,24 @@ def _test_neighbours_unchanged(failures: list[str]) -> None:
 
 def _test_prompt_contract(failures: list[str]) -> None:
     text = open(SUMMARY_PROMPT, encoding="utf-8").read()
-    _check_version(failures, "deal_summary", text, summarize._VERSION, (0, 12),
-                   "replaced flags.hostile with deal_attitude and approach_type")
+    _check_version(failures, "deal_summary", text, summarize._VERSION, (0, 13),
+                   "carried sponsor_transaction_role into the summary input")
     if '"hostile"' in text:
         failures.append("deal_summary prompt: the input contract still declares flags.hostile")
-    for field in ("deal_attitude", "approach_type"):
+    for field in ("deal_attitude", "approach_type", "sponsor_transaction_role"):
         if f'"{field}"' not in text:
             failures.append(f"deal_summary prompt: {field} is missing from the input contract")
+    # V3 §T7: sponsor role is carried by the canonical field, never inferred from buyer type.
+    if "acquirer_type = pe_portfolio: add-on" in text:
+        failures.append("deal_summary prompt: the retired pe_portfolio -> add-on inference is "
+                        "still an active framing rule — §T7 replaced it with "
+                        "sponsor_transaction_role")
 
 
 def main() -> None:
     failures: list[str] = []
     _test_transport(failures)
+    _test_sponsor_role_transport(failures)
     _test_neighbours_unchanged(failures)
     _test_prompt_contract(failures)
 
@@ -233,8 +277,8 @@ def main() -> None:
         for f in failures:
             print(f"  - {f}")
         sys.exit(1)
-    print(f"PASS  summary attitude/approach transport  "
-          f"({len(CASES)} transport cases + control + prompt contract)")
+    print(f"PASS  summary flags transport  ({len(CASES)} attitude/approach + "
+          f"{len(_SPONSOR_CASES)} sponsor-role cases + control + prompt contract)")
 
 
 if __name__ == "__main__":

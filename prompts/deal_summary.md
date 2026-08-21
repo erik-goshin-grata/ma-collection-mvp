@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.12 (hostile replaced by deal_attitude + approach_type)
+**Version:** 0.13 (sponsor role comes from sponsor_transaction_role)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -86,6 +86,7 @@ values are lowercase. `SPIN_SPLIT` replaced by `SPIN_OFF` / `SPLIT_OFF`.
     "is_take_private": false,
     "deal_attitude": null,
     "approach_type": null,
+    "sponsor_transaction_role": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -170,9 +171,9 @@ WRITING PRINCIPLES
 
 DEAL TYPE FRAMING (V2 event types + combination structure)
 
-- ACQUISITION + acquirer_type = pe_portfolio: add-on. Frame explicitly with
-  sponsor relationship.
-- ACQUISITION + acquirer_type = private_equity: direct PE acquisition.
+- ACQUISITION + acquirer_type = private_equity: direct PE acquisition. acquirer_type
+  describes what kind of buyer is involved. It never establishes the sponsor
+  transaction role — see SPONSOR TRANSACTION ROLE below.
 - ACQUISITION + target_type = business_unit or subsidiary: divestiture. Frame
   as "[Parent] divested its [Unit] to [Acquirer]." Do NOT use "carve-out."
 - ACQUISITION + target_type = assets: asset purchase. Specify assets.
@@ -196,6 +197,29 @@ DEAL TYPE FRAMING (V2 event types + combination structure)
   - EQUITY: new equity issued to restructure balance sheet.
   - LEVERAGED: company takes on debt to repurchase shares or pay dividend.
   - SPONSOR_RECAP: PE sponsor-driven recap of a portfolio company.
+
+SPONSOR TRANSACTION ROLE
+
+flags.sponsor_transaction_role is the ONLY source of platform / add-on framing. It is
+PLATFORM, ADD_ON, or null.
+
+- ADD_ON: the acquisition is being made BY a company that is already sponsor- or
+  PE-backed. Frame it as an add-on to that existing platform, naming the sponsor
+  relationship when ACQUIRER SPONSOR is populated.
+- PLATFORM: this transaction establishes or acquires the company as a new sponsor
+  platform. Frame the platform as newly established for the sponsor — not the company
+  as newly created, which is a different claim and usually false.
+- null: no sponsor role is established. Use NO platform or add-on framing at all.
+  Null means the fact was not established, not that it was denied, so do not write
+  that the deal is "not an add-on" either.
+
+Do NOT infer this role from anything else. Not from acquirer_type — a pe_portfolio or
+private_equity buyer establishes nothing here. Not from ACQUIRER SPONSOR being
+populated. Not from a description calling the acquirer private-equity-backed or a
+"platform". If the field is null, those signals remain insufficient.
+
+is_secondary_buyout is independent: a sponsor-to-sponsor deal may be PLATFORM and a
+secondary buyout at once, and neither implies the other.
 
 VALUE FRAMING
 
@@ -320,6 +344,7 @@ TARGET DESCRIPTION: a privately-held provider of pediatric and family dental ser
 ACQUIRER: Parkview Dental Partners (type: pe_portfolio)
 ACQUIRER DESCRIPTION: a private equity-backed dental services platform headquartered in Texas
 VALUE: null null (UNDISCLOSED)
+FLAGS: {"sponsor_transaction_role": "ADD_ON", ...}
 MULTIPLE QUALITY: NOT_CALCULABLE
 ADVISORS: null
 ```
@@ -330,7 +355,7 @@ Output:
   "summary_text": "On April 23, 2026, Parkview Dental Partners, a private equity-backed dental services platform headquartered in Texas, announced the acquisition of VIP Dental, a privately-held provider of pediatric and family dental services operating eight clinics across the Austin metro area. The transaction is an add-on to Parkview's existing Texas footprint, extending the platform's clinical capacity in pediatric care. Financial terms were not disclosed.",
   "word_count": 63,
   "model_confidence": "HIGH",
-  "notes": "Sparse private deal; pe_portfolio acquirer with no sponsor name captured.",
+  "notes": "Sparse private deal. Add-on framing comes from flags.sponsor_transaction_role = ADD_ON, not from acquirer_type or the private-equity-backed description; with the field null the same source would carry no sponsor-role framing.",
   "prompt_version": "deal_summary:0.9"
 }
 ```
@@ -462,3 +487,4 @@ Output:
 | 0.10 | 2026-08-20 | **Consumer update for V3 §T2 (S-B).** `MERGER` and `REVERSE_MERGER` are no longer emitted as event types, which would have left the two framing rules keyed on them permanently dead and silently dropped de-SPAC framing. Both are re-keyed onto `combination_structure`, and `DE_SPAC` framing is added. `combination_structure` added to the input schema and user template. The hierarchy is stated so framing is chosen by implication rather than by equality. Merger structure does **not** imply merger-of-equals — that stays driven by `is_merger_of_equals`, which is unchanged. |
 | 0.11 | 2026-08-20 | **`flags.includes_earnout` removed from the input contract.** Stage 7 no longer produces it and Stage 9 no longer aggregates it, so the key would have arrived permanently false — a flag asserting "no earnout" on every deal. It carried no framing rule or failure mode here, unlike `flags.is_take_private`, so nothing in summary behaviour depends on its removal. Contingent consideration is visible to this prompt where it always was: in `consideration_components`, which now distinguishes `EARNOUT`, `CVR` and `CONTINGENT_CONSIDERATION`. |
 | 0.12 | 2026-08-20 | **`flags.hostile` replaced by `flags.deal_attitude` and `flags.approach_type` (V3 §T11).** Stage 7 stopped writing `hostile` when the fused boolean split into two independent nullable dimensions, so the key had been arriving **permanently false** — an assertion of "not hostile" on every transaction, including genuinely hostile ones, and the canonical replacements never reached this prompt at all. A pure transport correction: both fields are passed through as themselves, **null stays null** rather than being coerced to false, and no framing rule couples attitude to approach — they are independent by decision. `deal_attitude` is `FRIENDLY`/`HOSTILE`/null and absence of hostile evidence is not `FRIENDLY`; `approach_type` is `SOLICITED`/`UNSOLICITED`/null. |
+| 0.13 | 2026-08-21 | **`flags.sponsor_transaction_role` added; the `pe_portfolio` → add-on inference removed (V3 §T7).** S-G made sponsor role a canonical extracted field, and this prompt was still deriving it from the acquirer's type — the exact derivation §T7 retired, and the field itself never reached the prompt at all. `PLATFORM` / `ADD_ON` / null are now carried in `flags`, uncoerced, with null meaning no role is established rather than one denied. A SPONSOR TRANSACTION ROLE section makes the field the only source of platform/add-on framing and prohibits inferring it from `acquirer_type`, from `ACQUIRER SPONSOR`, or from a description calling the acquirer PE-backed. `PLATFORM` is framed as the platform being newly established for the sponsor, not the company being newly created. The `acquirer_type = private_equity` line stays: buyer type may describe the buyer, it may not determine the role. `is_secondary_buyout` remains independent. Example 1 keeps its sparse-private-deal purpose and its add-on sentence, now justified by the canonical field in its FLAGS input. |

@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.12"
+_VERSION = "0.13"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0
@@ -145,6 +145,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             "is_take_private": bool(tr["is_take_private"]),
             "deal_attitude": tr["deal_attitude"],
             "approach_type": tr["approach_type"],
+            # V3 §T7 (deal_summary 0.13). Carried as itself for the same reason as the two
+            # above: PLATFORM / ADD_ON / null, where null means no sponsor role is
+            # established -- not that one is denied. Before this the summary was told the
+            # acquirer's type and left to infer the role, which is the derivation §T7 removed.
+            "sponsor_transaction_role": tr["sponsor_transaction_role"],
             "competing_bid": bool(tr["competing_bid"]),
             "regulatory_approvals_required": bool(tr["regulatory_approvals_required"]),
         })
