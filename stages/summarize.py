@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.11"
+_VERSION = "0.12"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _REQUIRED_KEYS = frozenset({"summary_text", "word_count", "model_confidence", "notes", "prompt_version"})
 _SLEEP = 1.0
@@ -135,9 +135,16 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         ebitda_period = _fmt_period(tr["target_ebitda_period_type"], tr["target_ebitda_period_end"])
         advisors_summary = _build_advisors_summary(conn, tid)
 
+        # V3 §T11 (deal_summary 0.12). `hostile` was retired from Stage 7 when the fused
+        # boolean split into deal_attitude and approach_type, so this key had been arriving
+        # permanently false — asserting "not hostile" on every deal, including hostile ones.
+        # The two canonical fields are passed through as themselves and NOT coerced: they are
+        # nullable by design, absence is not FRIENDLY, and json.dumps writes None as null.
+        # They are independent dimensions; nothing here derives one from the other.
         flags_json = json.dumps({
             "is_take_private": bool(tr["is_take_private"]),
-            "hostile": bool(tr["hostile"]),
+            "deal_attitude": tr["deal_attitude"],
+            "approach_type": tr["approach_type"],
             "competing_bid": bool(tr["competing_bid"]),
             "regulatory_approvals_required": bool(tr["regulatory_approvals_required"]),
         })

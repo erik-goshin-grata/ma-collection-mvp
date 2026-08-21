@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.11 (includes_earnout removed from input contract)
+**Version:** 0.12 (hostile replaced by deal_attitude + approach_type)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -84,7 +84,8 @@ values are lowercase. `SPIN_SPLIT` replaced by `SPIN_OFF` / `SPLIT_OFF`.
   ],
   "flags": {
     "is_take_private": false,
-    "hostile": false,
+    "deal_attitude": null,
+    "approach_type": null,
     "competing_bid": false,
     "regulatory_approvals_required": false
   },
@@ -460,3 +461,4 @@ Output:
 | 0.9 | 2026-07-28 | V2 alignment. Input field names updated: deal_type → v2_event_type, event_type → event_history_type, target_type values lowercased, acquirer_type values lowercased. SPIN_SPLIT replaced by SPIN_OFF / SPLIT_OFF. RECAPITALIZATION added with recap_type. NTM multiples added to input schema and framing rule. User template updated. Four examples updated to V2 field names; spin-off and dividend recap examples added. |
 | 0.10 | 2026-08-20 | **Consumer update for V3 §T2 (S-B).** `MERGER` and `REVERSE_MERGER` are no longer emitted as event types, which would have left the two framing rules keyed on them permanently dead and silently dropped de-SPAC framing. Both are re-keyed onto `combination_structure`, and `DE_SPAC` framing is added. `combination_structure` added to the input schema and user template. The hierarchy is stated so framing is chosen by implication rather than by equality. Merger structure does **not** imply merger-of-equals — that stays driven by `is_merger_of_equals`, which is unchanged. |
 | 0.11 | 2026-08-20 | **`flags.includes_earnout` removed from the input contract.** Stage 7 no longer produces it and Stage 9 no longer aggregates it, so the key would have arrived permanently false — a flag asserting "no earnout" on every deal. It carried no framing rule or failure mode here, unlike `flags.is_take_private`, so nothing in summary behaviour depends on its removal. Contingent consideration is visible to this prompt where it always was: in `consideration_components`, which now distinguishes `EARNOUT`, `CVR` and `CONTINGENT_CONSIDERATION`. |
+| 0.12 | 2026-08-20 | **`flags.hostile` replaced by `flags.deal_attitude` and `flags.approach_type` (V3 §T11).** Stage 7 stopped writing `hostile` when the fused boolean split into two independent nullable dimensions, so the key had been arriving **permanently false** — an assertion of "not hostile" on every transaction, including genuinely hostile ones, and the canonical replacements never reached this prompt at all. A pure transport correction: both fields are passed through as themselves, **null stays null** rather than being coerced to false, and no framing rule couples attitude to approach — they are independent by decision. `deal_attitude` is `FRIENDLY`/`HOSTILE`/null and absence of hostile evidence is not `FRIENDLY`; `approach_type` is `SOLICITED`/`UNSOLICITED`/null. |
