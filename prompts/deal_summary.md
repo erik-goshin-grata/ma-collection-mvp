@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.13 (sponsor role comes from sponsor_transaction_role)
+**Version:** 0.14 (spinco example corrected; legacy framing labelled)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -190,7 +190,7 @@ DEAL TYPE FRAMING (V2 event types + combination structure)
   framing. Because the values are hierarchical, DE_SPAC also satisfies any
   reverse-merger or merger framing above — do not apply all three.
 - JOINT_VENTURE: parties forming or contributing to a JV.
-- MINORITY_INVESTMENT: minority stake. State percentage when known.
+- MINORITY_INVESTMENT *(legacy rows only — the classifier stopped emitting this type at 0.7; minority status is derived downstream. Retained so stored transactions still frame correctly, never expected on new output)*: minority stake. State percentage when known.
 - RECAPITALIZATION: capital structure restructuring without change of control.
   Frame by recap_type:
   - DIVIDEND: debt-funded special dividend to shareholders/sponsors.
@@ -401,7 +401,7 @@ V2 EVENT TYPE: SPIN_OFF
 SPIN SPLIT TYPE: SPIN_OFF
 DISTRIBUTION MECHANISM: PRO_RATA
 EVENT HISTORY TYPE: ANNOUNCED
-TARGET TYPE: spinco
+TARGET TYPE: subsidiary
 TARGET STATUS: SUBSIDIARY_OF_PUBLIC
 ANNOUNCED DATE: 2026-05-10
 TARGET: Industrial Coatings Holdings
@@ -488,3 +488,4 @@ Output:
 | 0.11 | 2026-08-20 | **`flags.includes_earnout` removed from the input contract.** Stage 7 no longer produces it and Stage 9 no longer aggregates it, so the key would have arrived permanently false — a flag asserting "no earnout" on every deal. It carried no framing rule or failure mode here, unlike `flags.is_take_private`, so nothing in summary behaviour depends on its removal. Contingent consideration is visible to this prompt where it always was: in `consideration_components`, which now distinguishes `EARNOUT`, `CVR` and `CONTINGENT_CONSIDERATION`. |
 | 0.12 | 2026-08-20 | **`flags.hostile` replaced by `flags.deal_attitude` and `flags.approach_type` (V3 §T11).** Stage 7 stopped writing `hostile` when the fused boolean split into two independent nullable dimensions, so the key had been arriving **permanently false** — an assertion of "not hostile" on every transaction, including genuinely hostile ones, and the canonical replacements never reached this prompt at all. A pure transport correction: both fields are passed through as themselves, **null stays null** rather than being coerced to false, and no framing rule couples attitude to approach — they are independent by decision. `deal_attitude` is `FRIENDLY`/`HOSTILE`/null and absence of hostile evidence is not `FRIENDLY`; `approach_type` is `SOLICITED`/`UNSOLICITED`/null. |
 | 0.13 | 2026-08-21 | **`flags.sponsor_transaction_role` added; the `pe_portfolio` → add-on inference removed (V3 §T7).** S-G made sponsor role a canonical extracted field, and this prompt was still deriving it from the acquirer's type — the exact derivation §T7 retired, and the field itself never reached the prompt at all. `PLATFORM` / `ADD_ON` / null are now carried in `flags`, uncoerced, with null meaning no role is established rather than one denied. A SPONSOR TRANSACTION ROLE section makes the field the only source of platform/add-on framing and prohibits inferring it from `acquirer_type`, from `ACQUIRER SPONSOR`, or from a description calling the acquirer PE-backed. `PLATFORM` is framed as the platform being newly established for the sponsor, not the company being newly created. The `acquirer_type = private_equity` line stays: buyer type may describe the buyer, it may not determine the role. `is_secondary_buyout` remains independent. Example 1 keeps its sparse-private-deal purpose and its add-on sentence, now justified by the canonical field in its FLAGS input. |
+| 0.14 | 2026-08-21 | **Example 3's `TARGET TYPE: spinco` corrected to `subsidiary`; `MINORITY_INVESTMENT` framing labelled as legacy-row compatibility.** V3 §T3 removed `spinco`, so a worked example supplying it taught an input the summary can never receive. `subsidiary` follows from the example's own stated facts — a distributed entity with `TARGET STATUS: SUBSIDIARY_OF_PUBLIC`, typed on its structural merits as §T3 requires — so no new Product semantics are introduced. `MINORITY_INVESTMENT` keeps its framing rule, now explicitly marked as compatibility for stored rows rather than a current classifier output. |

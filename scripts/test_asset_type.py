@@ -417,6 +417,28 @@ def _test_hc_contract(failures: list[str]) -> None:
         failures.append("hc prompt: missing the asset-type-is-not-sector rule, which is the "
                         "distinction §T13 exists to draw")
 
+    # Stale active notes. The versioning table legitimately names retired fields in its
+    # history rows, so assertions below run against the instruction body only.
+    body = text.split("## 9. Versioning")[0] if "## 9. Versioning" in text else text
+    if "spinco" in body:
+        failures.append("hc prompt: `spinco` is still listed in the active target_type "
+                        "vocabulary — V3 §T3 removed the value, so it can no longer arrive")
+    if "When classifier is updated to v0.6+" in body:
+        failures.append("hc prompt: the V2 note still promises a rename 'when classifier is "
+                        "updated to v0.6+'. The classifier is well past that and the rename "
+                        "never happened: the template keeps legacy LABELS while the stage "
+                        "supplies current values")
+    if "is_divestiture" in body or "is_add_on" in body:
+        # Naming them is fine; describing them as currently authored is not.
+        if "no longer authored" not in body:
+            failures.append("hc prompt: the derivation note still presents is_divestiture "
+                            "and/or is_add_on as built derivations. §T4 removed the first and "
+                            "§T7 retired the second")
+    if "target_type_v2" not in body:
+        failures.append("hc prompt: the input note does not say that target_type arrives in "
+                        "its normalized current representation, which is what the stage "
+                        "actually passes (target_type_v2 or target_type)")
+
 
 def main() -> int:
     failures: list[str] = []

@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.21 (sponsor_transaction_role — platform vs add-on)
+**Version:** 0.22 (input note describes the values the stage actually sends)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -20,7 +20,7 @@
 > - **#11 Exchange ratio** *(needs schema — eng note):* capture the stock-deal `exchange_ratio` into a **structured field** (today it lands in `consideration_components.description` free-text; Olin/Huntsman `0.5476`).
 > - **ARR field** *(needs schema — eng note):* dedicated ARR capture, distinct from GAAP revenue.
 >
-> **Derivation JOB (#8) — now BUILT** in `stages/aggregate.py`: equity / implied-equity / EV / multiples and `is_take_private`/`is_divestiture`/`is_add_on`. The model **captures primitives only** — it must not compute or infer these (see rule 1).
+> **Derivation JOB (#8) — BUILT** in `stages/aggregate.py`: equity / implied-equity / EV / multiples and `is_take_private`. `is_divestiture` (§T4) and `is_add_on` (§T7) are **no longer authored** — the first is removed from V3, the second is replaced by the extracted `deal.sponsor_transaction_role`; both columns are retained but unwritten. The model **captures primitives only** — it must not compute or infer any of these (see rule 1).
 
 ---
 
@@ -64,13 +64,18 @@ transaction. Single-transaction sources return a one-element array.
 }
 ```
 
-**V2 note:** `deal_type` and `event_type` reflect legacy classifier output
-(v0.5 and earlier). When classifier is updated to v0.6+, these will be
-`v2_event_type` and `event_history_type`. The extraction prompt treats both
-field names equivalently — classify the content, not the label.
+**Input note:** the field LABELS above are legacy names, retained for stability. The
+VALUES are current: the stage supplies `v2_event_type` under the `deal_type` label and
+`event_history_type` under the `event_type` label, falling back to the legacy column only
+when the current one is absent. Classify the content, not the label.
 
-`target_type` values are lowercase in V2: `standalone_company`, `subsidiary`,
-`business_unit`, `assets`, `spinco`.
+`target_type` is supplied in its normalized current representation — the stage passes
+`target_type_v2` when present — so it arrives lowercase: `standalone_company`,
+`subsidiary`, `business_unit`, `assets`.
+
+Lowercase is specific to `target_type` and `acquirer.type`. Other vocabularies here are
+uppercase by design — `target_status`, `value.type`, `asset_type`, `offer_mechanism`,
+`deal.sponsor_transaction_role` — so do not lowercase a value because this note does.
 
 ---
 
@@ -1512,3 +1517,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.19 | 2026-08-20 | **`asset_type` added (V3 §T13), subordinate to `target_type = assets`.** Eleven values plus null, answering *what kind of asset is being transacted* — **not** the target's sector or industry, which remains a separate classification. `FACILITY` is deliberately distinct from `REAL_ESTATE`: an operating plant is a different transaction object from property held principally as real estate. Single-valued; a portfolio of like assets is one value. **Null for every target type other than `assets`**, enforced in the stage validator — it is a sub-classification of an asset purchase, not an independent judgement. Example 8 added; all ten existing example target blocks carry `asset_type: null`. |
 | 0.20 | 2026-08-20 | **`offer_mechanism` added (V3 §T12).** `TENDER_OFFER` | null, in the `deal` block. Describes whether the acquisition is effected through an offer made directly to target securityholders; established by tender-offer, exchange-offer or equivalent language. Vocabulary deliberately not expanded — `MANDATORY_OFFER`, `SCHEME_OF_ARRANGEMENT`, `ONE_STEP_MERGER` and `TWO_STEP_MERGER` are excluded by §T12. Two anti-inference rules: a public target is not evidence of a tender offer, and a merger agreement alone is not either. Example 9 added for the two-step case, where `offer_mechanism = TENDER_OFFER` and `combination_structure = MERGER` coexist. Previously this fact existed only as `merger_structure = TENDER_OFFER` on the SEC/agreement path, unreachable for any transaction without a filing; that path is retained as corroborating evidence, not replaced. |
 | 0.21 | 2026-08-21 | **`sponsor_transaction_role` added (V3 §T7); `is_platform_investment` retired.** `PLATFORM` / `ADD_ON` / null in the `deal` block, replacing the v0.4 `is_platform_investment` + `is_add_on` pair. `PLATFORM` needs affirmative evidence that **this** transaction creates a new sponsor platform — a PE buyer alone does not establish it. `ADD_ON` is an acquisition **by** an already sponsor/PE-backed portfolio or platform company; literal add-on/bolt-on/tuck-in wording is **not** required, the sponsor need not be named, and a company description may supply the context. Null is expected to be common: sponsor involvement alone is insufficient and generic VC backing is not `ADD_ON`. **No mechanical precedence rule** — `PLATFORM` requires new-platform evidence, otherwise an acquisition by an already-backed portfolio company is `ADD_ON`. Independent of `acquirer.type`, and never derived from it. `is_secondary_buyout` stays orthogonal. `is_platform_investment` leaves the `features` contract entirely — it accepted only explicit platform wording, which is the narrower half of what §T7 asks. **`sponsor_name` is no longer gated on `pe_portfolio`** (a value §T8 removes): populate it whenever the source establishes the sponsor associated with the acquirer, never inferred from apparent sponsor backing. |
+| 0.22 | 2026-08-21 | **Input note corrected to describe the values the stage actually sends; stale vocabulary and derivation claims removed.** The note said `deal_type` and `event_type` "reflect legacy classifier output (v0.5 and earlier)" and promised they would become `v2_event_type` / `event_history_type` "when classifier is updated to v0.6+". The classifier is at 0.12 and that rename never happened: the template keeps the legacy **labels** while `stages/high_confidence_extract.py` supplies the **current values** under them. `target_type` in particular arrives normalized — the stage passes `target_type_v2` when present — which is why it is lowercase. That is stated as specific to `target_type` and `acquirer.type`, with a reminder that `target_status`, `value.type`, `asset_type`, `offer_mechanism` and `sponsor_transaction_role` are uppercase by design, so the note cannot be read as a general lowercasing rule. `spinco` is dropped from the vocabulary (§T3 removed it, so it cannot arrive). The derivation note no longer presents `is_divestiture` and `is_add_on` as built: §T4 removed one and §T7 replaced the other with `sponsor_transaction_role`, and both columns are retained but unwritten. |

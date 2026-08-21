@@ -297,6 +297,14 @@ def _test_prompt_contract(failures: list[str]) -> None:
         failures.append("prompt: missing the rule that a contingent component never replaces "
                         "base consideration")
 
+    # Stale active vocabulary. The versioning table may name retired values in its history
+    # rows; the instruction body may not present them as receivable.
+    body = text.split("## 9. Versioning")[0] if "## 9. Versioning" in text else text
+    if "spinco" in body:
+        failures.append("prompt: `spinco` is still listed in the active target_type input "
+                        "vocabulary — V3 §T3 removed the value, so no upstream stage can "
+                        "supply it")
+
 
 def main() -> int:
     failures: list[str] = []

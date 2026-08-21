@@ -259,6 +259,22 @@ def _test_prompt_contract(failures: list[str]) -> None:
         if f'"{field}"' not in text:
             failures.append(f"deal_summary prompt: {field} is missing from the input contract")
     # V3 §T7: sponsor role is carried by the canonical field, never inferred from buyer type.
+    # Stale active example / framing. Changelog rows may name retired values; worked
+    # examples and framing rules may not present them as current.
+    body = text.split("## 9. Versioning")[0] if "## 9. Versioning" in text else text
+    if "TARGET TYPE: spinco" in body:
+        failures.append("deal_summary prompt: a worked example still supplies "
+                        "TARGET TYPE: spinco — V3 §T3 removed the value, so the summary can "
+                        "never receive it")
+    # Assert on the framing-rule line itself. A byte window around the token is fragile:
+    # the label may sit before or after it, and the changelog mentions the value too.
+    for line in body.splitlines():
+        if line.lstrip().startswith("- MINORITY_INVESTMENT") and "legacy" not in line.lower():
+            failures.append("deal_summary prompt: the MINORITY_INVESTMENT framing rule carries "
+                            "no legacy-row label. The classifier stopped emitting the type at "
+                            "0.7, so the rule is compatibility for stored rows, not current "
+                            "output")
+
     if "acquirer_type = pe_portfolio: add-on" in text:
         failures.append("deal_summary prompt: the retired pe_portfolio -> add-on inference is "
                         "still an active framing rule — §T7 replaced it with "
