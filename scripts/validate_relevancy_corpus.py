@@ -138,6 +138,10 @@ def _read_tsv(path: str, cols: dict, dedupe_by: str | None,
     return out, collapsed
 
 
+def _is_wire(domain: str) -> bool:
+    return (domain or "").removeprefix("www.") in _WIRE_DOMAINS
+
+
 def _domain(url: str) -> str:
     if "://" not in url:
         return ""
@@ -194,8 +198,10 @@ def _aggregate(records: list[dict]) -> dict:
         },
         "source_composition": {
             "distinct_domains": len({r["domain"] for r in records if r["domain"]}),
-            "pr_wire_stories": sum(1 for r in records if r["domain"] in _WIRE_DOMAINS),
-            "pr_wire_pct": rate(sum(1 for r in records if r["domain"] in _WIRE_DOMAINS)),
+            # Strip the www. prefix before matching. Without it every wire domain
+            # missed and the report claimed 0.0% PR-wire on a corpus that was 5.6%.
+            "pr_wire_stories": sum(1 for r in records if _is_wire(r["domain"])),
+            "pr_wire_pct": rate(sum(1 for r in records if _is_wire(r["domain"]))),
             "top_domains": [{"domain": d, "count": k} for d, k in
                             Counter(r["domain"] for r in records if r["domain"]).most_common(15)],
         },
