@@ -256,12 +256,100 @@ def _test_no_stage_reads_model_value(failures: list[str]) -> None:
                             "Provenance is caller-owned — use _FULL_VERSION")
 
 
+# ---------------------------------------------------------------------------
+# 5. No production prompt asks the model to author or echo provenance
+# ---------------------------------------------------------------------------
+#
+# Deliberately narrow. Provenance is caller-owned, not unmentionable: the `prompt_version`
+# TABLE, the `staging_extraction.prompt_version` COLUMN, changelog rows and ordinary prose
+# describing any of them are all legitimate and must keep working. What is prohibited is
+# the model being made responsible for the value:
+#
+#   (a) `"prompt_version"` as a key in a fenced response schema or worked example;
+#   (b) `prompt_version` as a row in a field-definition table describing the response;
+#   (c) `{prompt_version}` plumbing in a user template;
+#   (d) the instruction to return it unchanged.
+#
+# Generic by construction: it walks prompts/*.md, so a prompt added next year is covered
+# without editing this test.
+
+_FENCE_RE = re.compile(r"```.*?```", re.S)
+_KEY_RE = re.compile(r'"prompt_version"\s*:')
+_TEMPLATE_RE = re.compile(r"\{prompt_version\}")
+# Whitespace-tolerant: the sentence is line-wrapped in at least one prompt, and a per-line
+# reading would silently miss it -- the same wrap that hid two findings in the classifier.
+_ECHO_RE = re.compile(r'"prompt_version"\s+is\s+returned\s+unchanged', re.S)
+# Changelog table rows legitimately name the retired key in their history. Dropping just
+# those rows -- rather than everything after the Versioning heading -- keeps the scan honest
+# for files like prompt_conventions.md, whose shared response-format text sits AFTER its
+# changelog and would otherwise be excluded from the very check it most needs.
+_CHANGELOG_ROW_RE = re.compile(r"^\|\s*[0-9]+\.[0-9]+\s*\|.*$", re.M)
+# Response contracts are also stated as field-definition tables, not only as fenced JSON.
+# Six such rows survived the first sweep of this file precisely because they are not fenced
+# -- five agreement_* prompts plus relevancy_filter -- so the fenced-block scan alone does
+# not prove the contract is clean. Anchored on a first cell that is exactly the bare key:
+# a row documenting `staging_extraction.prompt_version` is caller-side and stays legal.
+_FIELD_ROW_RE = re.compile(r"^\|\s*`?prompt_version`?\s*\|", re.M)
+
+
+def _active_body(text: str) -> str:
+    return _CHANGELOG_ROW_RE.sub("", text)
+
+
+def _test_no_prompt_authors_provenance(failures: list[str]) -> None:
+    prompts_dir = os.path.join(ROOT, "prompts")
+    for name in sorted(os.listdir(prompts_dir)):
+        if not name.endswith(".md"):
+            continue
+        text = open(os.path.join(prompts_dir, name), encoding="utf-8").read()
+        # History may name the retired key; the active contract may not.
+        body = _active_body(text)
+
+        for fence in _FENCE_RE.finditer(body):
+            for m in _KEY_RE.finditer(fence.group(0)):
+                lineno = body[:fence.start() + m.start()].count("\n") + 1
+                failures.append(f"prompts/{name} L{lineno}: a response schema or worked "
+                                "example declares `prompt_version`. Provenance is "
+                                "caller-owned; the model must not author it")
+        for m in _FIELD_ROW_RE.finditer(body):
+            lineno = body[:m.start()].count("\n") + 1
+            failures.append(f"prompts/{name} L{lineno}: a field-definition table still "
+                            "documents `prompt_version` as a response field. Provenance is "
+                            "caller-owned; the model must not author it")
+        for m in _TEMPLATE_RE.finditer(body):
+            lineno = body[:m.start()].count("\n") + 1
+            failures.append(f"prompts/{name} L{lineno}: the user template supplies "
+                            "`{prompt_version}`. Echo plumbing is removed — the caller "
+                            "stamps the version and never asks for it back")
+        for m in _ECHO_RE.finditer(body):
+            lineno = body[:m.start()].count("\n") + 1
+            failures.append(f"prompts/{name} L{lineno}: still instructs the model to return "
+                            "prompt_version unchanged")
+
+
+def _test_no_stage_formats_provenance(failures: list[str]) -> None:
+    """No stage may pass the version INTO a user template."""
+    stages_dir = os.path.join(ROOT, "stages")
+    for name in sorted(os.listdir(stages_dir)):
+        if not name.endswith(".py"):
+            continue
+        text = open(os.path.join(stages_dir, name), encoding="utf-8").read()
+        for m in re.finditer(r"user_template\"\]\.format\((.*?)\)", text, re.S):
+            if "prompt_version=" in m.group(1):
+                lineno = text[:m.start()].count("\n") + 1
+                failures.append(f"stages/{name} L{lineno}: formats prompt_version into the "
+                                "user template. The caller already knows the version; "
+                                "handing it to the model creates a value to drift")
+
+
 def main() -> None:
     failures: list[str] = []
     _test_aggregation_conflict_row(failures)
     _test_relevancy_note(failures)
     _test_required_keys(failures)
     _test_no_stage_reads_model_value(failures)
+    _test_no_prompt_authors_provenance(failures)
+    _test_no_stage_formats_provenance(failures)
 
     if failures:
         print(f"FAIL ({len(failures)})")
@@ -269,7 +357,8 @@ def main() -> None:
             print(f"  - {f}")
         sys.exit(1)
     print("PASS  prompt provenance is caller-owned  (aggregation audit row via a real "
-          "same-tier conflict, relevancy note, required-key removal, no stage reads)")
+          "same-tier conflict, relevancy note, required-key removal, no stage reads, "
+          "no prompt authors or echoes it)")
 
 
 if __name__ == "__main__":

@@ -57,7 +57,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_type_classifier"
-_VERSION = "0.12"
+_VERSION = "0.13"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 # V2 EventType enum values

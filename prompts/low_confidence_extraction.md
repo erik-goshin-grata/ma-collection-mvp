@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.9 (stale target_type input vocabulary corrected)
+**Version:** 0.10 (provenance is caller-owned)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -267,11 +267,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": null
 }
 
-All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for optional fields that have no value.
 ```
 
 ---
@@ -328,8 +327,7 @@ Extract advisors, consideration components, and deal characteristic flags.
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": null
 }
 ```
 
@@ -383,8 +381,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": null
 }
 ```
 
@@ -424,8 +421,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": "Percentages against $800M max deal value",
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": "Percentages against $800M max deal value"
 }
 ```
 
@@ -463,8 +459,7 @@ Output:
     "acquirer_fee_percentage": 6.0
   },
   "model_confidence": "HIGH",
-  "notes": "HSR explicit. Target fee amount-only; acquirer fee both amount and percentage stated.",
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": "HSR explicit. Target fee amount-only; acquirer fee both amount and percentage stated."
 }
 ```
 
@@ -503,8 +498,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": "Percentages against $54M max deal value",
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": "Percentages against $54M max deal value"
 }
 ```
 
@@ -546,8 +540,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": "Total deal value not computable without share count; amounts left null",
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": "Total deal value not computable without share count; amounts left null"
 }
 ```
 
@@ -583,8 +576,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": "Closing release with no financial terms disclosed",
-  "prompt_version": "low_confidence_extraction:0.4"
+  "notes": "Closing release with no financial terms disclosed"
 }
 ```
 
@@ -792,3 +784,4 @@ initiated a process to find one.
 | 0.7 | 2026-08-20 | **Contingent consideration made explicit; `includes_earnout` retired (V3 §T12-adjacent consideration cleanup).** `CONTINGENT_CONSIDERATION` added to the component form enum for consideration the source states is contingent, deferred or milestone-based where neither `EARNOUT` nor `CVR` is established — that fact was previously lost or forced into a wrong subtype. A most-specific-supported-form rule is stated explicitly, in both directions: do not fall back to the generic form when the source supports a subtype, and do not promote a vague additional payment to `EARNOUT` because earnouts are common. Contingent components are **additive** — they never replace base consideration. **`includes_earnout` is removed entirely**: it was defined as "earnout OR CVR", a wider scope than the field it appeared to shortcut, so it was a third differently-scoped signal for two facts. `consideration_components` is the authoritative structured extraction; `has_earnout` derives only from `EARNOUT` and `has_cvr` only from `CVR`. |
 | 0.8 | 2026-08-20 | **A mandatory or regulatory offer does not by itself establish `approach_type = UNSOLICITED`.** Gate 2 returned `UNSOLICITED` for the Kontron / Ennoconn mandatory takeover offer under the Austrian Takeover Act, on a source where the word "unsolicited" never appears and no solicitation evidence exists in either direction — so `null` was already the answer the stated rule required. One sentence added to the `approach_type` block: a statutory obligation to make an offer describes **why** the offer had to be made, not **how** the approach arose. `deal_attitude` is untouched — `HOSTILE` was correct on this source and is now independently validated by it. No example is added or changed, and solicited/unsolicited semantics are not reopened. |
 | 0.9 | 2026-08-21 | **`spinco` removed from the active `target_type` input vocabulary (V3 §T3).** The note told this prompt to expect a value that no upstream stage can produce — §T3 removed it and the classifier rejects it as a schema violation. Descriptive input guidance is part of the contract, so this carries a version. No extraction rule changes. |
+| 0.10 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

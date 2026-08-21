@@ -1,6 +1,6 @@
 # Agreement Consideration Extraction Prompt
 
-**Version:** 0.1
+**Version:** 0.2 (provenance is caller-owned)
 **Repo path:** `prompts/agreement_consideration.md`
 
 ---
@@ -25,8 +25,7 @@ Runs in Stage 11 (agreement_extract) for each CONSIDERATION section in a deal do
 
 ```json
 {
-  "section_text": "...",
-  "prompt_version": "agreement_consideration:0.1"
+  "section_text": "..."
 }
 ```
 
@@ -73,11 +72,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   ],
   "per_share_price_total": 47.00,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_consideration:0.1"
+  "notes": null
 }
 
-All fields are required. Use null for optional sub-fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for optional sub-fields that have no value.
 ```
 
 ---
@@ -90,7 +88,6 @@ Extract consideration structure from the following deal document section.
 SECTION TEXT:
 {section_text}
 
-prompt_version: {prompt_version}
 ```
 
 ---
@@ -109,7 +106,6 @@ prompt_version: {prompt_version}
 | `per_share_price_total` | number\|null | Sum of cash-equivalent per-share consideration |
 | `model_confidence` | enum | HIGH \| MEDIUM \| LOW \| NONE |
 | `notes` | string\|null | Proration mechanics, caveats (≤200 chars) |
-| `prompt_version` | string | Echoed from input |
 
 ---
 
@@ -133,8 +129,7 @@ Section 3.1 Conversion of Company Common Stock. At the Effective Time, by virtue
   ],
   "per_share_price_total": 52.00,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_consideration:0.1"
+  "notes": null
 }
 ```
 
@@ -154,8 +149,7 @@ Section 2.2 Conversion of Shares. At the Effective Time, each share of Company C
   ],
   "per_share_price_total": 28.00,
   "model_confidence": "HIGH",
-  "notes": "CVR amount ($4.50) is contingent maximum; total if full CVR is $32.50 per agreement.",
-  "prompt_version": "agreement_consideration:0.1"
+  "notes": "CVR amount ($4.50) is contingent maximum; total if full CVR is $32.50 per agreement."
 }
 ```
 
@@ -178,8 +172,7 @@ Section 2.2 Conversion of Shares.
   ],
   "per_share_price_total": null,
   "model_confidence": "HIGH",
-  "notes": "Cash paid in lieu of fractional shares at VWAP; no fixed per-share cash amount stated.",
-  "prompt_version": "agreement_consideration:0.1"
+  "notes": "Cash paid in lieu of fractional shares at VWAP; no fixed per-share cash amount stated."
 }
 ```
 
@@ -200,3 +193,4 @@ Section 2.2 Conversion of Shares.
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version |
+| 0.2 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples and the `{prompt_version}` line from the user template. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

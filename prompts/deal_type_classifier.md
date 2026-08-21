@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.12 (active text uses the current lowercase vocabulary)
+**Version:** 0.13 (provenance is caller-owned)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -369,13 +369,10 @@ code fences, no preamble.
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": null
 }
 
 All fields are required. Use null for optional fields that have no value.
-"prompt_version" is returned unchanged from the value passed in the user
-prompt.
 
 "deal_type" is a transitional alias for "v2_event_type" — return the same
 value in both fields. Pipeline code will migrate to "v2_event_type";
@@ -415,8 +412,7 @@ target status.
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": null
 }
 ```
 
@@ -466,8 +462,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": null
 }
 ```
 
@@ -496,8 +491,7 @@ Output:
   "target_status": "PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Take-Private context: public target, PE acquirer. Downstream derives Take-Private flag from target_status + acquirer_type.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Take-Private context: public target, PE acquirer. Downstream derives Take-Private flag from target_status + acquirer_type."
 }
 ```
 
@@ -525,8 +519,7 @@ Output:
   "target_status": "SUBSIDIARY_OF_PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Business unit divestiture; parent_seller is MegaCorp (extracted downstream).",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Business unit divestiture; parent_seller is MegaCorp (extracted downstream)."
 }
 ```
 
@@ -556,8 +549,7 @@ Output:
   "target_status": "SUBSIDIARY_OF_PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Parent retains 15% residual stake, consistent with SPIN_OFF tax-free treatment.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Parent retains 15% residual stake, consistent with SPIN_OFF tax-free treatment."
 }
 ```
 
@@ -586,8 +578,7 @@ Output:
   "target_status": "SUBSIDIARY_OF_PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Practitioner term 'Split-Off' = SPLIT_OFF top-level type + EXCHANGE_OFFER mechanism.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Practitioner term 'Split-Off' = SPLIT_OFF top-level type + EXCHANGE_OFFER mechanism."
 }
 ```
 
@@ -616,8 +607,7 @@ Output:
   "target_status": "UNKNOWN",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "New entity formed; no existing company acquired.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "New entity formed; no existing company acquired."
 }
 ```
 
@@ -645,8 +635,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Debt-funded special dividend to PE sponsor; no change of control.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Debt-funded special dividend to PE sponsor; no change of control."
 }
 ```
 
@@ -674,8 +663,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Series B funding round. Venture Partners is lead investor. Funding extraction prompt handles investor list and round details.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Series B funding round. Venture Partners is lead investor. Funding extraction prompt handles investor list and round details."
 }
 ```
 
@@ -705,8 +693,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Growth equity minority investment by named growth equity firm (TA Associates). Profitable company, management partnership framing — GROWTH_EQUITY not VC_ROUND.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Growth equity minority investment by named growth equity firm (TA Associates). Profitable company, management partnership framing — GROWTH_EQUITY not VC_ROUND."
 }
 ```
 
@@ -736,8 +723,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Venture lending facility to a Series B-stage company. Explicitly framed as debt extending runway to next equity round.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Venture lending facility to a Series B-stage company. Explicitly framed as debt extending runway to next equity round."
 }
 ```
 
@@ -764,8 +750,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "First public announcement of a completed private acquisition; not a separate later closing release.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "First public announcement of a completed private acquisition; not a separate later closing release."
 }
 ```
 
@@ -792,8 +777,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Advisor tombstone; no prior announcement referenced — treat as first observed announcement.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Advisor tombstone; no prior announcement referenced — treat as first observed announcement."
 }
 ```
 
@@ -822,8 +806,7 @@ Output:
   "target_status": "PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Definitive agreement with pending-close language; event is announcement, not close.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Definitive agreement with pending-close language; event is announcement, not close."
 }
 ```
 
@@ -851,8 +834,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Separate later completion release explicitly references a previously announced acquisition.",
-  "prompt_version": "deal_type_classifier:0.7"
+  "notes": "Separate later completion release explicitly references a previously announced acquisition."
 }
 ```
 
@@ -880,8 +862,7 @@ Output:
   "target_status": "PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Acquisition effected through a merger. combination_structure = MERGER; merger-of-equals framing is not required and is not claimed here.",
-  "prompt_version": "deal_type_classifier:0.9"
+  "notes": "Acquisition effected through a merger. combination_structure = MERGER; merger-of-equals framing is not required and is not claimed here."
 }
 ```
 
@@ -907,8 +888,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "Public vehicle is a SPAC, so the most specific value applies: DE_SPAC, not REVERSE_MERGER. Broader merger questions are answered by implication.",
-  "prompt_version": "deal_type_classifier:0.9"
+  "notes": "Public vehicle is a SPAC, so the most specific value applies: DE_SPAC, not REVERSE_MERGER. Broader merger questions are answered by implication."
 }
 ```
 
@@ -934,8 +914,7 @@ Output:
   "target_status": "PRIVATE",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "A share purchase is not a combination structure. Absent merger, reverse-merger or de-SPAC evidence, combination_structure is null.",
-  "prompt_version": "deal_type_classifier:0.9"
+  "notes": "A share purchase is not a combination structure. Absent merger, reverse-merger or de-SPAC evidence, combination_structure is null."
 }
 ```
 
@@ -966,8 +945,7 @@ Output:
   "target_status": "SUBSIDIARY_OF_PUBLIC",
   "overrides_relevancy_hint": false,
   "model_confidence": "HIGH",
-  "notes": "A division, not a separate legal entity, so target_type = business_unit. The spin-off itself is carried by v2_event_type; target_type says what structural thing is being transacted. It is not standalone_company merely because it becomes standalone after the distribution.",
-  "prompt_version": "deal_type_classifier:0.10"
+  "notes": "A division, not a separate legal entity, so target_type = business_unit. The spin-off itself is carried by v2_event_type; target_type says what structural thing is being transacted. It is not standalone_company merely because it becomes standalone after the distribution."
 }
 ```
 
@@ -1005,3 +983,4 @@ Output:
 | 0.10 | 2026-08-20 | **`spinco` removed from `target_type` (V3 §T3).** It named an event/role, not a structure, and duplicated what `v2_event_type` already says. `target_type` now answers one question consistently — what structural thing is being transacted — so a SPIN_OFF or SPLIT_OFF is typed on the distributed entity's own merits: `subsidiary`, `business_unit`, `assets`, or null when the source does not establish it. **Not `standalone_company`** merely because it becomes standalone after the distribution. Examples 4 and 5 re-typed to `subsidiary`; Example 18 added for the division case. New output naming `spinco` is a schema violation. |
 | 0.11 | 2026-08-20 | **Transaction form alone does not determine `target_type`.** Gate 2 established one narrow failure: the classifier selected `assets` from asset-purchase wording ("acquired the assets of") on a source whose substance was the acquisition of a continuing operating business. One principle added to TARGET TYPE — do not classify as `assets` **solely** because of transaction-form language; read the full source to decide between a discrete asset set and an operating business. Deliberately minimal: no parsing rule, no evidence checklist, no decision tree, no new values, and the four-value taxonomy and its definitions are otherwise unchanged. "Solely" is load-bearing — the point is to remove a mechanical cue, not to install another one. Researcher review remains available for genuinely ambiguous cases. |
 | 0.12 | 2026-08-21 | **Active text brought onto the current lowercase vocabulary, and the failure-mode table corrected to describe the parser that exists.** IMPORTANT DISTINCTIONS instructed `target_type = BUSINESS_UNIT or SUBSIDIARY` and `acquirer_type = PRIVATE_EQUITY` while this same prompt declared uppercase target types no longer valid — one file asking for a value it forbids. Both are now lowercase, with `acquirer_type` marked as extracted downstream, since it is not an output of this prompt at all. `target_status = PUBLIC` is unchanged and correct: that vocabulary is genuinely uppercase. Separately, the failure-mode table claimed the parser **rejects** legacy uppercase `target_type`; it accepts it for rollout compatibility (`_VALID_LEGACY_TARGET_TYPES`) and normalizes it into `target_type_v2`, leaving the raw value on the legacy column that Stage 9 derivations read. The row now says so, and keeps the distinction that matters: **lowercase is valid current output, uppercase is tolerated legacy input and is not.** No parser change — the tolerance is deliberate, and `scripts/test_asset_type.py` now pins it behaviourally so ending it has to be an explicit decision. |
+| 0.13 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

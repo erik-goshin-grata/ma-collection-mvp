@@ -1,6 +1,6 @@
 # Agreement Termination Fees Extraction Prompt
 
-**Version:** 0.1
+**Version:** 0.2 (provenance is caller-owned)
 **Repo path:** `prompts/agreement_termination.md`
 
 ---
@@ -25,8 +25,7 @@ Runs in Stage 11 (agreement_extract) for each TERMINATION_FEES section in a deal
 
 ```json
 {
-  "section_text": "...",
-  "prompt_version": "agreement_termination:0.1"
+  "section_text": "..."
 }
 ```
 
@@ -73,11 +72,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "has_go_shop": false,
   "go_shop_period_days": null,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_termination:0.1"
+  "notes": null
 }
 
-All fields are required. Use null for amounts/percentages when not stated. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for amounts/percentages when not stated.
 ```
 
 ---
@@ -90,7 +88,6 @@ Extract termination fee and go-shop information from the following deal document
 SECTION TEXT:
 {section_text}
 
-prompt_version: {prompt_version}
 ```
 
 ---
@@ -109,7 +106,6 @@ prompt_version: {prompt_version}
 | `go_shop_period_days` | integer\|null | Days in go-shop period |
 | `model_confidence` | enum | HIGH \| MEDIUM \| LOW \| NONE |
 | `notes` | string\|null | Trigger conditions, caveats (≤200 chars) |
-| `prompt_version` | string | Echoed from input |
 
 ---
 
@@ -136,8 +132,7 @@ Section 7.4 Parent Termination Fee. In the event this Agreement is terminated by
   "has_go_shop": false,
   "go_shop_period_days": null,
   "model_confidence": "HIGH",
-  "notes": "Company fee (2.3% of equity value) stated explicitly. Parent fee is 2x company fee; no pct stated.",
-  "prompt_version": "agreement_termination:0.1"
+  "notes": "Company fee (2.3% of equity value) stated explicitly. Parent fee is 2x company fee; no pct stated."
 }
 ```
 
@@ -166,8 +161,7 @@ Section 8.3 Termination Fees.
   "has_go_shop": true,
   "go_shop_period_days": 35,
   "model_confidence": "HIGH",
-  "notes": "Reduced go-shop fee ($22M) applies for Excluded Parties; standard fee ($44M) used as primary. Parent fee for financing failure.",
-  "prompt_version": "agreement_termination:0.1"
+  "notes": "Reduced go-shop fee ($22M) applies for Excluded Parties; standard fee ($44M) used as primary. Parent fee for financing failure."
 }
 ```
 
@@ -188,3 +182,4 @@ Section 8.3 Termination Fees.
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version — termination fees + go-shop |
+| 0.2 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples and the `{prompt_version}` line from the user template. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

@@ -1,6 +1,6 @@
 # Funding Low-Confidence Extraction Prompt
 
-**Version:** 0.1
+**Version:** 0.2 (provenance is caller-owned)
 **Repo path:** `prompts/funding_lc_extraction.md`
 
 ---
@@ -141,12 +141,10 @@ code fences, no preamble.
   "pct_acquired": null,
   "regulatory_approvals_required": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "funding_lc_extraction:0.1"
+  "notes": null
 }
 
 All fields are required. Use null for optional fields that have no value.
-"prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -186,8 +184,7 @@ Extract advisors, use of proceeds, board seats, pct_acquired, and regulatory fla
   "pct_acquired": "number | null",
   "regulatory_approvals_required": "boolean | null",
   "model_confidence": "HIGH | MEDIUM | LOW",
-  "notes": "string | null",
-  "prompt_version": "string"
+  "notes": "string | null"
 }
 ```
 
@@ -240,8 +237,7 @@ Output:
   "pct_acquired": null,
   "regulatory_approvals_required": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "funding_lc_extraction:0.1"
+  "notes": null
 }
 ```
 
@@ -275,8 +271,7 @@ Output:
   "pct_acquired": 65.0,
   "regulatory_approvals_required": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "funding_lc_extraction:0.1"
+  "notes": null
 }
 ```
 
@@ -307,8 +302,7 @@ Output:
   "pct_acquired": null,
   "regulatory_approvals_required": false,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "funding_lc_extraction:0.1"
+  "notes": null
 }
 ```
 
@@ -334,8 +328,7 @@ Output:
   "pct_acquired": null,
   "regulatory_approvals_required": null,
   "model_confidence": "HIGH",
-  "notes": "Sparse portfolio page — no LC fields available.",
-  "prompt_version": "funding_lc_extraction:0.1"
+  "notes": "Sparse portfolio page — no LC fields available."
 }
 ```
 
@@ -358,3 +351,4 @@ Output:
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-07-28 | Initial version — advisors, use of proceeds, board seats, pct_acquired, regulatory flags for funding events. |
+| 0.2 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples (orphaned prompt: no owning stage exists, and none is created here). The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

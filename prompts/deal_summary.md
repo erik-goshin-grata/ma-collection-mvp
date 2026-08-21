@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.14 (spinco example corrected; legacy framing labelled)
+**Version:** 0.15 (provenance is caller-owned)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -251,12 +251,10 @@ code fences, no preamble.
   "summary_text": "...",
   "word_count": 70,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "deal_summary:0.9"
+  "notes": null
 }
 
 All fields are required. Use null for optional fields that have no value.
-"prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -321,8 +319,7 @@ Generate the summary.
   "summary_text": "On April 15, 2026, Acme Corp announced a definitive agreement to acquire Beta Industries...",
   "word_count": 70,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "deal_summary:0.9"
+  "notes": null
 }
 ```
 
@@ -355,8 +352,7 @@ Output:
   "summary_text": "On April 23, 2026, Parkview Dental Partners, a private equity-backed dental services platform headquartered in Texas, announced the acquisition of VIP Dental, a privately-held provider of pediatric and family dental services operating eight clinics across the Austin metro area. The transaction is an add-on to Parkview's existing Texas footprint, extending the platform's clinical capacity in pediatric care. Financial terms were not disclosed.",
   "word_count": 63,
   "model_confidence": "HIGH",
-  "notes": "Sparse private deal. Add-on framing comes from flags.sponsor_transaction_role = ADD_ON, not from acquirer_type or the private-equity-backed description; with the field null the same source would carry no sponsor-role framing.",
-  "prompt_version": "deal_summary:0.9"
+  "notes": "Sparse private deal. Add-on framing comes from flags.sponsor_transaction_role = ADD_ON, not from acquirer_type or the private-equity-backed description; with the field null the same source would carry no sponsor-role framing."
 }
 ```
 
@@ -388,8 +384,7 @@ Output:
   "summary_text": "On April 15, 2026, Acme Capital Partners, a private equity firm focused on technology and industrial software platforms, announced an agreement to acquire BetaCo, Inc. (NASDAQ: BETA) for $42.00 per share in cash, valuing the company at approximately $2.4 billion. The transaction values BetaCo at approximately 7.5x LTM revenue and 25.3x LTM EBITDA. Upon completion, BetaCo will become a private company. Goldman Sachs served as financial advisor and Skadden as legal counsel to BetaCo; Evercore served as financial advisor and Kirkland & Ellis as legal counsel to Acme Capital.",
   "word_count": 94,
   "model_confidence": "HIGH",
-  "notes": "Take-private flag true; per-share and aggregate equity value framing. LTM multiples included from the derived Tier 2 whole-company EV numerator.",
-  "prompt_version": "deal_summary:0.9"
+  "notes": "Take-private flag true; per-share and aggregate equity value framing. LTM multiples included from the derived Tier 2 whole-company EV numerator."
 }
 ```
 
@@ -420,8 +415,7 @@ Output:
   "summary_text": "On May 10, 2026, MegaCorp, a publicly-traded diversified industrials conglomerate, announced the spin-off of Industrial Coatings Holdings, its industrial coatings and protective solutions business with operations in 12 countries, as a standalone publicly traded company. MegaCorp shareholders will receive shares of Industrial Coatings Holdings pro-rata. MegaCorp stated the separation will allow both companies to focus on their distinct strategic priorities and capital allocation needs. Goldman Sachs served as financial advisor to MegaCorp.",
   "word_count": 73,
   "model_confidence": "HIGH",
-  "notes": "SPIN_OFF with PRO_RATA distribution. No third-party buyer; parent seller framed as the distributing entity.",
-  "prompt_version": "deal_summary:0.9"
+  "notes": "SPIN_OFF with PRO_RATA distribution. No third-party buyer; parent seller framed as the distributing entity."
 }
 ```
 
@@ -450,8 +444,7 @@ Output:
   "summary_text": "On March 15, 2026, PortfolioCo, a privately-held provider of industrial maintenance services backed by Sponsor Partners, completed a $500 million dividend recapitalization. The transaction involved the issuance of new term debt used to fund a special dividend to Sponsor Partners and PortfolioCo's shareholders. First Bank served as lead arranger. There was no change of control.",
   "word_count": 54,
   "model_confidence": "HIGH",
-  "notes": "RECAPITALIZATION / DIVIDEND. Same-day close. No change of control noted explicitly.",
-  "prompt_version": "deal_summary:0.9"
+  "notes": "RECAPITALIZATION / DIVIDEND. Same-day close. No change of control noted explicitly."
 }
 ```
 
@@ -489,3 +482,4 @@ Output:
 | 0.12 | 2026-08-20 | **`flags.hostile` replaced by `flags.deal_attitude` and `flags.approach_type` (V3 §T11).** Stage 7 stopped writing `hostile` when the fused boolean split into two independent nullable dimensions, so the key had been arriving **permanently false** — an assertion of "not hostile" on every transaction, including genuinely hostile ones, and the canonical replacements never reached this prompt at all. A pure transport correction: both fields are passed through as themselves, **null stays null** rather than being coerced to false, and no framing rule couples attitude to approach — they are independent by decision. `deal_attitude` is `FRIENDLY`/`HOSTILE`/null and absence of hostile evidence is not `FRIENDLY`; `approach_type` is `SOLICITED`/`UNSOLICITED`/null. |
 | 0.13 | 2026-08-21 | **`flags.sponsor_transaction_role` added; the `pe_portfolio` → add-on inference removed (V3 §T7).** S-G made sponsor role a canonical extracted field, and this prompt was still deriving it from the acquirer's type — the exact derivation §T7 retired, and the field itself never reached the prompt at all. `PLATFORM` / `ADD_ON` / null are now carried in `flags`, uncoerced, with null meaning no role is established rather than one denied. A SPONSOR TRANSACTION ROLE section makes the field the only source of platform/add-on framing and prohibits inferring it from `acquirer_type`, from `ACQUIRER SPONSOR`, or from a description calling the acquirer PE-backed. `PLATFORM` is framed as the platform being newly established for the sponsor, not the company being newly created. The `acquirer_type = private_equity` line stays: buyer type may describe the buyer, it may not determine the role. `is_secondary_buyout` remains independent. Example 1 keeps its sparse-private-deal purpose and its add-on sentence, now justified by the canonical field in its FLAGS input. |
 | 0.14 | 2026-08-21 | **Example 3's `TARGET TYPE: spinco` corrected to `subsidiary`; `MINORITY_INVESTMENT` framing labelled as legacy-row compatibility.** V3 §T3 removed `spinco`, so a worked example supplying it taught an input the summary can never receive. `subsidiary` follows from the example's own stated facts — a distributed entity with `TARGET STATUS: SUBSIDIARY_OF_PUBLIC`, typed on its structural merits as §T3 requires — so no new Product semantics are introduced. `MINORITY_INVESTMENT` keeps its framing rule, now explicitly marked as compatibility for stored rows rather than a current classifier output. |
+| 0.15 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

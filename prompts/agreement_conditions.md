@@ -1,6 +1,6 @@
 # Agreement Conditions to Closing Extraction Prompt
 
-**Version:** 0.1
+**Version:** 0.2 (provenance is caller-owned)
 **Repo path:** `prompts/agreement_conditions.md`
 
 ---
@@ -25,8 +25,7 @@ Runs in Stage 11 (agreement_extract) for each CONDITIONS_TO_CLOSING section in a
 
 ```json
 {
-  "section_text": "...",
-  "prompt_version": "agreement_conditions:0.1"
+  "section_text": "..."
 }
 ```
 
@@ -77,11 +76,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "target_vote_threshold": "MAJORITY_OUTSTANDING",
   "closing_conditions_summary": "Target shareholder approval (majority of outstanding shares). HSR clearance and CFIUS approval required. No material adverse effect on target at closing. Accuracy of representations and warranties in all material respects.",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_conditions:0.1"
+  "notes": null
 }
 
-All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for optional fields that have no value.
 ```
 
 ---
@@ -94,7 +92,6 @@ Extract closing conditions from the following deal document section.
 SECTION TEXT:
 {section_text}
 
-prompt_version: {prompt_version}
 ```
 
 ---
@@ -109,7 +106,6 @@ prompt_version: {prompt_version}
 | `closing_conditions_summary` | string\|null | 2-4 sentence plain-text summary of top conditions |
 | `model_confidence` | enum | HIGH \| MEDIUM \| LOW \| NONE |
 | `notes` | string\|null | Caveats, unusual conditions (≤200 chars) |
-| `prompt_version` | string | Echoed from input |
 
 ---
 
@@ -145,8 +141,7 @@ Section 6.2 Additional Conditions to Parent's and Merger Sub's Obligations.
   "target_vote_threshold": "MAJORITY_OUTSTANDING",
   "closing_conditions_summary": "Target stockholder approval required. HSR clearance and foreign competition regulatory approvals required. No Material Adverse Effect on target at closing. Accuracy of target representations and warranties at closing date.",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_conditions:0.1"
+  "notes": null
 }
 ```
 
@@ -173,8 +168,7 @@ Section 7.1 Conditions to the Offer. Notwithstanding any other provision of this
   "target_vote_threshold": "MAJORITY_OUTSTANDING",
   "closing_conditions_summary": "Minimum tender condition: majority of outstanding shares tendered. CFIUS approval required. No Material Adverse Effect on target. No legal prohibition on consummation.",
   "model_confidence": "HIGH",
-  "notes": "Tender offer structure; minimum condition serves as shareholder approval mechanism.",
-  "prompt_version": "agreement_conditions:0.1"
+  "notes": "Tender offer structure; minimum condition serves as shareholder approval mechanism."
 }
 ```
 
@@ -195,3 +189,4 @@ Section 7.1 Conditions to the Offer. Notwithstanding any other provision of this
 | Version | Date | Change |
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version — MAC clause, shareholder vote, conditions summary |
+| 0.2 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples and the `{prompt_version}` line from the user template. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

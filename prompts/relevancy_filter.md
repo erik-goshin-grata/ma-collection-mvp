@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.6 (PIPE recognition)
+**Version:** 0.7 (provenance is caller-owned)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -122,11 +122,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "relevancy_filter:0.4"
+  "notes": null
 }
 
-All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for optional fields that have no value.
 ```
 
 ---
@@ -151,8 +150,7 @@ Classify this release.
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "relevancy_filter:0.4"
+  "notes": null
 }
 ```
 
@@ -164,7 +162,6 @@ Classify this release.
 | `reason_code` | enum | See below |
 | `model_confidence` | enum | `HIGH`, `MEDIUM`, `LOW` |
 | `notes` | string or null | Brief explanation if notable |
-| `prompt_version` | string | Set by caller, returned unchanged |
 
 <!-- REASON_CODES_START — authoritative reason_code enum. tests/test_reason_code_parity.py
      parses this block; every code here must be covered by stages/relevancy_filter.py
@@ -216,8 +213,7 @@ Output:
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "relevancy_filter:0.4"
+  "notes": null
 }
 ```
 
@@ -235,8 +231,7 @@ Output:
   "classification": "NOT_RELEVANT",
   "reason_code": "PRODUCT_OR_COMMERCIAL",
   "model_confidence": "HIGH",
-  "notes": "Commercial partnership, no equity or M&A component mentioned",
-  "prompt_version": "relevancy_filter:0.4"
+  "notes": "Commercial partnership, no equity or M&A component mentioned"
 }
 ```
 
@@ -254,8 +249,7 @@ Output:
   "classification": "NOT_RELEVANT",
   "reason_code": "RUMOR_OR_SPECULATION",
   "model_confidence": "HIGH",
-  "notes": "No definitive agreement; rumor coverage is out of scope",
-  "prompt_version": "relevancy_filter:0.4"
+  "notes": "No definitive agreement; rumor coverage is out of scope"
 }
 ```
 
@@ -276,8 +270,7 @@ Output:
   "classification": "RELEVANT",
   "reason_code": "VC_ROUND_OR_FUNDING",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "relevancy_filter:0.5"
+  "notes": null
 }
 ```
 
@@ -295,8 +288,7 @@ Output:
   "classification": "RELEVANT",
   "reason_code": "DEAL_AMENDMENT_OR_TERMINATION",
   "model_confidence": "HIGH",
-  "notes": "Termination of a previously announced deal — in scope for completeness",
-  "prompt_version": "relevancy_filter:0.5"
+  "notes": "Termination of a previously announced deal — in scope for completeness"
 }
 ```
 
@@ -324,3 +316,4 @@ Output:
 | 0.4 | 2026-04-23 | Added suffix-pattern warning and two concrete examples. Addresses residual 13% failure rate from v0.3. |
 | 0.5 | 2026-07-28 | V2 alignment. Added VC/funding events to IN SCOPE: VC funding rounds, growth equity investments, venture debt, recapitalizations. Added `VC_ROUND_OR_FUNDING` and `RECAPITALIZATION` to reason_code enum (23 total, up from 21). Updated OUT OF SCOPE debt note to distinguish venture debt (in scope) from corporate bond issuances (out of scope). Added Example 4 (VC round). Updated CRITICAL block with invented-value examples for funding types. |
 | 0.6 | 2026-08-18 | Added `PIPE` to the RELEVANT reason_code enum (24 total, up from 23) and to IN SCOPE, gated on the source explicitly naming the structure. RELEVANT rather than NOT_RELEVANT on purpose: marking it not-relevant would drop the row before deal-type classification and lose the recognized-exclusion record. Added invented-value mappings for PIPE_FINANCING / PIPE_TRANSACTION / PIPE_OFFERING / PRIVATE_INVESTMENT_IN_PUBLIC_EQUITY. |
+| 0.7 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

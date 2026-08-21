@@ -24,7 +24,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "strategic_rationale"
-_VERSION = "0.5"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 # prompt_version is NOT here: provenance is caller-owned, stamped from _FULL_VERSION.
 _REQUIRED_KEYS = frozenset({

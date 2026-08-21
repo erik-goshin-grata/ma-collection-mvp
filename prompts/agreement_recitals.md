@@ -1,6 +1,6 @@
 # Agreement Recitals Extraction Prompt
 
-**Version:** 0.2
+**Version:** 0.3 (provenance is caller-owned)
 **Repo path:** `prompts/agreement_recitals.md`
 
 ---
@@ -25,8 +25,7 @@ Runs in Stage 11 (agreement_extract) for each RECITALS section in a deal documen
 
 ```json
 {
-  "section_text": "...",
-  "prompt_version": "agreement_recitals:0.1"
+  "section_text": "..."
 }
 ```
 
@@ -82,11 +81,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
   "target_name": "Beta Industries, Inc.",
   "merger_structure": "REVERSE_TRIANGULAR",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_recitals:0.1"
+  "notes": null
 }
 
-All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for optional fields that have no value.
 ```
 
 ---
@@ -99,7 +97,6 @@ Extract party and structure information from the following deal document section
 SECTION TEXT:
 {section_text}
 
-prompt_version: {prompt_version}
 ```
 
 ---
@@ -114,7 +111,6 @@ prompt_version: {prompt_version}
 | `merger_structure` | enum\|null | DIRECT \| FORWARD_TRIANGULAR \| REVERSE_TRIANGULAR \| TENDER_OFFER \| null (not determinable) |
 | `model_confidence` | enum | HIGH \| MEDIUM \| LOW \| NONE |
 | `notes` | string\|null | Ambiguities, caveats (≤200 chars) |
-| `prompt_version` | string | Echoed from input |
 
 ---
 
@@ -149,8 +145,7 @@ WHEREAS, the parties hereto desire to effect a business combination through a me
   "target_name": "Delta Systems, Inc.",
   "merger_structure": "REVERSE_TRIANGULAR",
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "agreement_recitals:0.1"
+  "notes": null
 }
 ```
 
@@ -177,8 +172,7 @@ WHEREAS, upon the terms and conditions of this Agreement, Purchaser will commenc
   "target_name": "Redwood Financial Group, Inc.",
   "merger_structure": "TENDER_OFFER",
   "model_confidence": "HIGH",
-  "notes": "Tender offer followed by back-end merger; Purchaser merges into Company (reverse triangular back-end).",
-  "prompt_version": "agreement_recitals:0.1"
+  "notes": "Tender offer followed by back-end merger; Purchaser merges into Company (reverse triangular back-end)."
 }
 ```
 
@@ -201,8 +195,7 @@ WHEREAS, the Board of Directors of each of Acquirer and the Company has approved
   "target_name": "Summit Corp.",
   "merger_structure": "DIRECT",
   "model_confidence": "HIGH",
-  "notes": "Two-party structure; Company merges into Acquirer, Acquirer survives.",
-  "prompt_version": "agreement_recitals:0.1"
+  "notes": "Two-party structure; Company merges into Acquirer, Acquirer survives."
 }
 ```
 
@@ -224,3 +217,4 @@ WHEREAS, the Board of Directors of each of Acquirer and the Company has approved
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version — party identification + merger structure |
 | 0.2 | 2026-05-05 | Remove UNKNOWN from merger_structure; null = not determinable |
+| 0.3 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples and the `{prompt_version}` line from the user template. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

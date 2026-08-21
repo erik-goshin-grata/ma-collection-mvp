@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.22 (input note describes the values the stage actually sends)
+**Version:** 0.23 (provenance is caller-owned)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -619,15 +619,13 @@ code fences, no preamble.
         "currency": null
       },
       "model_confidence": "HIGH",
-      "notes": null,
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": null
     }
   ]
 }
 
 All fields in each transaction element are required. Use null for fields with
-no value. "prompt_version" is returned unchanged from the value passed in
-the user prompt.
+no value.
 ```
 
 ---
@@ -730,8 +728,7 @@ Extract all transactions from this source.
         "currency": "string | null"
       },
       "model_confidence": "HIGH | MEDIUM | LOW",
-      "notes": "string | null",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "string | null"
     }
   ]
 }
@@ -831,8 +828,7 @@ Output:
         "currency": "USD"
       },
       "model_confidence": "HIGH",
-      "notes": "Pending close language present — closed_date left null.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "Pending close language present — closed_date left null."
     }
   ]
 }
@@ -929,8 +925,7 @@ Output:
         "currency": "USD"
       },
       "model_confidence": "HIGH",
-      "notes": "EV stated explicitly including $300M assumed net debt. LTM period end date stated as March 31, 2026.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "EV stated explicitly including $300M assumed net debt. LTM period end date stated as March 31, 2026."
     }
   ]
 }
@@ -1016,8 +1011,7 @@ Output:
         "currency": null
       },
       "model_confidence": "HIGH",
-      "notes": "Same-day completed private acquisition — no pending-close language. closed_date set to announced_date.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "Same-day completed private acquisition — no pending-close language. closed_date set to announced_date."
     }
   ]
 }
@@ -1113,8 +1107,7 @@ Output:
         "currency": "USD"
       },
       "model_confidence": "HIGH",
-      "notes": "LTM period end stated as twelve months ended December 31, 2025.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "LTM period end stated as twelve months ended December 31, 2025."
     }
   ]
 }
@@ -1189,8 +1182,7 @@ Output:
         "currency": null
       },
       "model_confidence": "HIGH",
-      "notes": "Transaction 1 of 2 from law firm tombstone. Closed per source language.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "Transaction 1 of 2 from law firm tombstone. Closed per source language."
     },
     {
       "target": {
@@ -1247,8 +1239,7 @@ Output:
         "currency": null
       },
       "model_confidence": "HIGH",
-      "notes": "Transaction 2 of 2 from law firm tombstone. Closed per source language.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "Transaction 2 of 2 from law firm tombstone. Closed per source language."
     }
   ]
 }
@@ -1311,8 +1302,7 @@ Output:
         "currency": "USD"
       },
       "model_confidence": "MEDIUM",
-      "notes": "NTM financials stated as projections for twelve months ending December 31, 2027. Party names not captured from this excerpt — full 8-K body would populate. Value amount not stated directly; multiples stated but aggregate value not extracted per extraction rule.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "NTM financials stated as projections for twelve months ending December 31, 2027. Party names not captured from this excerpt — full 8-K body would populate. Value amount not stated directly; multiples stated but aggregate value not extracted per extraction rule."
     }
   ]
 }
@@ -1394,8 +1384,7 @@ Output:
         "currency": "USD"
       },
       "model_confidence": "HIGH",
-      "notes": "The $210M revenue fact remains in target_financials; only the separate $210M enterprise value is included in value_observations.",
-      "prompt_version": "high_confidence_extraction:0.16"
+      "notes": "The $210M revenue fact remains in target_financials; only the separate $210M enterprise value is included in value_observations."
     }
   ]
 }
@@ -1518,3 +1507,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.20 | 2026-08-20 | **`offer_mechanism` added (V3 §T12).** `TENDER_OFFER` | null, in the `deal` block. Describes whether the acquisition is effected through an offer made directly to target securityholders; established by tender-offer, exchange-offer or equivalent language. Vocabulary deliberately not expanded — `MANDATORY_OFFER`, `SCHEME_OF_ARRANGEMENT`, `ONE_STEP_MERGER` and `TWO_STEP_MERGER` are excluded by §T12. Two anti-inference rules: a public target is not evidence of a tender offer, and a merger agreement alone is not either. Example 9 added for the two-step case, where `offer_mechanism = TENDER_OFFER` and `combination_structure = MERGER` coexist. Previously this fact existed only as `merger_structure = TENDER_OFFER` on the SEC/agreement path, unreachable for any transaction without a filing; that path is retained as corroborating evidence, not replaced. |
 | 0.21 | 2026-08-21 | **`sponsor_transaction_role` added (V3 §T7); `is_platform_investment` retired.** `PLATFORM` / `ADD_ON` / null in the `deal` block, replacing the v0.4 `is_platform_investment` + `is_add_on` pair. `PLATFORM` needs affirmative evidence that **this** transaction creates a new sponsor platform — a PE buyer alone does not establish it. `ADD_ON` is an acquisition **by** an already sponsor/PE-backed portfolio or platform company; literal add-on/bolt-on/tuck-in wording is **not** required, the sponsor need not be named, and a company description may supply the context. Null is expected to be common: sponsor involvement alone is insufficient and generic VC backing is not `ADD_ON`. **No mechanical precedence rule** — `PLATFORM` requires new-platform evidence, otherwise an acquisition by an already-backed portfolio company is `ADD_ON`. Independent of `acquirer.type`, and never derived from it. `is_secondary_buyout` stays orthogonal. `is_platform_investment` leaves the `features` contract entirely — it accepted only explicit platform wording, which is the narrower half of what §T7 asks. **`sponsor_name` is no longer gated on `pe_portfolio`** (a value §T8 removes): populate it whenever the source establishes the sponsor associated with the acquirer, never inferred from apparent sponsor backing. |
 | 0.22 | 2026-08-21 | **Input note corrected to describe the values the stage actually sends; stale vocabulary and derivation claims removed.** The note said `deal_type` and `event_type` "reflect legacy classifier output (v0.5 and earlier)" and promised they would become `v2_event_type` / `event_history_type` "when classifier is updated to v0.6+". The classifier is at 0.12 and that rename never happened: the template keeps the legacy **labels** while `stages/high_confidence_extract.py` supplies the **current values** under them. `target_type` in particular arrives normalized — the stage passes `target_type_v2` when present — which is why it is lowercase. That is stated as specific to `target_type` and `acquirer.type`, with a reminder that `target_status`, `value.type`, `asset_type`, `offer_mechanism` and `sponsor_transaction_role` are uppercase by design, so the note cannot be read as a general lowercasing rule. `spinco` is dropped from the vocabulary (§T3 removed it, so it cannot arrive). The derivation note no longer presents `is_divestiture` and `is_add_on` as built: §T4 removed one and §T7 replaced the other with `sponsor_transaction_role`, and both columns are retained but unwritten. |
+| 0.23 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

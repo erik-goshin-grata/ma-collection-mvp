@@ -1,6 +1,6 @@
 # Aggregation Prompt (Conflict Resolution)
 
-**Version:** 0.5 (V3 field vocabulary)
+**Version:** 0.6 (provenance is caller-owned)
 **Repo path:** `prompts/aggregation.md`
 
 ---
@@ -220,12 +220,10 @@ code fences, no preamble.
   "reasoning": "T1 SEC 8-K states $485M as the aggregate purchase price, published one day after the PR. The PR's $500M is a rounded or pre-adjustment figure. The definitive agreement value governs.",
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
-  "notes": null,
-  "prompt_version": "aggregation:0.4"
+  "notes": null
 }
 
 All fields are required. Use null for optional fields that have no value.
-"prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -260,8 +258,7 @@ Determine which observation should become the canonical value.
   "reasoning": "T1 SEC filing states precise $485M; T2 PR rounded to $500M. Definitive agreement value governs.",
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
-  "notes": null,
-  "prompt_version": "aggregation:0.4"
+  "notes": null
 }
 ```
 
@@ -315,8 +312,7 @@ Output:
   "reasoning": "T1 SEC filing states precise $485M purchase price one day after PR; T2 PR rounded to $500M. Definitive agreement value governs.",
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
-  "notes": null,
-  "prompt_version": "aggregation:0.4"
+  "notes": null
 }
 ```
 
@@ -344,8 +340,7 @@ Output:
   "reasoning": "T1 equity value is the more precise stake-level figure; T2 enterprise value is a whole-company EV figure. Both are valid but represent different things — equity value is Tier 1 stake-level consideration, while EV should populate implied_enterprise_value separately.",
   "flagged_for_review": true,
   "conflict_severity": "SEMANTIC",
-  "notes": "Orchestrator should preserve both value_amount (equity) and implied_enterprise_value (from T2/source-stated EV) rather than treating this as a simple numeric conflict.",
-  "prompt_version": "aggregation:0.4"
+  "notes": "Orchestrator should preserve both value_amount (equity) and implied_enterprise_value (from T2/source-stated EV) rather than treating this as a simple numeric conflict."
 }
 ```
 
@@ -373,8 +368,7 @@ Output:
   "reasoning": "First observation is the original announcement PR, explicitly dated. Second is a follow-up referencing 'earlier this week' which is less precise.",
   "flagged_for_review": false,
   "conflict_severity": "MINOR",
-  "notes": null,
-  "prompt_version": "aggregation:0.4"
+  "notes": null
 }
 ```
 
@@ -402,8 +396,7 @@ Output:
   "reasoning": "T1 clearly states forward-looking projected revenue; T2 states historical revenue. These are different metrics — both may be $200M but one is LTM and one is NTM. T1 wins on tier; NTM and LTM are not interchangeable.",
   "flagged_for_review": true,
   "conflict_severity": "SEMANTIC",
-  "notes": "Sources reference different periods — both should be preserved as separate financial_metric rows when that table is available. For now, T1 NTM value is canonical for this field.",
-  "prompt_version": "aggregation:0.4"
+  "notes": "Sources reference different periods — both should be preserved as separate financial_metric rows when that table is available. For now, T1 NTM value is canonical for this field."
 }
 ```
 
@@ -430,3 +423,4 @@ Output:
 | 0.3 | 2026-07-22 | Updated take-private note to derived flag reference |
 | 0.4 | 2026-07-28 | V2 alignment. Added FIELD VOCABULARY section documenting all V2 enum values the prompt may encounter. Updated deal_type context to V2 event types. event_type → event_history_type in vocabulary. acquirer_type values lowercased. period_type values added (LTM, NTM, ANNUAL, QUARTERLY, INTERIM_YTD). Principle 4 added: LTM and NTM are not interchangeable in conflict resolution — period type disagreement is SEMANTIC, not MINOR. Example 4 added for period type semantic conflict. |
 | 0.5 | 2026-08-21 | **V3 field vocabulary (§T2, §T3, §T7, §T11–T14).** This prompt reasons about every canonical field — Stage 9 calls it once per disputed field — and had not been opened by any V3 slice, so it still enumerated `MERGER` and `REVERSE_MERGER` as event types, lacked `MARKET_CAPITALIZATION`, and had no vocabulary at all for `combination_structure`, `asset_type`, `offer_mechanism`, `deal_attitude`, `approach_type`, `sponsor_transaction_role` or `round_price_direction`. Vocabularies are now in a marker-delimited block checked against the owning stages' frozensets by `scripts/test_aggregation_vocabulary_parity.py`. Retired event types move to a labelled `legacy_read_only` line: observable on stored rows, never valid new output. A typed-dimension section states the tie-breaks that plain string resolution gets wrong — `combination_structure` is hierarchical and DE_SPAC vs MERGER is not a conflict; `asset_type` is subordinate to `target_type = assets`; `PLATFORM` is not a more specific `ADD_ON`; attitude and approach are independent; `FLAT` is not a compromise between disagreeing price directions. The `pe_portfolio` specificity preference is removed — §T7 forbids acquirer type as a sponsor-status proxy and §T8 removes the value. Deliberately compact: no extraction rules, evidence bars or null policy, because `_pick_value` drops nulls before escalating and this prompt only ever chooses between observed non-null values. |
+| 0.6 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

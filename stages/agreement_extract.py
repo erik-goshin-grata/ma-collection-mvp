@@ -57,11 +57,11 @@ _SECTION_PROMPT_MAP = {
 }
 
 _VERSIONS = {
-    "agreement_recitals": "0.2",
-    "agreement_consideration": "0.1",
-    "agreement_capitalization": "0.1",
-    "agreement_termination": "0.1",
-    "agreement_conditions": "0.1",
+    "agreement_recitals": "0.3",
+    "agreement_consideration": "0.2",
+    "agreement_capitalization": "0.2",
+    "agreement_termination": "0.2",
+    "agreement_conditions": "0.2",
 }
 
 _SLEEP = 1.0  # between LLM calls
@@ -403,10 +403,11 @@ def _call_section_prompt(
 ) -> dict | None:
     prompt_version = f"{prompt_name}:{_VERSIONS[prompt_name]}"
     prompt = load_prompt_file(prompt_name)
-    user = prompt["user_template"].format(
-        section_text=section_text,
-        prompt_version=prompt_version,
-    )
+    # prompt_version is deliberately NOT formatted in. Provenance is caller-owned: it is
+    # passed to call_prompt below and stamped on the row, and the model is never asked to
+    # carry it. This family was the only one that genuinely supplied the value, and even
+    # here nothing compared what came back.
+    user = prompt["user_template"].format(section_text=section_text)
     try:
         result = call_prompt(
             prompt_name=prompt_name,

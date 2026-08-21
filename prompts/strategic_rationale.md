@@ -1,6 +1,6 @@
 # Strategic Rationale Prompt
 
-**Version:** 0.5 (V2 alignment)
+**Version:** 0.6 (provenance is caller-owned)
 **Repo path:** `prompts/strategic_rationale.md`
 
 ---
@@ -131,12 +131,10 @@ code fences, no preamble.
   "secondary_rationales": ["PRODUCT_OR_TECH_CAPABILITY"],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": null
 }
 
 All fields are required. Use null for optional fields that have no value.
-"prompt_version" is returned unchanged from the value passed in the user prompt.
 ```
 
 ---
@@ -167,8 +165,7 @@ Classify the primary strategic rationale.
   "secondary_rationales": ["PRODUCT_OR_TECH_CAPABILITY"],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": null
 }
 ```
 
@@ -211,8 +208,7 @@ Output:
   "secondary_rationales": [],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": null
 }
 ```
 
@@ -239,8 +235,7 @@ Output:
   "secondary_rationales": ["TALENT_ACQUISITION"],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": null,
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": null
 }
 ```
 
@@ -269,8 +264,7 @@ Output:
   "secondary_rationales": [],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": "PE take-private with standard shareholder-value framing; no specific strategic rationale beyond the financial thesis.",
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": "PE take-private with standard shareholder-value framing; no specific strategic rationale beyond the financial thesis."
 }
 ```
 
@@ -297,8 +291,7 @@ Output:
   "secondary_rationales": [],
   "supporting_excerpt_index": null,
   "model_confidence": "LOW",
-  "notes": "Excerpts contain only generic value-creation language; no specific strategic rationale can be identified.",
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": "Excerpts contain only generic value-creation language; no specific strategic rationale can be identified."
 }
 ```
 
@@ -327,8 +320,7 @@ Output:
   "secondary_rationales": [],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": "Downstream integration into distribution.",
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": "Downstream integration into distribution."
 }
 ```
 
@@ -355,8 +347,7 @@ Output:
   "secondary_rationales": [],
   "supporting_excerpt_index": 0,
   "model_confidence": "HIGH",
-  "notes": "Recapitalization defaults to FINANCIAL_OR_ARBITRAGE per classification rule; source confirms balance-sheet and investor-liquidity framing.",
-  "prompt_version": "strategic_rationale:0.5"
+  "notes": "Recapitalization defaults to FINANCIAL_OR_ARBITRAGE per classification rule; source confirms balance-sheet and investor-liquidity framing."
 }
 ```
 
@@ -385,3 +376,4 @@ Output:
 | 0.3 | 2026-04-23 | Audited and removed incorrect use of "carve-out" for private business unit sales |
 | 0.4 | 2026-07-22 | Updated take-private note to derived flag reference |
 | 0.5 | 2026-07-28 | V2 alignment. `deal_type` → `v2_event_type` in input schema and user template. V2 event type enum referenced in classification rules. RECAPITALIZATION default rule added (FINANCIAL_OR_ARBITRAGE). SPIN_OFF / SPLIT_OFF explicitly referenced in spin-off default rule. Example 6 added for recapitalization. |
+| 0.6 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |

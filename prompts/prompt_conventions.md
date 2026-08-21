@@ -1,6 +1,6 @@
 # Prompt Conventions
 
-**Version:** 0.4 (Sonnet tier)
+**Version:** 0.5 (provenance is caller-owned)
 **Repo path:** `prompts/prompt_conventions.md`
 
 Conventions that apply to every prompt file in this directory. Each individual prompt file references this document by default and only specifies deviations.
@@ -86,9 +86,16 @@ If the model returns anything other than a parseable JSON object:
 
 Every JSON output includes these meta fields in addition to the stage-specific fields:
 
+**Prompt provenance is caller-owned. Models do not author or echo prompt provenance.**
+`prompt_version` is not a response field and must not appear in a response schema, a worked
+example, or a user template. The stage knows the authoritative prompt name and version, passes
+them to `call_prompt`, and stamps them on the row; `register_prompt_version` records the prompt
+file's hash alongside. A model can only repeat what it was handed, so asking it to supply the
+value adds no assurance and creates something that can be wrong — which it was, in the
+aggregation audit table, for several releases.
+
 | Field | Type | Purpose |
 | :--- | :--- | :--- |
-| `prompt_version` | string | Semantic version of the prompt that produced the output (e.g., `"relevancy_filter:0.1"`). Set by the caller before the prompt runs, returned unchanged by the model. |
 | `model_confidence` | enum: `HIGH` / `MEDIUM` / `LOW` / `NONE` | Self-assessed confidence. `NONE` if the model cannot make a determination at all. |
 | `notes` | string or null | Freeform notes from the model — ambiguities, assumptions, caveats. Short (≤200 chars). Omitted if nothing worth noting. |
 
@@ -161,6 +168,7 @@ All examples are synthetic. No real press release text, no real company data, no
 | 0.2 | 2026-04-23 | Added §11 Prompt File Structure Rule (RESPONSE FORMAT requirement). |
 | 0.3 | 2026-07-28 | V2 alignment. Model strings updated: claude-opus-4-5 → claude-opus-4-7, claude-haiku-4-5 → claude-haiku-4-5-20251001. Model upgrade policy added. OpenAI provider model hierarchy documented. Stage table updated to reflect current defaults. |
 | 0.4 | 2026-08-02 | Sonnet tier added (`claude-sonnet-4-6`). §2 stage table updated: deal type classification, high-confidence extraction, funding HC (Stage 4b), and deal summary moved Opus → Sonnet. Rationale/decision recorded in `docs/decisions.md` (2026-08-02). |
+| 0.5 | 2026-08-21 | **Prompt provenance is caller-owned.** `prompt_version` is removed from the shared response-field conventions and from every prompt's response schema, worked examples and user templates. The stage already passes the authoritative name and version to `call_prompt` and stamps them on the row, and `register_prompt_version` records the prompt file hash — the model can only echo what it was handed, so the field added no assurance while creating a value that could drift. It had: two prompts never supplied the version at all, so the model's only source was a stale worked example, and `aggregation_conflict_log.prompt_version` recorded `aggregation:0.4` while the prompt was at 0.5. The `prompt_version` table and the `staging_extraction.prompt_version` column are unaffected — those are caller-written and remain the provenance record. |
 
 ---
 
@@ -181,5 +189,5 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
 
 { ... concrete JSON example ... }
 
-All fields are required. Use null for optional fields that have no value. "prompt_version" is returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for optional fields that have no value.
 ```

@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.2 (round_price_direction replaces is_down_round)
+**Version:** 0.3 (provenance is caller-owned)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -271,14 +271,12 @@ code fences, no preamble.
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "model_confidence": "HIGH",
-      "notes": null,
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": null
     }
   ]
 }
 
-All fields are required. Use null for fields with no value. "prompt_version" is
-returned unchanged from the value passed in the user prompt.
+All fields are required. Use null for fields with no value.
 ```
 
 ---
@@ -349,8 +347,7 @@ Extract all funding transactions from this source.
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "equity | safe | convertible_note | debt | warrant | null",
       "model_confidence": "HIGH | MEDIUM | LOW",
-      "notes": "string | null",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "string | null"
     }
   ]
 }
@@ -446,8 +443,7 @@ Output:
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "model_confidence": "HIGH",
-      "notes": null,
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": null
     }
   ]
 }
@@ -518,8 +514,7 @@ Output:
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "model_confidence": "HIGH",
-      "notes": "pct_acquired stated as approximately 65%; pre-money valuation stated explicitly. Goldman Sachs advisor captured by LC extraction.",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "pct_acquired stated as approximately 65%; pre-money valuation stated explicitly. Goldman Sachs advisor captured by LC extraction."
     }
   ]
 }
@@ -587,8 +582,7 @@ Output:
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "debt",
       "model_confidence": "HIGH",
-      "notes": "facility_size populated; round.size null (debt facility, not equity round size).",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "facility_size populated; round.size null (debt facility, not equity round size)."
     }
   ]
 }
@@ -644,8 +638,7 @@ Output:
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "model_confidence": "MEDIUM",
-      "notes": "Portfolio page — date precision month only; investor name (Acme Ventures) inferred as source but not named as investor in the text.",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "Portfolio page — date precision month only; investor name (Acme Ventures) inferred as source but not named as investor in the text."
     },
     {
       "company": {
@@ -677,8 +670,7 @@ Output:
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "model_confidence": "MEDIUM",
-      "notes": "Portfolio page — date precision month only.",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "Portfolio page — date precision month only."
     },
     {
       "company": {
@@ -710,8 +702,7 @@ Output:
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "model_confidence": "MEDIUM",
-      "notes": "Portfolio page — date precision month only.",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "Portfolio page — date precision month only."
     }
   ]
 }
@@ -779,8 +770,7 @@ Output:
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": "safe",
       "model_confidence": "HIGH",
-      "notes": "YC typically invests via SAFE; consideration_type inferred from investor type and pre-seed stage. Amount explicitly undisclosed.",
-      "prompt_version": "funding_hc_extraction:0.1"
+      "notes": "YC typically invests via SAFE; consideration_type inferred from investor type and pre-seed stage. Amount explicitly undisclosed."
     }
   ]
 }
@@ -863,3 +853,4 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | :--- | :--- | :--- |
 | 0.1 | 2026-07-28 | Initial version — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT extraction. Multi-investment source support. Sparse source handling. Five examples covering PR release, growth equity, venture debt, portfolio page, SAFE/undisclosed. |
 | 0.2 | 2026-08-20 | **`round_price_direction` replaces `is_down_round` (V3 §A6.3 / §T14).** `UP` | `DOWN` | `FLAT` | null. The boolean could only ever record DOWN — `is_up_round` never existed anywhere in the codebase — so `is_down_round = 0` fused *up*, *flat* and *unknown* into one bit. All three values now have extraction vocabulary, and **null stays distinct from `FLAT`**: "not stated" and "unchanged" are different facts. The existing anti-inference rule is preserved and widened — two disclosed valuations do not license a comparison unless the source makes it. Example 6 added for an explicitly stated down round. Canonical `round` and `vc_stage` are **not** prompt fields: they are deterministic normalizations of `round_label`, which is unchanged and still verbatim. |
+| 0.3 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
