@@ -338,6 +338,11 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "sponsor_transaction_role" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "009_v3_sponsor_transaction_role.sql").read_text(encoding="utf-8"))
 
+    # 010 (V3 take-private ownership outcome). Sentinel-guarded like the rest; this
+    # directory is NOT globbed, so a migration without a block here never runs.
+    if "is_going_private_outcome" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "010_v3_take_private_outcome.sql").read_text(encoding="utf-8"))
+
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
     # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document

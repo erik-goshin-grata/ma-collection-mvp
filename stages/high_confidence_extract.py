@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.23"
+_VERSION = "0.24"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -171,10 +171,15 @@ def _validate(result: dict) -> str | None:
         return "invalid features: expected object"
     # is_platform_investment is NOT here (V3 §T7, prompt 0.21). It is replaced by
     # deal.sponsor_transaction_role; the column is retained and simply stops being written.
-    for feature_name in ("is_secondary_buyout", "is_merger_of_equals"):
+    for feature_name in ("is_secondary_buyout", "is_merger_of_equals", "is_going_private_outcome"):
         value = features.get(feature_name)
         if value is not None and not isinstance(value, bool):
             return f"invalid features.{feature_name}: expected boolean or null"
+    # is_going_private_outcome is `true | null` by Product contract -- the model is never
+    # asked to establish that a target REMAINS public, so `false` is not a state we collect.
+    # It is accepted HERE and normalized to None at the write site below: rejecting it is
+    # fatal to every transaction from this source (see the _mark_failed path in run()),
+    # which is a disproportionate answer to a value that carries no evidence either way.
 
     # financials_disclosure_status — required, must be valid
     fds = result.get("financials_disclosure_status")
@@ -418,6 +423,22 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 )
                 asset_type = None
 
+            # is_going_private_outcome is `true | null`, not a three-state boolean. The model
+            # is never asked to establish that a target REMAINS publicly traded, so a `false`
+            # is not evidence of anything -- it is the model answering a question we did not
+            # ask. Normalize it away BEFORE persistence: a stored 0 would reach the observation
+            # ledger (the writer skips None but not 0) and land a canonical 0 that reads as an
+            # observed negative, which is the `hostile` failure V3 §T11 removed.
+            # Dropped and logged rather than rejected, matching asset_type above.
+            going_private_outcome = features.get("is_going_private_outcome")
+            if going_private_outcome is False:
+                log.warning(
+                    "extraction_id/source_raw_id=%s features.is_going_private_outcome=false "
+                    "— normalizing to null; this field is affirmative-evidence-only (true | null)",
+                    row["source_raw_id"],
+                )
+                going_private_outcome = None
+
             # Normalize V2 fields
             acquirer_type_raw = a.get("type")
             acquirer_type_v2 = _normalize_acquirer_type(acquirer_type_raw)
@@ -440,6 +461,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 (txn.get("deal") or {}).get("sponsor_transaction_role"),
                 features.get("is_secondary_buyout"),
                 features.get("is_merger_of_equals"),
+                going_private_outcome,
                 d.get("announced_date"), d.get("closed_date"), d.get("signing_date"),
                 d.get("announced_date_precision"),   # new
                 d.get("closed_date_precision"),      # new
@@ -486,6 +508,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         pct_acquired = ?,  stake_transition_type = ?,  offer_mechanism = ?,
                         sponsor_transaction_role = ?,
                         is_secondary_buyout = ?,  is_merger_of_equals = ?,
+                        is_going_private_outcome = ?,
                         announced_date = ?,  closed_date = ?,  signing_date = ?,
                         announced_date_precision = ?,  closed_date_precision = ?,  signing_date_precision = ?,
                         rumor_date = ?,
@@ -541,6 +564,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         pct_acquired, stake_transition_type, offer_mechanism,
                         sponsor_transaction_role,
                         is_secondary_buyout, is_merger_of_equals,
+                        is_going_private_outcome,
                         announced_date, closed_date, signing_date,
                         announced_date_precision, closed_date_precision, signing_date_precision,
                         rumor_date,
@@ -565,7 +589,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

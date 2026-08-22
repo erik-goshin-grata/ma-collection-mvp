@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.23 (provenance is caller-owned)
+**Version:** 0.24 (take-private ownership outcome)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -454,6 +454,18 @@ ownership percentages, board composition, or management roles.
   "merger of equals", "combination of equals", or clearly equivalent language.
   Do not infer merely from merger structure, similar company size, ownership
   percentages, board composition, or management roles.
+- is_going_private_outcome: true when the source affirmatively establishes that
+  this transaction results in the target's equity ceasing to be publicly held or
+  traded — that the target becomes privately held. Explicit language qualifies
+  ("taken private", "going-private transaction", "will no longer be publicly
+  traded", "shares will cease to be listed"), and those exact words are NOT
+  required when explicit mechanics unambiguously establish the same outcome.
+  null when the source does not establish that outcome. This is the common case.
+  Do NOT infer it from a private-equity or financial-sponsor buyer, from the
+  target being public, from a merger or tender-offer structure, from
+  pct_acquired, or from an unstated percentage read as 100%.
+  This records the OUTCOME only. Who the buyer is does not belong to this field
+  and is captured separately by acquirer.type.
 
 financials_disclosure_status:
 Classify whether financial terms are disclosed in this source:
@@ -606,7 +618,7 @@ code fences, no preamble.
           "evidence": "for $500 million in cash"
         }
       ],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -713,7 +725,8 @@ Extract all transactions from this source.
       ],
       "features": {
         "is_secondary_buyout": "boolean | null",
-        "is_merger_of_equals": "boolean | null"
+        "is_merger_of_equals": "boolean | null",
+        "is_going_private_outcome": "true | null"
       },
       "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
@@ -815,7 +828,7 @@ Output:
           "evidence": "for $500 million in cash"
         }
       ],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -912,7 +925,7 @@ Output:
           "evidence": "values PublicCo at approximately $2.1 billion enterprise value"
         }
       ],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": true},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -925,7 +938,7 @@ Output:
         "currency": "USD"
       },
       "model_confidence": "HIGH",
-      "notes": "EV stated explicitly including $300M assumed net debt. LTM period end date stated as March 31, 2026."
+      "notes": "EV stated explicitly including $300M assumed net debt. LTM period end date stated as March 31, 2026. is_going_private_outcome = true: the headline states the target is \"to Be Taken Private\" and the body has the buyer acquiring all outstanding shares. Note that none of pct_acquired, stake_transition_type or offer_mechanism carries this fact -- the outcome is not derivable from them."
     }
   ]
 }
@@ -998,7 +1011,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1094,7 +1107,7 @@ Output:
           "evidence": "to sell its Industrial Coatings Division ... for $1.2 billion in cash"
         }
       ],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1172,7 +1185,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1229,7 +1242,7 @@ Output:
           "evidence": "acquisition of Omega Systems for $250 million in cash"
         }
       ],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1289,7 +1302,7 @@ Output:
         "per_share_price": null
       },
       "value_observations": [],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": null,
       "target_financials": {
@@ -1371,7 +1384,7 @@ Output:
           "evidence": "total enterprise value of approximately $210 million on a cash-free, debt-free basis"
         }
       ],
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
@@ -1422,7 +1435,7 @@ Output:
       "acquirer": {"name": "Cascade Midstream Partners", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": "Meridian Energy Corp", "ticker": null, "description": null},
       "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": null, "sponsor_transaction_role": null},
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "notes": "TARGET TYPE is assets, so asset_type is populated. A pipeline system is INFRASTRUCTURE because that is the thing transacted, not ENERGY, which would describe the parties' sector. No employees or going-concern unit transfer, consistent with an asset purchase rather than a business unit."
     }
   ]
@@ -1458,7 +1471,7 @@ Output:
       "acquirer": {"name": "Halden Therapeutics", "domain": null, "ticker": null, "type": "strategic_corporate", "description": null, "sponsor_name": null},
       "parent_seller": {"name": null, "ticker": null, "description": null},
       "deal": {"pct_acquired": null, "stake_transition_type": null, "offer_mechanism": "TENDER_OFFER"},
-      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null},
+      "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "notes": "\"commence a tender offer to purchase all outstanding shares\" is a direct offer to securityholders. The back-end merger is a separate fact recorded as combination_structure by the classifier; it does not compete with offer_mechanism and does not replace it."
     }
   ]
@@ -1480,6 +1493,7 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | `acquirer.type` uses legacy uppercase (e.g. PRIVATE_EQUITY) | Parser rejects — V2 lowercase required |
 | `revenue_period_type` or `ebitda_period_type` not in valid set | Parser rejects |
 | `financials_disclosure_status` missing | Parser rejects — required field in V2 |
+| `features.is_going_private_outcome` emitted as `false` | Normalized to null before persistence and logged. NOT rejected: the row's other extraction is valid, and a rejection here is fatal to every transaction from the source. `false` is not a Product state for this field — the model is never asked to establish that a target remains public — so it is defensive normalization, not a discarded observation |
 | Model assumes LTM when period not stated | Critical — prompt explicitly forbids; QA samples check period_type = null rate |
 | Model populates closed_date with future expected close date | Prompt addresses; parser flags dates > 30 days from published_date as suspect |
 | Model returns legacy SPIN_SPLIT as acquirer.type | Not applicable; acquirer.type is a party classification |
@@ -1508,3 +1522,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.21 | 2026-08-21 | **`sponsor_transaction_role` added (V3 §T7); `is_platform_investment` retired.** `PLATFORM` / `ADD_ON` / null in the `deal` block, replacing the v0.4 `is_platform_investment` + `is_add_on` pair. `PLATFORM` needs affirmative evidence that **this** transaction creates a new sponsor platform — a PE buyer alone does not establish it. `ADD_ON` is an acquisition **by** an already sponsor/PE-backed portfolio or platform company; literal add-on/bolt-on/tuck-in wording is **not** required, the sponsor need not be named, and a company description may supply the context. Null is expected to be common: sponsor involvement alone is insufficient and generic VC backing is not `ADD_ON`. **No mechanical precedence rule** — `PLATFORM` requires new-platform evidence, otherwise an acquisition by an already-backed portfolio company is `ADD_ON`. Independent of `acquirer.type`, and never derived from it. `is_secondary_buyout` stays orthogonal. `is_platform_investment` leaves the `features` contract entirely — it accepted only explicit platform wording, which is the narrower half of what §T7 asks. **`sponsor_name` is no longer gated on `pe_portfolio`** (a value §T8 removes): populate it whenever the source establishes the sponsor associated with the acquirer, never inferred from apparent sponsor backing. |
 | 0.22 | 2026-08-21 | **Input note corrected to describe the values the stage actually sends; stale vocabulary and derivation claims removed.** The note said `deal_type` and `event_type` "reflect legacy classifier output (v0.5 and earlier)" and promised they would become `v2_event_type` / `event_history_type` "when classifier is updated to v0.6+". The classifier is at 0.12 and that rename never happened: the template keeps the legacy **labels** while `stages/high_confidence_extract.py` supplies the **current values** under them. `target_type` in particular arrives normalized — the stage passes `target_type_v2` when present — which is why it is lowercase. That is stated as specific to `target_type` and `acquirer.type`, with a reminder that `target_status`, `value.type`, `asset_type`, `offer_mechanism` and `sponsor_transaction_role` are uppercase by design, so the note cannot be read as a general lowercasing rule. `spinco` is dropped from the vocabulary (§T3 removed it, so it cannot arrive). The derivation note no longer presents `is_divestiture` and `is_add_on` as built: §T4 removed one and §T7 replaced the other with `sponsor_transaction_role`, and both columns are retained but unwritten. |
 | 0.23 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.24 | 2026-08-22 | **`is_going_private_outcome` added to `features` (take-private ownership outcome).** `true | null`. The affirmative source primitive for the ownership-outcome half of the take-private definition: true only when the source establishes that the transaction results in the target's equity ceasing to be publicly held or traded. Explicit going-private/delisting language qualifies, and those exact words are not required when explicit mechanics unambiguously establish the same outcome; null is the common case and means not established. Five anti-inference rules, mirroring the block's existing discipline: not from a PE/sponsor buyer, not from the target being public, not from a merger or tender-offer structure, not from `pct_acquired`, and not from an unstated percentage read as 100%. It records the OUTCOME only -- buyer identity belongs to `acquirer.type`. **Why a new primitive:** no existing field can establish this. `pct_acquired` is documented "Null if 100% or unstated", so null is ambiguous by construction; the aggregation §2.6 resolver's assumed 100 fires on every silent control acquisition; `stake_transition_type` is populated only on explicit prior/current/resulting ownership evidence and is empirically sparse; `offer_mechanism` is `TENDER_OFFER | null` and most take-privates are one-step mergers; `target_status` is pre-transaction with no post-transaction counterpart. Example 2 in §7 -- this prompt's own worked public take-private -- emits none of them, so any rule built from current primitives would score it negative. **`false` is not a Product state.** The model is never asked to establish that a target remains public, so a model-emitted `false` is normalized to null before persistence and logged rather than rejected: rejection is fatal to every transaction from the source, and the delivered contract here has never offered `false` (the word does not appear in this system prompt). Consumed by the Stage 9 `is_take_private` derivation as one of three required conditions; the flag stays derived and `deal_summary` still consumes only the flag. |

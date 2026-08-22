@@ -106,6 +106,10 @@ _FIELDS = [
     ("sponsor_transaction_role", "string"),  # PLATFORM | ADD_ON | null (§T7)
     ("is_secondary_buyout", "boolean"),
     ("is_merger_of_equals", "boolean"),
+    # V3 take-private ownership outcome. 1 or absent -- never 0: Stage 4 normalizes a
+    # model `false` to NULL and the observation writer skips NULL, so "not established"
+    # is the ABSENCE of an observation, not an observed negative.
+    ("is_going_private_outcome", "boolean"),
     ("target_revenue", "number"),
     ("target_revenue_period_type", "string"),
     ("target_revenue_period_type_v2", "string"),
@@ -156,24 +160,44 @@ _FIELDS = [
 _FIELD_NAMES = {f for f, _ in _FIELDS}
 _FIELD_TYPE = {f: t for f, t in _FIELDS}
 _CONTEXT_FIELDS = ("target_name", "acquirer_name", "deal_type", "announced_date")
-# Acquirer types that leave a public target in private hands. Membership is expressed in
-# the V2 lowercase vocabulary because that is what Stage 4 stores; the comparison
-# lowercases its input, so rows still carrying the legacy uppercase form match too.
-_PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES = frozenset({
+# Buyer/structure types that satisfy the private-ownership condition of a take-private.
+# Membership is expressed in the V2 lowercase vocabulary because that is what Stage 4
+# stores; the comparison lowercases its input, so rows still carrying the legacy uppercase
+# form match too.
+#
+# This set is deliberately NARROW and is one of three required conditions -- it is not on
+# its own a take-private test. Every other acquirer type is out BY TYPE ALONE, which is a
+# statement about what the type establishes, not a claim that such a buyer can never take a
+# company private:
+#
+#   strategic_corporate  A private strategic buying a public company is an ordinary
+#                        acquisition. The target stops being independent, not necessarily
+#                        publicly traded, and nothing in the type says which.
+#   consortium           A PE/sponsor consortium DOES qualify conceptually, but bare
+#                        `consortium` means only "multiple buyers acting jointly" (the
+#                        prompt's own words) and establishes no sponsor character. Nothing
+#                        in the data model carries it: acquirer_type is one flat value with
+#                        no per-member type; entity.entity_type is in the schema but is
+#                        never written; consortium members are all written as the single
+#                        undifferentiated role ACQUIRER; staging_investor.investor_type is
+#                        funding-path-only and has no private_equity value; and
+#                        acquirer_sponsor_name names a sponsor BEHIND the buyer, which in a
+#                        direct PE consortium is null because the sponsors ARE the buyers.
+#                        Recorded as a representation gap rather than proxied.
+#   venture_capital, individual, family_office, hedge_fund, pension_fund,
+#   sovereign_wealth_fund, growth_equity, spac, unknown
+#                        None establishes a going-private structure by type.
+#
+# There is deliberately no acquirer-ticker guard. It was never a proxy for the buyer being
+# private -- a listed sponsor (Blackstone, EQT, Apollo) taking a company private is a
+# genuine take-private, and the guard returned 0 for every one of them.
+_TAKE_PRIVATE_QUALIFYING_ACQUIRER_TYPES = frozenset({
     "private_equity",
     "pe_portfolio",
-    "venture_capital",
-    "sovereign_wealth_fund",
-    "pension_fund",
-    "hedge_fund",
-    "family_office",
-    "individual",
     "management",
     "employee_group",
-    "consortium",
     "other_financial_sponsor",
 })
-_PRIVATE_STRATEGIC_ACQUIRER_TYPES = frozenset({"strategic_corporate"})
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +224,6 @@ def _derive_consideration_type(components_json: str | None) -> str | None:
     return "OTHER"
 
 
-def _has_value(value: Any) -> bool:
-    return bool(str(value or "").strip())
-
-
 def _lower(value: Any) -> str:
     """Case-fold one value for comparison. Local to the comparison, by design.
 
@@ -218,6 +238,27 @@ def _lower(value: Any) -> str:
 
 
 def _derive_is_take_private(fields: dict) -> int:
+    """Three required conditions, all of which must hold.
+
+    1. The target was a public standalone company BEFORE the transaction.
+    2. The buyer/structure satisfies the private-ownership condition.
+    3. The source AFFIRMATIVELY establishes the ownership outcome -- that the target
+       ceases to have publicly held/traded equity.
+
+    Condition 3 is the one that cannot be inferred. Before it existed this derivation
+    reached 1 on conditions 1 and 2 alone, which made every private-strategic acquisition
+    of a public company a take-private and could not distinguish a sponsor's control
+    investment in a still-listed company from a genuine privatization. No pre-existing
+    primitive supplies it: pct_acquired is documented "Null if 100% or unstated" so its
+    null is ambiguous by construction; the §2.6 resolver's assumed 100 fires on every
+    silent control acquisition; stake_transition_type is populated only on explicit
+    ownership evidence and is sparse; offer_mechanism is TENDER_OFFER|null and most
+    take-privates are one-step mergers; target_status is pre-transaction only. Hence the
+    extracted `is_going_private_outcome`.
+
+    Absence of affirmative outcome evidence is 0, by decision. `is_going_private_outcome`
+    is never persisted as 0, so `_explicit_flag` reads its absence, not a stored negative.
+    """
     # deal_type and target_status are UPPERCASE in production and are compared as stored.
     # Only target_type and acquirer_type are case-folded -- those are the two the V2
     # vocabulary lowercased, and comparing them against uppercase literals returned 0 for
@@ -228,15 +269,9 @@ def _derive_is_take_private(fields: dict) -> int:
         return 0
     if _lower(fields.get("target_type")) != "standalone_company":
         return 0
-
-    acquirer_type = _lower(fields.get("acquirer_type"))
-    if _has_value(fields.get("acquirer_ticker")):
+    if _lower(fields.get("acquirer_type")) not in _TAKE_PRIVATE_QUALIFYING_ACQUIRER_TYPES:
         return 0
-    if acquirer_type in _PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES:
-        return 1
-    if acquirer_type in _PRIVATE_STRATEGIC_ACQUIRER_TYPES:
-        return 1
-    return 0
+    return _explicit_flag(fields.get("is_going_private_outcome"))
 
 
 _MINORITY_STAKE_TRANSITIONS_WITHOUT_PCT = frozenset({
@@ -1470,6 +1505,7 @@ def _load_staging_input(conn: sqlite3.Connection) -> dict[str, dict]:
                se.value_amount, se.value_currency, se.value_type, se.per_share_price, se.pct_acquired,
                se.stake_transition_type, se.offer_mechanism,
                se.is_platform_investment, se.is_secondary_buyout, se.is_merger_of_equals,
+               se.is_going_private_outcome,
                se.sponsor_transaction_role,
                se.target_revenue, se.target_revenue_period_type, se.target_revenue_period_end,
                se.target_ebitda, se.target_ebitda_period_type, se.target_ebitda_period_end,
@@ -1783,6 +1819,7 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "sponsor_transaction_role",
     "is_secondary_buyout",
     "is_merger_of_equals",
+    "is_going_private_outcome",
     "has_earnout",
     "has_cvr",
     "round_label",
@@ -2154,6 +2191,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("sponsor_transaction_role"),
                     derived["is_secondary_buyout"],
                     derived["is_merger_of_equals"],
+                    field_values.get("is_going_private_outcome"),
                     _derive_has_earnout(field_values.get("consideration_components")),
                     _derive_has_cvr(field_values.get("consideration_components")),
                     # Funding fields

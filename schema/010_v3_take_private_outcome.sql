@@ -1,0 +1,40 @@
+-- 010 — V3 take-private ownership outcome primitive.
+--
+-- `is_going_private_outcome` is the affirmative source primitive for the ownership-outcome
+-- half of the take-private definition. Nullable INTEGER on staging_extraction and
+-- transaction_record, no DEFAULT: the absence of a value is the no-observation state and
+-- must stay distinguishable from an observed value.
+--
+--   1     the source affirmatively establishes that this transaction results in the
+--         target's equity ceasing to be publicly held or traded -- that it becomes
+--         privately held. Explicit going-private / delisting language qualifies, and so do
+--         explicit mechanics that unambiguously establish the same outcome.
+--   NULL  that outcome is not established. This is the common case.
+--
+-- 0 IS NOT A PERMITTED PERSISTED VALUE. The prompt contract is `true | null`: the model is
+-- never asked to establish that a target REMAINS public, so an authored negative would be
+-- evidence we did not collect. `stages/high_confidence_extract.py` normalizes a
+-- model-emitted `false` to NULL before persistence and logs it. A 0 in this column would
+-- mean the normalization was bypassed, not that a negative was observed.
+--
+-- This deliberately does not follow `is_secondary_buyout INTEGER DEFAULT 0` (001_initial).
+-- That default is the pattern V3 §T11 corrected when it removed `hostile`: a defaulted 0
+-- makes "not established" indistinguishable from "established false". Migrations 004-009
+-- all use plain nullable ADD COLUMN and this follows them.
+--
+-- Why a new primitive at all: no existing field can establish the outcome. `pct_acquired`
+-- is documented "Null if 100% or unstated", so NULL is ambiguous by construction; the
+-- §2.6 resolver's assumed 100 fires on every silent control acquisition; `stake_transition_type`
+-- is populated only on explicit prior/current/resulting ownership evidence and is sparse;
+-- `offer_mechanism` is TENDER_OFFER|null and most take-privates are one-step mergers;
+-- `target_status` is pre-transaction with no post-transaction counterpart. The high_confidence
+-- prompt's own worked take-private example emits none of them.
+--
+-- The derived flag `transaction_record.is_take_private` stays derived and keeps its own
+-- column. This primitive is one of its three inputs, not a replacement for it.
+--
+-- Enums/domains are application-layer, not CHECK constraints, matching every other typed
+-- dimension in this schema.
+
+ALTER TABLE staging_extraction  ADD COLUMN is_going_private_outcome INTEGER;   -- 1 | NULL (never 0)
+ALTER TABLE transaction_record  ADD COLUMN is_going_private_outcome INTEGER;   -- 1 | NULL (never 0)

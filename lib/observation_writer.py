@@ -72,6 +72,12 @@ HC_FIELDS = (
     "sponsor_transaction_role",
     "is_secondary_buyout",
     "is_merger_of_equals",
+    # V3 take-private ownership outcome. Affirmative-evidence-only: staging holds 1 or
+    # NULL and never 0 (Stage 4 normalizes a model `false` away), and _write_field_group
+    # skips None, so "not established" produces NO observation row at all rather than an
+    # observed negative. Omitting this line strands the field on staging_extraction,
+    # since Stage 9 reads observations by default.
+    "is_going_private_outcome",
     "target_revenue",
     "target_revenue_period_type",
     "target_revenue_period_end",

@@ -1,8 +1,29 @@
 #!/usr/bin/env python3
 """Stage 9 take-private flag derivation — unit cases plus the production path.
 
-`is_take_private` means: a PUBLIC, STANDALONE_COMPANY target acquired by a buyer with no
-public listing of its own, into private ownership. Four conditions, unchanged here.
+`is_take_private` means: a PUBLIC, STANDALONE_COMPANY target, acquired by a buyer whose
+type satisfies the private-ownership condition, where the SOURCE AFFIRMATIVELY ESTABLISHES
+that the target ceases to have publicly held/traded equity. Three conditions, all required.
+
+THE THIRD CONDITION IS NEW AND IS THE POINT OF THIS REVISION.
+
+Before it, the derivation reached 1 on the first two conditions alone. That made every
+private-strategic acquisition of a public company a take-private, and it could not
+distinguish a sponsor's control investment in a still-listed company from a genuine
+privatization. It also carried an acquirer-ticker guard that was never a proxy for the
+buyer being private: a listed sponsor (Blackstone, EQT, Apollo) taking a company private is
+a genuine take-private, and the guard returned 0 for every one of them. The guard is gone.
+
+The earlier version of this file certified the behaviour Product has now ruled wrong -- it
+asserted `private_strategic_take_private` = 1 and `public_acquirer_blocks_flag` = 0 -- so it
+would have blocked this fix. Both are inverted below, deliberately.
+
+`is_going_private_outcome` is affirmative-evidence-only: `true | null`, never persisted as
+0. The model is not asked to establish that a target REMAINS public, so a model-emitted
+`false` is normalized to NULL by Stage 4 before persistence. That normalization is pinned
+end-to-end below, in both polarities, through the real Stage 4 -> observation ledger ->
+Stage 9 -> canonical chain: `false` must reach canonical NULL with NO ledger row, and `true`
+must survive intact, so the normalization cannot silently suppress affirmative evidence.
 
 TWO LAYERS, AND THE SECOND ONE IS THE POINT.
 
@@ -43,6 +64,7 @@ sys.path.insert(0, str(ROOT))
 from config import DEFAULT_AGGREGATION_READ_SOURCE
 from db import get_connection, init_db
 import stages.aggregate as aggregate
+import stages.high_confidence_extract as hc
 from stages.aggregate import _derive_flags, _load_sponsor_participant_context
 from lib.observation_writer import (
     backfill_observation_transaction_ids,
@@ -51,29 +73,69 @@ from lib.observation_writer import (
 
 
 def _case(**overrides: object) -> dict:
+    """Base case satisfies all three conditions; overrides break one at a time.
+
+    `is_going_private_outcome` is in the base because it is now required -- omitting it
+    would silently make every "positive" case a negative and hide a broken condition.
+    """
     base = {
         "deal_type": "ACQUISITION",
         "target_status": "PUBLIC",
         "target_type": "STANDALONE_COMPANY",
         "acquirer_type": "PRIVATE_EQUITY",
         "acquirer_ticker": None,
+        "is_going_private_outcome": 1,
     }
     base.update(overrides)
     return base
 
 
+# The five qualifying buyer types. Every other acquirer_type is out BY TYPE ALONE.
+_QUALIFYING = ("PRIVATE_EQUITY", "PE_PORTFOLIO", "MANAGEMENT", "EMPLOYEE_GROUP",
+               "OTHER_FINANCIAL_SPONSOR")
+# strategic_corporate and consortium are the two that CHANGED verdict. The rest were never
+# positive, but they are enumerated so that widening the qualifying set silently is a test
+# failure rather than a discovery in production.
+_NON_QUALIFYING = ("STRATEGIC_CORPORATE", "CONSORTIUM", "VENTURE_CAPITAL", "INDIVIDUAL",
+                   "FAMILY_OFFICE", "HEDGE_FUND", "PENSION_FUND", "SOVEREIGN_WEALTH_FUND",
+                   "GROWTH_EQUITY", "SPAC", "UNKNOWN")
+
 CASES = [
-    ("pe_take_private", _case(acquirer_type="PRIVATE_EQUITY"), 1),
-    ("pe_platform_take_private", _case(acquirer_type="PE_PORTFOLIO"), 1),
-    ("private_strategic_take_private", _case(acquirer_type="STRATEGIC_CORPORATE"), 1),
-    ("private_consortium_take_private", _case(acquirer_type="CONSORTIUM"), 1),
-    ("management_take_private", _case(acquirer_type="MANAGEMENT"), 1),
-    ("public_acquirer_blocks_flag", _case(acquirer_type="STRATEGIC_CORPORATE", acquirer_ticker="NYSE:ABC"), 0),
+    # --- positives: all three conditions met -------------------------------------
+    *[(f"qualifying_{t.lower()}_take_private", _case(acquirer_type=t), 1) for t in _QUALIFYING],
+    # The ticker guard is gone. A LISTED sponsor taking a company private is a genuine
+    # take-private; this returned 0 before and was a false-negative class, not noise.
+    ("listed_sponsor_ticker_does_not_block",
+     _case(acquirer_type="PRIVATE_EQUITY", acquirer_ticker="NYSE:BX"), 1),
+    # sponsor_transaction_role stays orthogonal: an ADD_ON can also be a take-private.
+    ("add_on_can_also_be_take_private",
+     _case(acquirer_type="PE_PORTFOLIO", sponsor_transaction_role="ADD_ON"), 1),
+
+    # --- negatives: buyer-side condition fails -----------------------------------
+    # Both of these were POSITIVES in the previous revision. strategic_corporate produced
+    # the two wrong MPS positives in the PL integration run; consortium is non-qualifying
+    # because bare `consortium` establishes no sponsor character anywhere in the data model
+    # (representation gap, recorded -- deliberately not proxied).
+    *[(f"non_qualifying_{t.lower()}_not_take_private", _case(acquirer_type=t), 0)
+      for t in _NON_QUALIFYING],
+
+    # --- negatives: outcome condition fails --------------------------------------
+    # The class the previous derivation could not see at all.
+    ("pe_control_investment_still_listed",
+     _case(acquirer_type="PRIVATE_EQUITY", pct_acquired=60, is_going_private_outcome=None), 0),
+    ("pe_acquisition_no_outcome_evidence",
+     _case(acquirer_type="PRIVATE_EQUITY", is_going_private_outcome=None), 0),
+    # A persisted 0 must never exist for this field, but if one ever did it must read as
+    # "not established", never as evidence.
+    ("outcome_zero_is_not_evidence",
+     _case(acquirer_type="PRIVATE_EQUITY", is_going_private_outcome=0), 0),
+
+    # --- negatives: other conditions, unchanged by this revision ------------------
     ("public_public_merger_not_take_private", _case(deal_type="MERGER", acquirer_type="STRATEGIC_CORPORATE"), 0),
     ("public_target_asset_sale_not_take_private", _case(target_type="ASSETS", acquirer_type="PRIVATE_EQUITY"), 0),
     ("public_target_subsidiary_sale_not_take_private", _case(target_type="SUBSIDIARY", acquirer_type="PRIVATE_EQUITY"), 0),
     ("minority_investment_not_take_private", _case(deal_type="MINORITY_INVESTMENT", acquirer_type="PRIVATE_EQUITY"), 0),
-    ("unknown_acquirer_not_enough", _case(acquirer_type="UNKNOWN"), 0),
+    ("private_target_status_not_take_private", _case(target_status="PRIVATE"), 0),
 ]
 
 
@@ -97,12 +159,21 @@ CASES = [
 _PROD_CASES = [
     # (label, expected, overrides)
     ("positive_pe_lowercase", 1, {}),
-    ("control_public_acquirer_has_ticker", 0, {"acquirer_ticker": "NYSE:ABC"}),
+    # The ticker no longer blocks: a listed sponsor can take a company private. This row was
+    # a 0-expecting control in the previous revision and is inverted deliberately.
+    ("listed_sponsor_ticker_does_not_block", 1, {"acquirer_ticker": "NYSE:BX"}),
     ("control_assets_target", 0, {"target_type": "assets", "target_type_v2": "assets"}),
     ("control_private_target_status", 0, {"target_status": "PRIVATE"}),
     ("control_minority_investment", 0, {"deal_type": "MINORITY_INVESTMENT",
                                         "v2_event_type": "MINORITY_INVESTMENT"}),
-    # Kept deliberately separate from the four controls: this is not a V3-production row.
+    # Buyer-side condition through the production chain. This is the MPS reproduction: a
+    # private strategic buying a public standalone company, which reached 1 before.
+    ("control_strategic_corporate_buyer", 0, {"acquirer_type": "strategic_corporate",
+                                              "acquirer_type_v2": "strategic_corporate"}),
+    # Outcome condition through the production chain. Everything else qualifies; only the
+    # affirmative outcome is missing, so the observation is simply absent.
+    ("control_no_outcome_evidence", 0, {"is_going_private_outcome": None}),
+    # Kept deliberately separate from the controls: this is not a V3-production row.
     # It proves that repairing new-production casing does not strand rows already stored in
     # the legacy uppercase form, which Stage 3 and Stage 4 still accept.
     ("legacy_uppercase_read_tolerance", 1, {"target_type": "STANDALONE_COMPANY",
@@ -139,6 +210,7 @@ def _run_production_case(label: str, overrides: dict) -> int | None:
             "acquirer_ticker": None,              # no public listing -> stays private
             "acquirer_type": "private_equity",        # lowercase in production
             "acquirer_type_v2": "private_equity",
+            "is_going_private_outcome": 1,            # affirmative outcome evidence
             "announced_date": "2026-08-18",
             "announced_date_precision": "exact",
             "financials_disclosure_status": "UNKNOWN",
@@ -177,6 +249,155 @@ def _run_production_case(label: str, overrides: dict) -> int | None:
         return None if canon is None else canon["is_take_private"]
     finally:
         conn.close()
+
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 normalization: model `false` must never be persisted
+# ---------------------------------------------------------------------------
+#
+# `is_going_private_outcome` is `true | null`. The model is never asked to establish that a
+# target REMAINS publicly traded, so `false` is the model answering a question we did not
+# ask -- not an observed negative. Stage 4 normalizes it to NULL before persistence.
+#
+# This matters structurally, not just cosmetically: lib/observation_writer skips None but
+# NOT 0, so a persisted 0 would author a real ledger row and land a canonical 0 that reads
+# as observed evidence that the target stays public. That is the `hostile` failure V3 §T11
+# removed, and it is what this test exists to prevent regressing.
+#
+# Both polarities run through the SAME real chain -- Stage 4 (with only the model transport
+# stubbed) -> production observation writer -> Stage 9 at the configured read source ->
+# canonical. `true` is pinned as hard as `false`: a normalization that quietly swallowed
+# affirmative evidence would pass a false-only test.
+
+
+def _hc_response(outcome: object) -> dict:
+    """One valid HC response whose only variable is features.is_going_private_outcome."""
+    return {
+        "transactions": [{
+            "target": {"name": "Verity Biosciences", "domain": None,
+                       "ticker": "NASDAQ: VRTY", "description": "Target company.",
+                       "asset_type": None},
+            "acquirer": {"name": "Halden Capital Partners", "domain": None, "ticker": None,
+                         "type": "private_equity", "description": "Sponsor.",
+                         "sponsor_name": None},
+            "parent_seller": {"name": None, "ticker": None, "description": None},
+            "deal": {"pct_acquired": None, "stake_transition_type": None,
+                     "offer_mechanism": None, "sponsor_transaction_role": None},
+            "dates": {"announced_date": "2026-08-18", "announced_date_precision": "exact",
+                      "closed_date": None, "closed_date_precision": None,
+                      "signing_date": None, "signing_date_precision": None,
+                      "rumor_date": None},
+            "value": {"amount": None, "currency": None, "type": "UNDISCLOSED",
+                      "type_confidence": "HIGH", "qualifier": None, "per_share_price": None},
+            "value_observations": [],
+            "features": {"is_secondary_buyout": None, "is_merger_of_equals": None,
+                         "is_going_private_outcome": outcome},
+            "target_financials": {"revenue_amount": None, "revenue_period_type": None,
+                                  "revenue_period_end": None, "ebitda_amount": None,
+                                  "ebitda_period_type": None, "ebitda_period_end": None,
+                                  "currency": None},
+            "financials_disclosure_status": "UNDISCLOSED",
+            "consideration_type": None,
+            "model_confidence": "HIGH",
+            "notes": None,
+        }]
+    }
+
+
+def _run_stage4_case(label: str, outcome: object) -> dict:
+    """Drive real Stage 4 with a stubbed transport, then the real chain to canonical."""
+    txn = f"tc_gpo_{label}"
+    db_path = os.path.join(tempfile.mkdtemp(), "gpo.db")
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO source_raw (source_type, source_tier, url, title, published_date,"
+            " clean_text, source_status, fetched_at)"
+            " VALUES ('PR_NEWSWIRE','T1','u-gpo','t-gpo','2026-08-18','body','RELEVANT',?)",
+            (now,))
+        srid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO staging_extraction
+                (source_raw_id, status, deal_type, v2_event_type, event_type,
+                 event_history_type, target_status, target_type, target_type_v2,
+                 dt_prompt_version, transaction_cluster_id)
+            VALUES (?, 'CLASSIFIED', 'ACQUISITION', 'ACQUISITION', 'ANNOUNCEMENT',
+                    'ANNOUNCED', 'PUBLIC', 'standalone_company', 'standalone_company',
+                    'deal_type_classifier:test', ?)
+            """,
+            (srid, txn),
+        )
+        conn.commit()
+
+        real_call, real_sleep = hc.call_prompt, hc._SLEEP
+        hc.call_prompt, hc._SLEEP = (lambda **_k: _hc_response(outcome)), 0
+        try:
+            hc.run(conn=conn, cfg=SimpleNamespace(log_level="ERROR"), run_id=f"gpo_{label}")
+        finally:
+            hc.call_prompt, hc._SLEEP = real_call, real_sleep
+
+        staged = conn.execute(
+            "SELECT is_going_private_outcome FROM staging_extraction WHERE source_raw_id=?",
+            (srid,)).fetchone()["is_going_private_outcome"]
+
+        # Stand in for Stage 8, which is what promotes HC_EXTRACTED -> CLUSTERED and assigns
+        # transaction_cluster_id. The id is seeded at insert above; only the status gate is
+        # left, and Stage 9 reads no other clustering output. Stage 4 and Stage 9 themselves
+        # are real.
+        conn.execute("UPDATE staging_extraction SET status='CLUSTERED' WHERE source_raw_id=?",
+                     (srid,))
+        backfill_observation_transaction_ids(conn)
+        conn.commit()
+        ledger_rows = conn.execute(
+            "SELECT COUNT(*) AS n FROM transaction_field_observation"
+            " WHERE field_name='is_going_private_outcome'").fetchone()["n"]
+
+        cfg = SimpleNamespace(log_level="ERROR",
+                              aggregation_read_source=DEFAULT_AGGREGATION_READ_SOURCE)
+        original = aggregate._call_agg_prompt
+        aggregate._call_agg_prompt = lambda f, *a, **k: (_ for _ in ()).throw(
+            AssertionError(f"unexpected aggregation conflict on {f!r}"))
+        try:
+            aggregate.run(conn, cfg, f"gpo_{label}")
+        finally:
+            aggregate._call_agg_prompt = original
+        conn.commit()
+
+        canon = conn.execute(
+            "SELECT is_going_private_outcome, is_take_private FROM transaction_record"
+            " WHERE transaction_id=?", (txn,)).fetchone()
+        return {
+            "staging": staged,
+            "ledger_rows": ledger_rows,
+            "canonical": None if canon is None else canon["is_going_private_outcome"],
+            "is_take_private": None if canon is None else canon["is_take_private"],
+        }
+    finally:
+        conn.close()
+
+
+def _test_outcome_normalization(failed: list) -> None:
+    # `false` is normalized away entirely: nothing persisted, nothing observed, flag 0.
+    got = _run_stage4_case("false", False)
+    want = {"staging": None, "ledger_rows": 0, "canonical": None, "is_take_private": 0}
+    if got != want:
+        failed.append(("stage4/model_false_normalized_to_null", want, got))
+
+    # `true` survives the same path intact -- the normalization must not suppress evidence.
+    got = _run_stage4_case("true", True)
+    want = {"staging": 1, "ledger_rows": 1, "canonical": 1, "is_take_private": 1}
+    if got != want:
+        failed.append(("stage4/model_true_survives_production_path", want, got))
+
+    # null behaves exactly as false does, which is the whole point of normalizing.
+    got = _run_stage4_case("null", None)
+    want = {"staging": None, "ledger_rows": 0, "canonical": None, "is_take_private": 0}
+    if got != want:
+        failed.append(("stage4/model_null_not_established", want, got))
 
 
 def _test_production_path(failed: list) -> None:
@@ -290,13 +511,15 @@ def main() -> None:
         failed.append(("secondary_loader_generic_mentions", 0, context.get("generic_mentions")))
 
     _test_production_path(failed)
+    _test_outcome_normalization(failed)
 
     if failed:
         for name, expected, actual in failed:
             print(f"FAIL {name}: expected {expected}, got {actual}")
         raise SystemExit(1)
 
-    print(f"PASS transaction feature derivation  unit={len(CASES) + len(feature_cases)}  production-path={len(_PROD_CASES)}")
+    print(f"PASS transaction feature derivation  unit={len(CASES) + len(feature_cases)}"
+          f"  production-path={len(_PROD_CASES)}  stage4-normalization=3")
 
 
 if __name__ == "__main__":
