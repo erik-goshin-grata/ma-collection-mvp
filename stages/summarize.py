@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.15"
+_VERSION = "0.16"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 # prompt_version is NOT here: provenance is caller-owned, stamped from _FULL_VERSION
 # below. Requiring it rejected otherwise valid responses for omitting a field the
@@ -166,6 +166,35 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             "acquirer_fee_amount": tr["acquirer_fee_amount"],
             "acquirer_fee_percentage": tr["acquirer_fee_percentage"],
         })
+        # deal_summary 0.16. Canonical funding fields were fetched by SELECT tr.* and then
+        # dropped: the template had no funding placeholder, so a correct canonical round
+        # reached the model as nothing at all. With the value block empty -- funding events
+        # derive no transaction value, by design, because a round is primary capital rather
+        # than a purchase price -- the model met VALUE FRAMING's UNDISCLOSED line and
+        # asserted "Financial terms were not disclosed" on rounds whose size, valuation and
+        # total-raised were all correctly stored.
+        #
+        # Passed through as themselves, deliberately. No bool(), no or-default, no
+        # coercion: json.dumps writes None as null, and null here means the fact is not
+        # established -- which is not the same as a disclosed zero or a denial. This is the
+        # same reasoning recorded above for deal_attitude/approach_type, and the same
+        # mistake bool() made of has_go_shop.
+        funding_json = json.dumps({
+            "round_label": tr["round_label"],
+            "round": tr["round"],
+            "vc_stage": tr["vc_stage"],
+            "round_size": tr["round_size"],
+            "round_currency": tr["round_currency"],
+            "pre_money_valuation": tr["pre_money_valuation"],
+            "post_money_valuation": tr["post_money_valuation"],
+            "valuation_currency": tr["valuation_currency"],
+            "facility_size": tr["facility_size"],
+            "total_raised_to_date": tr["total_raised_to_date"],
+            "round_price_direction": tr["round_price_direction"],
+            "is_extension_round": tr["is_extension_round"],
+            "is_bridge_round": tr["is_bridge_round"],
+            "use_of_proceeds": tr["use_of_proceeds"],
+        })
 
         def _f(v) -> str:
             return str(v) if v is not None else "null"
@@ -212,6 +241,13 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             ev_to_ebitda_ltm=_f(tr["ev_to_ebitda_ltm"]),
             ev_to_ebitda_ntm=_f(tr["ev_to_ebitda_ntm"]),
             multiple_quality=_f(tr["multiple_quality"]),
+            funding_json=funding_json,
+            # Sent for every deal type, not just funding. It is the only affirmative
+            # disclosure signal the summary has ever had; without it the prompt could only
+            # infer non-disclosure from absent input, which is what produced the false
+            # claims. Its canonical meaning is narrow and the prompt says so: DISCLOSED is
+            # "at least one financial value is stated", NOT "all terms are known".
+            financials_disclosure_status=_f(tr["financials_disclosure_status"]),
             advisors_summary=_f(advisors_summary),
         )
 

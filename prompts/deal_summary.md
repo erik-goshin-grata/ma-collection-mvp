@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.15 (provenance is caller-owned)
+**Version:** 0.16 (funding round facts reach the summary)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -100,9 +100,34 @@ values are lowercase. `SPIN_SPLIT` replaced by `SPIN_OFF` / `SPLIT_OFF`.
     "acquirer_fee_amount": null,
     "acquirer_fee_percentage": null
   },
+  "funding": {
+    "round_label": null,
+    "round": null,
+    "vc_stage": null,
+    "round_size": null,
+    "round_currency": null,
+    "pre_money_valuation": null,
+    "post_money_valuation": null,
+    "valuation_currency": null,
+    "facility_size": null,
+    "total_raised_to_date": null,
+    "round_price_direction": null,
+    "is_extension_round": null,
+    "is_bridge_round": null,
+    "use_of_proceeds": null
+  },
+  "financials_disclosure_status": "DISCLOSED",
   "advisors_summary": "Goldman Sachs and Wachtell, Lipton, Rosen & Katz advised Acme; Morgan Stanley and Kirkland & Ellis advised Beta."
 }
 ```
+
+The `funding` block is all-null on a control transaction, as above, and carries the
+round facts on VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT events. Every member is passed
+through as stored: null means the fact is not established, never a disclosed zero and
+never a denial.
+
+`financials_disclosure_status` is source-level and narrow: DISCLOSED means at least one
+financial value was stated, not that every term is known.
 
 **Orchestrator-derived fields passed to this prompt:**
 - `consideration_type` — derived enum — {CASH, STOCK, CASH_AND_STOCK, ELECTION, OTHER}.
@@ -197,6 +222,12 @@ DEAL TYPE FRAMING (V2 event types + combination structure)
   - EQUITY: new equity issued to restructure balance sheet.
   - LEVERAGED: company takes on debt to repurchase shares or pay dividend.
   - SPONSOR_RECAP: PE sponsor-driven recap of a portfolio company.
+- VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT: a primary-capital raise INTO the
+  company. The company is the recipient, not a target being acquired, and the
+  investors are not acquirers — do not frame these as acquisitions and do not
+  describe the company as being bought. Lead with the round: "[Company] raised
+  $X in a Series B round led by [Investor]". Read the round facts from the
+  FUNDING block; see FUNDING FRAMING below.
 
 SPONSOR TRANSACTION ROLE
 
@@ -229,6 +260,57 @@ VALUE FRAMING
   at approximately $Y"
 - TRANSACTION_VALUE: "valued at approximately $X"
 - UNDISCLOSED: "Financial terms were not disclosed"
+- null value_type on a funding event (VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT):
+  CATEGORICALLY INAPPLICABLE, not undisclosed. A round is primary capital into
+  the company, so there is no purchase price to report and none is computed
+  upstream. A null VALUE block on these events says nothing about disclosure.
+  Never read it as UNDISCLOSED, and never let it produce non-disclosure
+  language. The round facts are in the FUNDING block; use them.
+
+FUNDING FRAMING
+
+Read every one of these from the FUNDING block. Each is a distinct fact and they
+must not be merged, substituted for one another, or added together.
+
+- round_size is the amount raised in THIS round. It is the headline figure.
+- total_raised_to_date is CUMULATIVE across all rounds to date. It is never this
+  round's size. Report it only as a cumulative total and label it as such
+  ("bringing total funding to $X"), never as the amount raised now.
+- facility_size is a SEPARATE facility or instrument alongside the round — debt,
+  a credit line, a revolver. Report it as its own component ("alongside a $X
+  credit facility"), never folded into round_size and never summed with it.
+- pre_money_valuation / post_money_valuation are what the company is VALUED at,
+  not what it raised. "$X at a $Y valuation" — never present a valuation as the
+  amount raised. valuation_currency belongs to these; round_currency belongs to
+  round_size and facility_size. Where they disagree, report each with its own.
+- round_label is the source's own wording ("Series A Extension"); round and
+  vc_stage are normalized groupings. Prefer round_label when naming the round.
+- round_price_direction is UP / DOWN / FLAT / null. Use this field for up- or
+  down-round framing. There is no is_down_round field; do not invent one, and do
+  not infer direction from valuations.
+- is_extension_round / is_bridge_round: when true, say so ("a Series A
+  extension", "a bridge round"). When false or absent, say NOTHING about it —
+  false licenses silence, never an affirmative "this was not an extension".
+- use_of_proceeds: report in the source's own terms when present.
+
+FUNDING DISCLOSURE, and disclosure generally
+
+FINANCIALS DISCLOSURE carries the canonical financials_disclosure_status, whose
+meaning is narrow and must not be widened:
+
+- UNDISCLOSED — the source EXPLICITLY stated terms were not disclosed. This is
+  the only value that licenses "Financial terms were not disclosed" on its own.
+- DISCLOSED — AT LEAST ONE financial value is stated. It does NOT mean every
+  term is known. Never treat it as a warrant that nothing is missing, and never
+  use it to claim completeness.
+- UNKNOWN — the source is silent on financials, neither stating nor denying.
+  Silent, not undisclosed. Say nothing about disclosure.
+
+Affirmative non-disclosure language requires an affirmative signal: either
+FINANCIALS DISCLOSURE = UNDISCLOSED, or value_type = UNDISCLOSED. Absent, empty
+or null input is NOT such a signal. A canonical null means the fact was not
+established, which is not the same as the source having declined to state it —
+so when a fact is missing, write less, and never assert that it was withheld.
 
 Tier guard: transaction value and stake-level equity value describe what changed
 hands. They are not financial-multiple numerators. EV/Revenue and EV/EBITDA
@@ -293,6 +375,8 @@ CONSIDERATION COMPONENTS: {consideration_components_json}
 FLAGS: {flags_json}
 GO-SHOP: {go_shop_json}
 TERMINATION FEES: {termination_fees_json}
+FUNDING: {funding_json}
+FINANCIALS DISCLOSURE: {financials_disclosure_status}
 
 TARGET FINANCIALS:
 - Revenue: {target_revenue} ({target_revenue_period})
@@ -483,3 +567,4 @@ Output:
 | 0.13 | 2026-08-21 | **`flags.sponsor_transaction_role` added; the `pe_portfolio` → add-on inference removed (V3 §T7).** S-G made sponsor role a canonical extracted field, and this prompt was still deriving it from the acquirer's type — the exact derivation §T7 retired, and the field itself never reached the prompt at all. `PLATFORM` / `ADD_ON` / null are now carried in `flags`, uncoerced, with null meaning no role is established rather than one denied. A SPONSOR TRANSACTION ROLE section makes the field the only source of platform/add-on framing and prohibits inferring it from `acquirer_type`, from `ACQUIRER SPONSOR`, or from a description calling the acquirer PE-backed. `PLATFORM` is framed as the platform being newly established for the sponsor, not the company being newly created. The `acquirer_type = private_equity` line stays: buyer type may describe the buyer, it may not determine the role. `is_secondary_buyout` remains independent. Example 1 keeps its sparse-private-deal purpose and its add-on sentence, now justified by the canonical field in its FLAGS input. |
 | 0.14 | 2026-08-21 | **Example 3's `TARGET TYPE: spinco` corrected to `subsidiary`; `MINORITY_INVESTMENT` framing labelled as legacy-row compatibility.** V3 §T3 removed `spinco`, so a worked example supplying it taught an input the summary can never receive. `subsidiary` follows from the example's own stated facts — a distributed entity with `TARGET STATUS: SUBSIDIARY_OF_PUBLIC`, typed on its structural merits as §T3 requires — so no new Product semantics are introduced. `MINORITY_INVESTMENT` keeps its framing rule, now explicitly marked as compatibility for stored rows rather than a current classifier output. |
 | 0.15 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.16 | 2026-08-22 | **Canonical funding fields reach the summary; non-disclosure language now requires an affirmative signal.** Every funding field was already fetched by `SELECT tr.*` and then dropped: the template had no funding placeholder, and the words "funding", "round" and "Series" appeared nowhere in the delivered system prompt. Funding events also derive no transaction value by design -- a round is primary capital, not a purchase price -- so the VALUE block arrived null, the model met VALUE FRAMING's `UNDISCLOSED` line, and asserted "Financial terms were not disclosed" on rounds whose size, valuation and total-raised were all correctly stored. In the PL integration run that was 4 of 7 funding transactions, including Castelion ($800M Series C equity + $250M facility + $13B post-money) and Rillet ($100M at $1B post-money). **Added:** `FUNDING: {funding_json}` carrying `round_label`, `round`, `vc_stage`, `round_size`, `round_currency`, `pre_money_valuation`, `post_money_valuation`, `valuation_currency`, `facility_size`, `total_raised_to_date`, `round_price_direction`, `is_extension_round`, `is_bridge_round`, `use_of_proceeds`, passed through uncoerced so a null stays null; and `FINANCIALS DISCLOSURE: {financials_disclosure_status}` for every deal type, the only affirmative disclosure signal this prompt has ever had. **Rules:** a VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT deal-type framing entry; a null `value_type` on a funding event is categorically inapplicable rather than undisclosed; FUNDING FRAMING keeps `round_size` (this round), `total_raised_to_date` (cumulative), `facility_size` (a separate instrument) and the valuations (what the company is worth, not what it raised) as distinct facts that may not be merged or summed; up/down framing uses the canonical `round_price_direction` and there is no `is_down_round` to invent; `is_extension_round` / `is_bridge_round` license positive framing when true and silence when false. **Disclosure semantics are deliberately narrow:** only `UNDISCLOSED` -- from `financials_disclosure_status` or `value_type` -- licenses "Financial terms were not disclosed". `DISCLOSED` means at least one financial value was stated, NOT that every term is known, and is never a claim of completeness; `UNKNOWN` is silence. A canonical null means not established, which is not the source declining to state it, so a missing fact means write less -- never assert it was withheld. |

@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from db import get_connection, init_db
 import stages.summarize as summarize
+from prompts.base import load_prompt_file
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUMMARY_PROMPT = os.path.join(ROOT, "prompts", "deal_summary.md")
@@ -110,15 +111,61 @@ def _run_stage12(conn, txn_id: str) -> dict:
     return json.loads(m.group(1))
 
 
+def _capture_prompt(conn) -> str:
+    """Same real-Stage-12 mechanism as _run_stage12, returning the whole user prompt.
+
+    The funding assertions need more than one line of it, and reading the transported text
+    is the point: a parallel summary implementation would prove nothing about what the
+    production template actually emits.
+    """
+    captured: dict = {}
+    real = summarize.call_prompt
+
+    def _capture(**kw):
+        captured["user_prompt"] = kw["user_prompt"]
+        out = dict(_SUMMARY_RESULT)
+        out["prompt_version"] = kw["prompt_version"]
+        return out
+
+    summarize.call_prompt = _capture
+    summarize._SLEEP = 0.0
+    try:
+        summarize.run(conn, SimpleNamespace(log_level="ERROR"), "test_summary_funding")
+    finally:
+        summarize.call_prompt = real
+    return captured.get("user_prompt", "")
+
+
+def _funding_block(prompt_text: str, txn_id: str) -> dict:
+    m = re.search(r"^FUNDING: (.+)$", prompt_text, re.M)
+    if m is None:
+        raise AssertionError(f"no FUNDING line in the transported prompt for {txn_id}")
+    return json.loads(m.group(1))
+
+
+def _disclosure_line(prompt_text: str, txn_id: str) -> str:
+    m = re.search(r"^FINANCIALS DISCLOSURE: (.+)$", prompt_text, re.M)
+    if m is None:
+        raise AssertionError(f"no FINANCIALS DISCLOSURE line in the transported "
+                             f"prompt for {txn_id}")
+    return m.group(1).strip()
+
+
 def _seed(conn, txn_id: str, deal_attitude, approach_type, sponsor_role=None) -> None:
     conn.execute(
         """INSERT INTO transaction_record
                (transaction_id, is_current, deal_type, v2_event_type, target_name,
                 acquirer_name, acquirer_type, announced_date, deal_attitude, approach_type,
                 sponsor_transaction_role, hostile,
-                competing_bid, regulatory_approvals_required, is_take_private, has_go_shop)
+                competing_bid, regulatory_approvals_required, is_take_private, has_go_shop,
+                -- Explicit NULLs: both carry DEFAULT 0 in schema/003_funding_path.sql, but
+                -- Stage 9 writes them from field_values.get(...), so a real ACQUISITION row
+                -- has NULL here, not 0. Omitting them would seed a value production never
+                -- writes and make the control assert against SQLite's default.
+                is_extension_round, is_bridge_round)
            VALUES (?, 1, 'ACQUISITION', 'ACQUISITION', 'Verity Biosciences',
-                   'Halden Therapeutics', 'pe_portfolio', '2026-08-18', ?, ?, ?, 1, 0, 0, 0, 0)""",
+                   'Halden Therapeutics', 'pe_portfolio', '2026-08-18', ?, ?, ?, 1, 0, 0, 0, 0,
+                   NULL, NULL)""",
         (txn_id, deal_attitude, approach_type, sponsor_role),
     )
     conn.commit()
@@ -245,14 +292,214 @@ def _test_neighbours_unchanged(failures: list[str]) -> None:
         conn.close()
 
 
+
+# ---------------------------------------------------------------------------
+# 2b. Funding round facts reach the summary (deal_summary 0.16)
+# ---------------------------------------------------------------------------
+#
+# The canonical funding fields were always fetched -- summarize.py runs SELECT tr.* -- and
+# then dropped, because the user template had no funding placeholder. Funding events also
+# derive no transaction value by design, so the VALUE block arrived null and the model read
+# VALUE FRAMING's UNDISCLOSED line, asserting "Financial terms were not disclosed" on rounds
+# whose size, valuation and total-raised were all correctly stored. Four of seven funding
+# transactions in the PL integration run said exactly that.
+#
+# The anchors below are those live cases, with their real figures. They pin the three facts
+# most easily conflated -- this round's size, the cumulative total, and a separate facility
+# -- as distinct values in the transported block, plus the null-preservation rule that a
+# fact which is not established arrives as JSON null rather than 0 or false.
+
+_FUNDING_COLUMNS = (
+    "round_label", "round", "vc_stage", "round_size", "round_currency",
+    "pre_money_valuation", "post_money_valuation", "valuation_currency",
+    "facility_size", "total_raised_to_date", "round_price_direction",
+    "is_extension_round", "is_bridge_round", "use_of_proceeds",
+)
+
+# (label, v2_event_type, disclosure, {canonical funding values}, {expected in prompt})
+_FUNDING_CASES = [
+    (
+        "castelion_round_plus_facility_plus_post_money", "VC_ROUND", "DISCLOSED",
+        {"round_label": "Series C", "round": "SERIES_C", "vc_stage": "LATE_VC",
+         "round_size": 800000000.0, "round_currency": "USD",
+         "facility_size": 250000000.0, "post_money_valuation": 13000000000.0,
+         "valuation_currency": "USD"},
+        # round_size and facility_size must arrive as two separate figures. Summing them
+        # ($1.05B) or reporting either alone is the failure this case exists to catch.
+        {"round_size": 800000000.0, "facility_size": 250000000.0,
+         "post_money_valuation": 13000000000.0, "round_label": "Series C"},
+    ),
+    (
+        "rillet_round_plus_post_money_plus_total_raised", "VC_ROUND", "DISCLOSED",
+        {"round_label": "Series C", "round": "SERIES_C", "round_size": 100000000.0,
+         "round_currency": "USD", "post_money_valuation": 1000000000.0,
+         "valuation_currency": "USD", "total_raised_to_date": 200000000.0},
+        # total_raised_to_date is cumulative and must not stand in for round_size.
+        {"round_size": 100000000.0, "total_raised_to_date": 200000000.0,
+         "post_money_valuation": 1000000000.0},
+    ),
+    (
+        "kynexis_extension_round_eur", "VC_ROUND", "DISCLOSED",
+        {"round_label": "Series A Extension", "round": "SERIES_A",
+         "round_size": 40000000.0, "round_currency": "EUR",
+         "total_raised_to_date": 97000000.0, "is_extension_round": 1},
+        # A true extension flag must survive as a positive fact, and the currency must be
+        # the round's own, not defaulted.
+        {"round_size": 40000000.0, "round_currency": "EUR",
+         "total_raised_to_date": 97000000.0, "is_extension_round": 1},
+    ),
+    (
+        "tiger_sparse_round", "VC_ROUND", "DISCLOSED",
+        {"round_label": "Series A", "round": "SERIES_A", "round_size": 10000000.0,
+         "round_currency": "USD"},
+        # The sparse case. Everything unstated must arrive as null -- not 0, not false.
+        {"round_size": 10000000.0, "post_money_valuation": None,
+         "facility_size": None, "total_raised_to_date": None,
+         "is_extension_round": None, "is_bridge_round": None,
+         "round_price_direction": None, "use_of_proceeds": None},
+    ),
+]
+
+
+def _seed_funding(conn, txn_id: str, event_type: str, disclosure, values: dict) -> None:
+    # Every funding column is written EXPLICITLY, including the ones left unset. Stage 9
+    # owns these columns and writes field_values.get(...) for each, so an unobserved fact
+    # reaches canonical as NULL. staging_extraction and transaction_record both declare
+    # is_extension_round / is_bridge_round with DEFAULT 0 (schema/003_funding_path.sql), so
+    # omitting them here would seed a 0 the production writer never produces and would test
+    # SQLite's default rather than this stage's transport.
+    cols = ["transaction_id", "is_current", "deal_type", "v2_event_type", "target_name",
+            "announced_date", "financials_disclosure_status"]
+    vals = [txn_id, 1, event_type, event_type, "Castelion", "2026-08-18", disclosure]
+    for col in _FUNDING_COLUMNS:
+        cols.append(col)
+        vals.append(values.get(col))
+    conn.execute(
+        f"INSERT INTO transaction_record ({', '.join(cols)}) "
+        f"VALUES ({', '.join('?' * len(cols))})", vals)
+    conn.commit()
+
+
+def _test_funding_transport(failures: list[str]) -> None:
+    for label, event_type, disclosure, values, expected in _FUNDING_CASES:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "f.db")
+            init_db(path)
+            conn = get_connection(path)
+            txn = f"tc_fund_{label}"
+            _seed_funding(conn, txn, event_type, disclosure, values)
+            try:
+                text = _capture_prompt(conn)
+                funding = _funding_block(text, txn)
+                got_disclosure = _disclosure_line(text, txn)
+            except AssertionError as exc:
+                failures.append(f"{label}: {exc}")
+                conn.close()
+                continue
+            for key in _FUNDING_COLUMNS:
+                if key not in funding:
+                    failures.append(f"{label}: FUNDING block is missing {key!r}")
+            for key, want in expected.items():
+                _eq(failures, f"{label}.{key}", funding.get(key, "<absent>"), want)
+            _eq(failures, f"{label}.financials_disclosure", got_disclosure, disclosure)
+            conn.close()
+
+
+def _test_stored_false_transports_as_false(failures: list[str]) -> None:
+    """A stored 0 must arrive as 0 -- uncoerced in the other direction too.
+
+    The funding extractor declares is_extension_round / is_bridge_round as plain booleans
+    and its worked examples emit `false`, so 0 here is an AUTHORED negative rather than an
+    absent one. The transport must not launder it into null any more than it may turn null
+    into false. What stops a stored 0 becoming a false claim is the prompt rule -- false
+    licenses silence, never an affirmative "this was not an extension" -- not the transport.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "z.db")
+        init_db(path)
+        conn = get_connection(path)
+        _seed_funding(conn, "tc_fund_stored_false", "VC_ROUND", "DISCLOSED",
+                      {"round_label": "Series B", "round_size": 25000000.0,
+                       "is_extension_round": 0, "is_bridge_round": 0})
+        try:
+            funding = _funding_block(_capture_prompt(conn), "tc_fund_stored_false")
+        except AssertionError as exc:
+            failures.append(str(exc))
+            conn.close()
+            return
+        _eq(failures, "stored_false.is_extension_round", funding.get("is_extension_round"), 0)
+        _eq(failures, "stored_false.is_bridge_round", funding.get("is_bridge_round"), 0)
+        conn.close()
+
+
+def _test_funding_nulls_are_not_falsey(failures: list[str]) -> None:
+    """An unestablished funding fact must arrive as null, never coerced to 0/false.
+
+    This is the has_go_shop mistake: bool(None) is False, and a summary told `false` will
+    state the negative as fact. json.dumps writes None as null only if nothing coerces it
+    on the way, so the assertion is on the transported JSON, not on the database row.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "n.db")
+        init_db(path)
+        conn = get_connection(path)
+        _seed_funding(conn, "tc_fund_all_null", "VC_ROUND", "UNKNOWN", {})
+        try:
+            funding = _funding_block(_capture_prompt(conn), "tc_fund_all_null")
+        except AssertionError as exc:
+            failures.append(str(exc))
+            conn.close()
+            return
+        for key in _FUNDING_COLUMNS:
+            if funding.get(key, "<absent>") is not None:
+                failures.append(f"null-preservation: FUNDING.{key} arrived as "
+                                f"{funding.get(key, '<absent>')!r}, expected null — a fact "
+                                "that is not established must not become 0 or false")
+        conn.close()
+
+
+def _test_non_funding_control(failures: list[str]) -> None:
+    """A control transaction must be untouched by the funding change.
+
+    Its FUNDING block must be present and entirely null, and the three neighbouring blocks
+    must keep the exact shapes they had before 0.16. Without this, a change that populated
+    FUNDING from the wrong columns, or disturbed FLAGS/GO-SHOP/FEES, would still pass.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "c.db")
+        init_db(path)
+        conn = get_connection(path)
+        _seed(conn, "tc_sum_fund_control", "HOSTILE", None)
+        try:
+            text = _capture_prompt(conn)
+            funding = _funding_block(text, "tc_sum_fund_control")
+        except AssertionError as exc:
+            failures.append(str(exc))
+            conn.close()
+            return
+        for key in _FUNDING_COLUMNS:
+            if funding.get(key, "<absent>") is not None:
+                failures.append(f"control: FUNDING.{key} is populated on an ACQUISITION "
+                                f"({funding.get(key)!r}) — funding fields must stay null")
+        for block in ("FLAGS: ", "GO-SHOP: ", "TERMINATION FEES: "):
+            if block not in text:
+                failures.append(f"control: the {block.strip()} block vanished from the "
+                                "summary input")
+        flags = json.loads(re.search(r"^FLAGS: (.+)$", text, re.M).group(1))
+        for key in ("is_take_private", "competing_bid", "regulatory_approvals_required"):
+            if not isinstance(flags.get(key), bool):
+                failures.append(f"control: flags.{key} lost its bool shape at 0.16")
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # 3. The prompt's own input contract
 # ---------------------------------------------------------------------------
 
 def _test_prompt_contract(failures: list[str]) -> None:
     text = open(SUMMARY_PROMPT, encoding="utf-8").read()
-    _check_version(failures, "deal_summary", text, summarize._VERSION, (0, 13),
-                   "carried sponsor_transaction_role into the summary input")
+    _check_version(failures, "deal_summary", text, summarize._VERSION, (0, 16),
+                   "carried the canonical funding fields into the summary input")
     if '"hostile"' in text:
         failures.append("deal_summary prompt: the input contract still declares flags.hostile")
     for field in ("deal_attitude", "approach_type", "sponsor_transaction_role"):
@@ -280,12 +527,48 @@ def _test_prompt_contract(failures: list[str]) -> None:
                         "still an active framing rule — §T7 replaced it with "
                         "sponsor_transaction_role")
 
+    # deal_summary 0.16. Assert on the DELIVERED system prompt and user template, not on the
+    # file: the loader extracts only the §4 and §5 fences, so a rule written into §3, §7 or
+    # the changelog is documentation the model never receives. That distinction is what made
+    # the funding gap invisible in the first place.
+    delivered = load_prompt_file("deal_summary")
+    system, user = delivered["system"], delivered["user_template"]
+    for placeholder in ("{funding_json}", "{financials_disclosure_status}"):
+        if placeholder not in user:
+            failures.append(f"deal_summary user template: {placeholder} is missing — the "
+                            "canonical value is fetched and then dropped without it")
+    for rule, why in (
+        ("FUNDING FRAMING", "the funding fields arrive with no rule for reading them"),
+        ("CATEGORICALLY INAPPLICABLE",
+         "a null value_type on a funding event is still readable as UNDISCLOSED"),
+        ("VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT",
+         "funding events have no deal-type framing entry"),
+        ("total_raised_to_date is CUMULATIVE",
+         "the cumulative total may be reported as this round's size"),
+        ("round_price_direction", "up/down framing has no canonical field to read"),
+    ):
+        if rule not in system:
+            failures.append(f"deal_summary system prompt: {rule!r} is not delivered to the "
+                            f"model — {why}")
+    # The disclosure gate is the rule that stops absent input becoming a false claim.
+    if "UNDISCLOSED" not in system or "at least one financial value" not in system.lower():
+        failures.append("deal_summary system prompt: the narrow financials_disclosure_status "
+                        "semantics are not delivered — DISCLOSED must not read as "
+                        "'every term is known'")
+    if "is_down_round" not in system:
+        failures.append("deal_summary system prompt: the prohibition on inventing an "
+                        "is_down_round field is missing")
+
 
 def main() -> None:
     failures: list[str] = []
     _test_transport(failures)
     _test_sponsor_role_transport(failures)
     _test_neighbours_unchanged(failures)
+    _test_funding_transport(failures)
+    _test_funding_nulls_are_not_falsey(failures)
+    _test_stored_false_transports_as_false(failures)
+    _test_non_funding_control(failures)
     _test_prompt_contract(failures)
 
     if failures:
@@ -293,8 +576,9 @@ def main() -> None:
         for f in failures:
             print(f"  - {f}")
         sys.exit(1)
-    print(f"PASS  summary flags transport  ({len(CASES)} attitude/approach + "
-          f"{len(_SPONSOR_CASES)} sponsor-role cases + control + prompt contract)")
+    print(f"PASS  summary transport  ({len(CASES)} attitude/approach + "
+          f"{len(_SPONSOR_CASES)} sponsor-role + {len(_FUNDING_CASES)} funding anchors "
+          f"+ null-preservation + 2 controls + prompt contract)")
 
 
 if __name__ == "__main__":
