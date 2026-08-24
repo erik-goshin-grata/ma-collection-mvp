@@ -44,15 +44,37 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "low_confidence_extraction"
-_VERSION = "0.10"
+_VERSION = "0.11"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
     "advisors", "consideration_components", "flags",
     "go_shop", "termination_fees", "model_confidence",
 })
+# Legacy compatibility vocabularies. Still accepted on input and still written, so rows
+# stored before 0.11 stay readable and so anything reading `type` / `advised_party` keeps
+# working. `BOTH` is accepted HERE for old responses but is no longer offered by the prompt:
+# one advisor serving two participants is two participations, which a single row cannot say.
 _VALID_ADVISOR_TYPES = frozenset({"FINANCIAL", "LEGAL", "OTHER"})
 _VALID_ADVISED_PARTIES = frozenset({"TARGET", "ACQUIRER", "PARENT_SELLER", "BOTH", "UNKNOWN"})
+
+# V3 advisor participation (prompt 0.11). The specialty the source establishes, at the most
+# specific supported level. `financial_advisory`, `legal`, `accounting`, `fairness_opinion`
+# and `regulatory` already exist in Grata; `tax`, `proxy_solicitation` and `information_agent`
+# were accepted on the strength of being named in the old `OTHER` definition; `communications`
+# is a Product addition. `restructuring` and `capital_markets` remain deferred pending
+# extraction evidence. A financing provider is a LENDER, not an advisor specialty.
+_VALID_ADVISOR_SPECIALTIES = frozenset({
+    "financial_advisory", "legal", "accounting", "fairness_opinion", "regulatory",
+    "tax", "proxy_solicitation", "information_agent", "communications",
+})
+_VALID_ADVISED_SIDES = frozenset({"BUY_SIDE", "SELL_SIDE"})
+
+# Compatibility projection for the legacy `type` column. Only the two specialties the old
+# vocabulary could express map to themselves; every other supported specialty projects to
+# OTHER, which is what the old contract would have recorded. The projection is lossy by
+# construction -- that is the point of the new `specialty` column, which keeps the fact.
+_SPECIALTY_TO_LEGACY_TYPE = {"financial_advisory": "FINANCIAL", "legal": "LEGAL"}
 # V3 §T11 — two independent nullable dimensions replacing the fused `hostile` boolean.
 # null is a valid, meaningful value for both: the source did not establish the fact.
 # Component forms were never validated: the prompt listed eight and nothing enforced them,
@@ -100,9 +122,21 @@ def _validate(result: dict) -> str | None:
 
 
 def _clean_advisors(advisors: list, log, eid: int) -> list[dict]:
-    """Filter advisor list to entries with valid type and advised_party.
+    """Normalize advisor participations. Only a nameless entry is dropped.
 
-    Bad entries are logged and skipped rather than failing the whole row.
+    An advisor participation is four separate facts: who advised, in what specialty, which
+    specific participant they advised, and on which side. They are populated independently
+    and an unusable value in one must not discard the others.
+
+    That is a deliberate change from the pre-0.11 behaviour, which skipped the whole entry
+    when `type` or `advised_party` was unrecognized. Under that rule a newly-supported
+    specialty arriving from a newer prompt would have silently deleted the advisor -- name
+    included -- with only a log line. The name is the irreducible fact, so it is the only
+    thing whose absence drops a row.
+
+    Neither identity nor side is ever manufactured from the other. A participant name is not
+    evidence of a side and a side is not evidence of a participant; each stays None unless the
+    source established it.
     """
     valid = []
     for a in advisors:
@@ -113,15 +147,53 @@ def _clean_advisors(advisors: list, log, eid: int) -> list[dict]:
         if not name:
             log.warning("extraction_id=%d skipping advisor with empty name", eid)
             continue
+
+        specialty = a.get("advisor_specialty") or a.get("specialty")
+        if specialty is not None and specialty not in _VALID_ADVISOR_SPECIALTIES:
+            log.warning("extraction_id=%d unsupported advisor specialty %r for %r — keeping "
+                        "the participation, dropping the specialty", eid, specialty, name)
+            specialty = None
+
+        side = a.get("advised_side")
+        if side is not None and side not in _VALID_ADVISED_SIDES:
+            log.warning("extraction_id=%d invalid advised_side %r for %r — clearing",
+                        eid, side, name)
+            side = None
+
+        party_name = (a.get("advised_party_name") or "").strip() or None
+
+        # Legacy `type`: projected from specialty when one is established, otherwise the
+        # value the response carried. Never invented -- an entry with neither is OTHER,
+        # which is exactly what the old contract recorded for anything it could not name.
         atype = a.get("type")
-        if atype not in _VALID_ADVISOR_TYPES:
-            log.warning("extraction_id=%d invalid advisor type %r for %r — skipping", eid, atype, name)
-            continue
+        if specialty is not None:
+            atype = _SPECIALTY_TO_LEGACY_TYPE.get(specialty, "OTHER")
+        elif atype not in _VALID_ADVISOR_TYPES:
+            if atype is not None:
+                log.warning("extraction_id=%d invalid advisor type %r for %r — recording as "
+                            "OTHER", eid, atype, name)
+            atype = "OTHER"
+
+        # Legacy `advised_party`: a ROLE, which the 0.11 contract no longer asks for. It is
+        # taken from the response when present and valid, and is otherwise UNKNOWN. It is
+        # NOT synthesized from `advised_party_name` or from `advised_side` -- neither
+        # establishes which participant role the client holds, and asserting one would state
+        # a fact the source did not.
         party = a.get("advised_party")
         if party not in _VALID_ADVISED_PARTIES:
-            log.warning("extraction_id=%d invalid advised_party %r for %r — skipping", eid, party, name)
-            continue
-        valid.append({"name": name, "type": atype, "advised_party": party})
+            if party is not None:
+                log.warning("extraction_id=%d invalid advised_party %r for %r — recording as "
+                            "UNKNOWN", eid, party, name)
+            party = "UNKNOWN"
+
+        valid.append({
+            "name": name,
+            "type": atype,
+            "advised_party": party,
+            "specialty": specialty,
+            "advised_party_name": party_name,
+            "advised_side": side,
+        })
     return valid
 
 
@@ -280,8 +352,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
         clean_advisors = _clean_advisors(result.get("advisors") or [], log, eid)
         for adv in clean_advisors:
             conn.execute(
-                "INSERT INTO advisor (extraction_id, name, type, advised_party) VALUES (?, ?, ?, ?)",
-                (eid, adv["name"], adv["type"], adv["advised_party"]),
+                "INSERT INTO advisor (extraction_id, name, type, advised_party,"
+                " specialty, advised_party_name, advised_side) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (eid, adv["name"], adv["type"], adv["advised_party"],
+                 adv["specialty"], adv["advised_party_name"], adv["advised_side"]),
             )
         conn.commit()
         advisors_inserted += len(clean_advisors)

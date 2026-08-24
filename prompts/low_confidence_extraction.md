@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.10 (provenance is caller-owned)
+**Version:** 0.11 (advisor participation: specialty and advised party)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -73,14 +73,40 @@ ADVISORS:
 
 Extract any financial and legal advisors mentioned in the text. For each advisor:
 - advisor_name — the firm name as stated (e.g., "Goldman Sachs", "Wachtell, Lipton, Rosen & Katz")
-- advisor_type — enum: FINANCIAL, LEGAL, OTHER
-- advised_party — enum: TARGET, ACQUIRER, PARENT_SELLER, BOTH, UNKNOWN
+- advisor_specialty — the advisory service, at the MOST SPECIFIC level the source
+  establishes. Enum or null:
+    financial_advisory — financial / M&A advisory
+    legal — legal counsel
+    accounting — accounting advisory
+    tax — tax advisory
+    fairness_opinion — provider of a fairness opinion
+    proxy_solicitation — proxy solicitation agent
+    information_agent — information agent
+    regulatory — regulatory advisory
+    communications — communications / public-relations advisory
+    null — the source does not establish which service was provided
+  Do NOT record a generic catch-all when the source establishes one of the values
+  above. If the source names the service, name it.
+  A LENDER is NOT an advisor specialty. Providing capital and advising on a
+  transaction are different participations; a firm doing both appears twice.
+- advised_party_name — the SPECIFIC party advised, exactly as stated (e.g.
+  "Acme Corp", "Beta Industries"). Null when the source does not identify which
+  party the advisor acted for.
+- advised_side — enum: BUY_SIDE, SELL_SIDE, or null. Populate ONLY when the source
+  establishes a side. Null means the side is not established.
 
 Rules:
-- "OTHER" covers fairness opinion providers, proxy solicitors, info agents, and accounting/tax advisors.
 - Do not include internal advisors (in-house counsel, in-house finance teams) — only external firms.
 - If multiple advisors are listed for the same party, capture each as a separate entry.
-- If an advisor's role is stated but the advised party is ambiguous, use UNKNOWN.
+- ONE ADVISOR SERVING TWO PARTIES IS TWO ENTRIES. There is no "both" value. Emit one
+  entry per advisor-and-party pair, each naming its own advised_party_name.
+- advised_party_name and advised_side are INDEPENDENT facts. Never infer one from the
+  other: naming a party is not evidence of a side, and a side is not evidence of which
+  party. If the source establishes only a side, set advised_side and leave
+  advised_party_name null. If it names a party without establishing a side, set
+  advised_party_name and leave advised_side null.
+- If neither the party nor the side is established, leave both null and still record
+  the advisor and its specialty.
 
 CONSIDERATION COMPONENTS:
 
@@ -233,8 +259,10 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
 
 {
   "advisors": [
-    {"name": "Goldman Sachs", "type": "FINANCIAL", "advised_party": "ACQUIRER"},
-    {"name": "Wachtell, Lipton, Rosen & Katz", "type": "LEGAL", "advised_party": "ACQUIRER"}
+    {"name": "Goldman Sachs", "advisor_specialty": "financial_advisory",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"},
+    {"name": "Wachtell, Lipton, Rosen & Katz", "advisor_specialty": "legal",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"}
   ],
   "consideration_components": [
     {
@@ -299,8 +327,10 @@ Extract advisors, consideration components, and deal characteristic flags.
 ```json
 {
   "advisors": [
-    {"name": "Goldman Sachs", "type": "FINANCIAL", "advised_party": "ACQUIRER"},
-    {"name": "Wachtell, Lipton, Rosen & Katz", "type": "LEGAL", "advised_party": "ACQUIRER"}
+    {"name": "Goldman Sachs", "advisor_specialty": "financial_advisory",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"},
+    {"name": "Wachtell, Lipton, Rosen & Katz", "advisor_specialty": "legal",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"}
   ],
   "consideration_components": [
     {
@@ -359,10 +389,14 @@ Output:
 ```json
 {
   "advisors": [
-    {"name": "Goldman Sachs", "type": "FINANCIAL", "advised_party": "ACQUIRER"},
-    {"name": "Wachtell, Lipton, Rosen & Katz", "type": "LEGAL", "advised_party": "ACQUIRER"},
-    {"name": "Morgan Stanley", "type": "FINANCIAL", "advised_party": "TARGET"},
-    {"name": "Kirkland & Ellis", "type": "LEGAL", "advised_party": "TARGET"}
+    {"name": "Goldman Sachs", "advisor_specialty": "financial_advisory",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"},
+    {"name": "Wachtell, Lipton, Rosen & Katz", "advisor_specialty": "legal",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"},
+    {"name": "Morgan Stanley", "advisor_specialty": "financial_advisory",
+     "advised_party_name": "Beta Industries", "advised_side": "SELL_SIDE"},
+    {"name": "Kirkland & Ellis", "advisor_specialty": "legal",
+     "advised_party_name": "Beta Industries", "advised_side": "SELL_SIDE"}
   ],
   "consideration_components": [
     {"form": "CASH", "amount": 500000000, "percentage": 100.0, "description": "All-cash at closing"}
@@ -519,8 +553,10 @@ Output:
 ```json
 {
   "advisors": [
-    {"name": "Lazard", "type": "FINANCIAL", "advised_party": "ACQUIRER"},
-    {"name": "Centerview Partners", "type": "FINANCIAL", "advised_party": "TARGET"}
+    {"name": "Lazard", "advisor_specialty": "financial_advisory",
+     "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"},
+    {"name": "Centerview Partners", "advisor_specialty": "financial_advisory",
+     "advised_party_name": "Beta Industries", "advised_side": "SELL_SIDE"}
   ],
   "consideration_components": [
     {"form": "CASH", "amount": null, "percentage": null, "description": "$25.00 per share cash at closing"},
@@ -785,3 +821,4 @@ initiated a process to find one.
 | 0.8 | 2026-08-20 | **A mandatory or regulatory offer does not by itself establish `approach_type = UNSOLICITED`.** Gate 2 returned `UNSOLICITED` for the Kontron / Ennoconn mandatory takeover offer under the Austrian Takeover Act, on a source where the word "unsolicited" never appears and no solicitation evidence exists in either direction — so `null` was already the answer the stated rule required. One sentence added to the `approach_type` block: a statutory obligation to make an offer describes **why** the offer had to be made, not **how** the approach arose. `deal_attitude` is untouched — `HOSTILE` was correct on this source and is now independently validated by it. No example is added or changed, and solicited/unsolicited semantics are not reopened. |
 | 0.9 | 2026-08-21 | **`spinco` removed from the active `target_type` input vocabulary (V3 §T3).** The note told this prompt to expect a value that no upstream stage can produce — §T3 removed it and the classifier rejects it as a schema violation. Descriptive input guidance is part of the contract, so this carries a version. No extraction rule changes. |
 | 0.10 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.11 | 2026-08-24 | **Advisor participation: specialty and the advised participant become source facts.** The old shape asked for `advisor_type` (`FINANCIAL`/`LEGAL`/`OTHER`) and `advised_party` (`TARGET`/`ACQUIRER`/`PARENT_SELLER`/`BOTH`/`UNKNOWN`), and compressed both. `OTHER` was lossy **by written instruction** — this prompt's own definition read "OTHER covers fairness opinion providers, proxy solicitors, info agents, and accounting/tax advisors", so four named specialties were collapsed into one bucket with the evidence sitting in the source text. `BOTH` was worse: one advisor serving two participants is two participations, and a single row cannot say which two. **Replaced by** `advisor_specialty` (`financial_advisory` · `legal` · `accounting` · `tax` · `fairness_opinion` · `proxy_solicitation` · `information_agent` · `regulatory` · `communications` · null), `advised_party_name` (the specific party, as stated) and `advised_side` (`BUY_SIDE`/`SELL_SIDE`/null). Five of those specialties already exist in Grata; `tax`, `proxy_solicitation` and `information_agent` were accepted on the strength of being named in the old `OTHER` definition; `communications` is a Product addition. `restructuring` and `capital_markets` remain deferred pending extraction evidence. **A LENDER is not an advisor specialty** — providing capital and advising are different participations, and a firm doing both appears twice. **Name and side are independent**: neither is ever inferred from the other, and each stays null unless established. `BOTH` is removed from the contract; two parties means two entries. **Nothing is lost on read** — `type` and `advised_party` are retained and still written, historical `OTHER` keeps its meaning as evidence that a non-financial, non-legal specialty was observed, and the legacy pair now carries a compatibility projection rather than the Product model. Participant *resolution* is not here; capture is, so the stated identity stops being discarded while resolution is pending. |

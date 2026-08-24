@@ -62,7 +62,7 @@ def _build_advisors_summary(conn: sqlite3.Connection, cluster_id: str) -> str | 
     """Build a natural-language advisors sentence from the advisor table."""
     rows = conn.execute(
         """
-        SELECT a.name, a.type, a.advised_party
+        SELECT a.name, a.type, a.advised_party, a.advised_party_name, a.advised_side
         FROM advisor a
         JOIN staging_extraction se ON se.extraction_id = a.extraction_id
         WHERE se.transaction_cluster_id = ?
@@ -74,17 +74,27 @@ def _build_advisors_summary(conn: sqlite3.Connection, cluster_id: str) -> str | 
     if not rows:
         return None
 
+    # Prefer the stated client name, then the side, then the legacy role. LC 0.11 stopped
+    # asking the model for a role, so `advised_party` is UNKNOWN on new rows unless the
+    # response carried one -- reading it alone would render every new advisor as "Unknown"
+    # while the row holds the client's actual name. Rows stored before 0.11 have no name or
+    # side and still resolve through the legacy role, so nothing regresses.
+    def _label(r) -> str:
+        name = r["advised_party_name"] if "advised_party_name" in r.keys() else None
+        if name:
+            return name
+        side = r["advised_side"] if "advised_side" in r.keys() else None
+        if side:
+            return "the buy side" if side == "BUY_SIDE" else "the sell side"
+        return (r["advised_party"] or "UNKNOWN").replace("_", " ").title()
+
     by_party: dict[str, list[str]] = {}
     for r in rows:
-        by_party.setdefault(r["advised_party"], []).append(r["name"])
+        by_party.setdefault(_label(r), []).append(r["name"])
 
     parts = []
-    for party in ("TARGET", "ACQUIRER", "PARENT_SELLER", "BOTH", "UNKNOWN"):
-        names = by_party.get(party)
-        if not names:
-            continue
+    for label, names in by_party.items():
         unique = list(dict.fromkeys(names))
-        label = party.replace("_", " ").title()
         parts.append(f"{' and '.join(unique)} advised {label}")
 
     return "; ".join(parts) + "." if parts else None

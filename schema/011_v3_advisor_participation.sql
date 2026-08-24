@@ -1,0 +1,75 @@
+-- 011 — V3 advisor participation: specialty and advised participant as source facts.
+--
+-- An advisor participation records four separate facts:
+--   advisor name · advisory specialty · the specific participant advised · the advised side.
+-- The pre-V3 shape could express two of them, and compressed both:
+--
+--   type          FINANCIAL | LEGAL | OTHER   -- OTHER absorbed four named specialties
+--   advised_party TARGET | ACQUIRER | PARENT_SELLER | BOTH | UNKNOWN
+--
+-- `OTHER` was not an accident of collection. The extraction prompt's own definition read
+-- "OTHER covers fairness opinion providers, proxy solicitors, info agents, and
+-- accounting/tax advisors" -- four distinct specialties collapsed into one bucket by written
+-- instruction, with the evidence present in the source text and discarded at the enum.
+-- `BOTH` was worse than lossy: one advisor serving two participants is two participations,
+-- and a single row cannot say which two.
+--
+-- Three nullable columns are added. Nothing is dropped, rewritten or backfilled.
+--
+--   specialty          financial_advisory | legal | accounting | fairness_opinion |
+--                      regulatory | tax | proxy_solicitation | information_agent |
+--                      communications | NULL
+--   advised_party_name the specific participant advised, as stated. NULL when the source
+--                      does not identify one.
+--   advised_side       BUY_SIDE | SELL_SIDE | NULL. Side evidence, recorded when the source
+--                      establishes a side. NULL is "not established", never "neither".
+--
+-- Vocabulary provenance: `financial_advisory`, `legal`, `accounting`, `fairness_opinion` and
+-- `regulatory` already exist in Grata. `tax`, `proxy_solicitation` and `information_agent`
+-- were accepted for addition on the strength of being named in the old `OTHER` definition --
+-- the sources demonstrably carry the distinction. `communications` is a Product addition.
+-- `restructuring` and `capital_markets` remain deferred pending extraction evidence.
+--
+-- NAME AND SIDE ARE INDEPENDENT. A participant name is not evidence of a side, and a side is
+-- not evidence of a participant. Populate each only from what the source establishes; where
+-- only one is known the other stays NULL. Manufacturing either from the other asserts a fact
+-- the source did not state.
+--
+-- A financing provider stays a LENDER and is not an advisor specialty. The same firm may
+-- legitimately appear twice in different capacities.
+--
+-- `type` and `advised_party` are RETAINED and still written. Historical `OTHER` is evidence
+-- in its own right -- it proves a non-financial, non-legal specialty was observed even though
+-- the old contract discarded which one -- and is never converted to NULL. For new rows the
+-- legacy pair carries a compatibility projection, not the Product model.
+--
+-- Participant RESOLUTION -- linking advised_party_name to a transaction participant -- is not
+-- here; it belongs with the participant/entity work. Capture is here so the stated identity
+-- stops being discarded while resolution is pending.
+--
+-- NAMED PEOPLE ARE DEFERRED, NOT EXCLUDED. This migration adds no person columns, and that
+-- is a scope decision about this slice -- NOT a Product decision that people are out of the
+-- target model. Do not read the absence as exclusion. The target requirement stands:
+--
+--   * explicitly named people participating in a transaction are preserved where relevant;
+--   * for advisors, a named banker, lawyer, accountant or communications adviser is
+--     associated with the relevant advisor firm / advisor participation;
+--   * MULTIPLE named people must be representable -- this is expressly not a single
+--     advisor_person_name / advisor_person_title scalar pair;
+--   * the person's title or role is preserved where stated;
+--   * the principle generalizes beyond advisors rather than creating an advisor-specific
+--     person model;
+--   * board representation follows the same principle -- preserve the investor/participant
+--     and the named representative, rather than reducing it to a has_board_seat flag plus
+--     free-text notes.
+--
+-- The physical/cardinality model, identity resolution and participant/person relationships
+-- belong with the broader participant/entity work (ENG-V3-008). Adding a scalar pair here
+-- would have to be undone by that work, which is why this slice adds nothing rather than
+-- adding something shaped wrongly.
+--
+-- Enums are application-layer, not CHECK constraints, matching every other typed dimension.
+
+ALTER TABLE advisor ADD COLUMN specialty          TEXT;  -- 9-value vocabulary | NULL
+ALTER TABLE advisor ADD COLUMN advised_party_name TEXT;  -- as stated | NULL
+ALTER TABLE advisor ADD COLUMN advised_side       TEXT;  -- BUY_SIDE | SELL_SIDE | NULL
