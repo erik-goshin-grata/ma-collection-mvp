@@ -259,11 +259,18 @@ def _derive_is_take_private(fields: dict) -> int:
     Absence of affirmative outcome evidence is 0, by decision. `is_going_private_outcome`
     is never persisted as 0, so `_explicit_flag` reads its absence, not a stored negative.
     """
-    # deal_type and target_status are UPPERCASE in production and are compared as stored.
-    # Only target_type and acquirer_type are case-folded -- those are the two the V2
+    # Read the RESOLVED event type, never the raw `deal_type` column. `deal_type` is a
+    # legacy alias that Stage 3 stopped asking the model to author at classifier 0.14; it is
+    # still written, but from the resolved value. Reading it directly made this derivation
+    # the only one in the file that depended on the alias surviving -- its sibling
+    # _derive_is_secondary_buyout already used this helper. Same value today, and no longer
+    # a hidden dependency on a field being retired.
+    #
+    # The event type and target_status are UPPERCASE in production and are compared as
+    # stored. Only target_type and acquirer_type are case-folded -- those are the two the V2
     # vocabulary lowercased, and comparing them against uppercase literals returned 0 for
     # every transaction.
-    if fields.get("deal_type") != "ACQUISITION":
+    if _event_type(fields) != "ACQUISITION":
         return 0
     if fields.get("target_status") != "PUBLIC":
         return 0

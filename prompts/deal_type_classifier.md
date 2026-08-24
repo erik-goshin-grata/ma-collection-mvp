@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.13 (provenance is caller-owned)
+**Version:** 0.14 (one model-authored event classification)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -15,11 +15,10 @@ handling and downstream extraction logic.
 
 Runs on every row where `relevancy_filter.classification = RELEVANT`.
 
-**V2 note:** `v2_event_type` replaces the legacy `deal_type` field. Both are
-returned during the pipeline migration window. `event_history_type` replaces
-the legacy `event_type` field to eliminate naming collision with V2's
-`event_type` (which is the deal classification). Downstream code should
-migrate to `v2_event_type` and `event_history_type`.
+**Event classification.** `v2_event_type` is the single model-authored transaction
+classification. The `deal_type` key is no longer emitted (0.14): it was a transitional
+alias with no separate meaning. The `deal_type` column is retained and still written by
+the stage for read compatibility with rows stored before 0.14.
 
 ---
 
@@ -89,7 +88,7 @@ DEAL TYPES (v2_event_type):
 
 5. RECAPITALIZATION — A company restructures its capital structure without a
    change of control. Includes dividend recaps, equity recaps, leveraged
-   recaps, and sponsor recaps. When deal_type = RECAPITALIZATION, also
+   recaps, and sponsor recaps. When v2_event_type = RECAPITALIZATION, also
    populate recap_type (see discriminators below).
 
 6. VC_ROUND — A priced or unpriced venture capital funding round. Seed through
@@ -359,7 +358,6 @@ code fences, no preamble.
 
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -374,9 +372,8 @@ code fences, no preamble.
 
 All fields are required. Use null for optional fields that have no value.
 
-"deal_type" is a transitional alias for "v2_event_type" — return the same
-value in both fields. Pipeline code will migrate to "v2_event_type";
-"deal_type" will be deprecated in a future version.
+`v2_event_type` is the transaction classification. Do not emit a `deal_type`
+key — it carried no separate meaning and is no longer part of this contract.
 ```
 
 ---
@@ -402,7 +399,6 @@ target status.
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -422,7 +418,6 @@ target status.
 | :--- | :--- | :--- |
 | `v2_event_type` | enum | `ACQUISITION`, `SPIN_OFF`, `SPLIT_OFF`, `JOINT_VENTURE`, `RECAPITALIZATION`, `VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`, `PIPE`, `UNKNOWN` |
 | `combination_structure` | enum\|null | `MERGER`, `REVERSE_MERGER`, `DE_SPAC`, `null`. Only when `v2_event_type = ACQUISITION`; null for every other type. Most specific value; ambiguity resolves upward. |
-| `deal_type` | enum | Same as `v2_event_type` — transitional alias, deprecated in future version |
 | `spin_split_type` | enum or null | `SPIN_OFF`, `SPLIT_OFF`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `distribution_mechanism` | enum or null | `PRO_RATA`, `EXCHANGE_OFFER`, or null if v2_event_type ∉ {SPIN_OFF, SPLIT_OFF} |
 | `recap_type` | enum or null | `DIVIDEND`, `EQUITY`, `LEVERAGED`, `SPONSOR_RECAP`, or null if v2_event_type ≠ RECAPITALIZATION |
@@ -452,7 +447,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -481,7 +475,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -509,7 +502,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -539,7 +531,6 @@ Output:
 ```json
 {
   "v2_event_type": "SPIN_OFF",
-  "deal_type": "SPIN_OFF",
   "combination_structure": null,
   "spin_split_type": "SPIN_OFF",
   "distribution_mechanism": "PRO_RATA",
@@ -568,7 +559,6 @@ Output:
 ```json
 {
   "v2_event_type": "SPLIT_OFF",
-  "deal_type": "SPLIT_OFF",
   "combination_structure": null,
   "spin_split_type": "SPLIT_OFF",
   "distribution_mechanism": "EXCHANGE_OFFER",
@@ -597,7 +587,6 @@ Output:
 ```json
 {
   "v2_event_type": "JOINT_VENTURE",
-  "deal_type": "JOINT_VENTURE",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -625,7 +614,6 @@ Output:
 ```json
 {
   "v2_event_type": "RECAPITALIZATION",
-  "deal_type": "RECAPITALIZATION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -653,7 +641,6 @@ Output:
 ```json
 {
   "v2_event_type": "VC_ROUND",
-  "deal_type": "VC_ROUND",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -683,7 +670,6 @@ Output:
 ```json
 {
   "v2_event_type": "GROWTH_EQUITY",
-  "deal_type": "GROWTH_EQUITY",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -713,7 +699,6 @@ Output:
 ```json
 {
   "v2_event_type": "VENTURE_DEBT",
-  "deal_type": "VENTURE_DEBT",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -740,7 +725,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -767,7 +751,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -796,7 +779,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -824,7 +806,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -852,7 +833,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": "MERGER",
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -878,7 +858,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": "DE_SPAC",
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -904,7 +883,6 @@ Output:
 ```json
 {
   "v2_event_type": "ACQUISITION",
-  "deal_type": "ACQUISITION",
   "combination_structure": null,
   "spin_split_type": null,
   "distribution_mechanism": null,
@@ -935,7 +913,6 @@ Output:
 ```json
 {
   "v2_event_type": "SPIN_OFF",
-  "deal_type": "SPIN_OFF",
   "combination_structure": null,
   "spin_split_type": "SPIN_OFF",
   "distribution_mechanism": "PRO_RATA",
@@ -984,3 +961,4 @@ Output:
 | 0.11 | 2026-08-20 | **Transaction form alone does not determine `target_type`.** Gate 2 established one narrow failure: the classifier selected `assets` from asset-purchase wording ("acquired the assets of") on a source whose substance was the acquisition of a continuing operating business. One principle added to TARGET TYPE — do not classify as `assets` **solely** because of transaction-form language; read the full source to decide between a discrete asset set and an operating business. Deliberately minimal: no parsing rule, no evidence checklist, no decision tree, no new values, and the four-value taxonomy and its definitions are otherwise unchanged. "Solely" is load-bearing — the point is to remove a mechanical cue, not to install another one. Researcher review remains available for genuinely ambiguous cases. |
 | 0.12 | 2026-08-21 | **Active text brought onto the current lowercase vocabulary, and the failure-mode table corrected to describe the parser that exists.** IMPORTANT DISTINCTIONS instructed `target_type = BUSINESS_UNIT or SUBSIDIARY` and `acquirer_type = PRIVATE_EQUITY` while this same prompt declared uppercase target types no longer valid — one file asking for a value it forbids. Both are now lowercase, with `acquirer_type` marked as extracted downstream, since it is not an output of this prompt at all. `target_status = PUBLIC` is unchanged and correct: that vocabulary is genuinely uppercase. Separately, the failure-mode table claimed the parser **rejects** legacy uppercase `target_type`; it accepts it for rollout compatibility (`_VALID_LEGACY_TARGET_TYPES`) and normalizes it into `target_type_v2`, leaving the raw value on the legacy column that Stage 9 derivations read. The row now says so, and keeps the distinction that matters: **lowercase is valid current output, uppercase is tolerated legacy input and is not.** No parser change — the tolerance is deliberate, and `scripts/test_asset_type.py` now pins it behaviourally so ending it has to be an explicit decision. |
 | 0.13 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.14 | 2026-08-24 | **`deal_type` is no longer model-authored.** It was a transitional alias: the prompt itself instructed the model to "return the same value in both fields", so it carried no separate meaning and every consumer read `v2_event_type or deal_type`. Asking for it twice invited the two to disagree with nothing to arbitrate them. Removed from the delivered output template, from the output schema and from all worked examples; the delivered contract now states it must not be emitted. **Read compatibility is unchanged** — `_resolve_v2_event_type()` still accepts a stored `deal_type` (including the legacy `SPIN_SPLIT` normalization), and the stage still writes the `deal_type` column, falling back to the resolved `v2_event_type` exactly as it already did when the key was absent. No storage migration, and the physical `v2_event_type` → `event_type` rename is deliberately NOT bundled here. **`v2_event_type` remains MVP compatibility naming, not the target Product field name** — the target Product model calls this `event_type`; `event_history_type` carries lifecycle and `combination_structure` carries merger/reverse-merger/de-SPAC structure. Paired with a Stage 9 fix: the take-private derivation read the raw `deal_type` value directly while its sibling derivation used the resolved event-type helper, so removing the key without that fix would have silently broken the flag. |

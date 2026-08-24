@@ -57,7 +57,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_type_classifier"
-_VERSION = "0.13"
+_VERSION = "0.14"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 # V2 EventType enum values
@@ -419,7 +419,10 @@ def _insert(
         """,
         (
             source_raw_id, status,
-            # deal_type — legacy field; keep writing for backward compat
+            # deal_type — legacy column, no longer model-authored (prompt 0.14). Still
+            # written so rows stay readable by anything that reads it; the value is the
+            # resolved v2_event_type, which is what the alias always meant. The fallback
+            # itself is unchanged — it already handled a response that omitted the key.
             r.get("deal_type") or v2_event_type,
             # v2_event_type — new canonical field
             v2_event_type,

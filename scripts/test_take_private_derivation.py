@@ -90,6 +90,19 @@ def _case(**overrides: object) -> dict:
     return base
 
 
+def _no_alias(case: dict) -> dict:
+    """Drop the legacy `deal_type` alias, leaving only `v2_event_type`.
+
+    This is the shape Stage 3 produces from classifier 0.14 onward. `_case()` seeds
+    `deal_type` because stored rows still carry it; a derivation that reads the alias
+    directly passes those and fails these.
+    """
+    out = dict(case)
+    alias = out.pop("deal_type", None)
+    out.setdefault("v2_event_type", alias)
+    return out
+
+
 # The five qualifying buyer types. Every other acquirer_type is out BY TYPE ALONE.
 _QUALIFYING = ("PRIVATE_EQUITY", "PE_PORTFOLIO", "MANAGEMENT", "EMPLOYEE_GROUP",
                "OTHER_FINANCIAL_SPONSOR")
@@ -129,6 +142,13 @@ CASES = [
     # "not established", never as evidence.
     ("outcome_zero_is_not_evidence",
      _case(acquirer_type="PRIVATE_EQUITY", is_going_private_outcome=0), 0),
+
+    # Classifier 0.14 stopped asking the model to author `deal_type`. New rows carry
+    # `v2_event_type` and a `deal_type` column written from the resolved value; this case
+    # drops the alias entirely, which is what the derivation must survive. It failed before
+    # the derivation moved to the resolved-event-type helper.
+    ("v2_event_type_alone_no_deal_type_alias", _no_alias(_case()), 1),
+    ("v2_event_type_alone_non_acquisition", _no_alias(_case(v2_event_type="MERGER")), 0),
 
     # --- negatives: other conditions, unchanged by this revision ------------------
     ("public_public_merger_not_take_private", _case(deal_type="MERGER", acquirer_type="STRATEGIC_CORPORATE"), 0),
