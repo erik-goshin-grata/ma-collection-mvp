@@ -243,7 +243,7 @@ Researcher review remains available for ambiguous or misclassified secondary fie
 ## 7. `is_take_private` — RESOLVED at `V3-PC-1.0`
 
 **This section described a live defect. It has been remediated.** Retained for the record;
-the current contract is in the Data Dictionary §2 and the Register row `ENG-V3-020`.
+the current contract is in the Data Dictionary derived-fields section and the Register row `ENG-V3-020`.
 
 **What was wrong.** The derivation reached 1 on a public standalone target plus a broad
 acquirer type, with an acquirer-ticker guard standing in for "the buyer is private". Both

@@ -166,7 +166,7 @@ companies, investors and participants, with lead/primary designation where estab
 does not materialize a synthetic consortium entity. Product and Engineering are aligned on
 this and always have been. The `consortium` vocabulary value and the synthetic `CONSORTIUM`
 group still present in the prototype implementation are **not part of `V3-PC-1.0`** and are
-retired as part of the participant/entity work (`ENG-V3-008`). See Data Dictionary §4.1.
+retired as part of the participant/entity work (`ENG-V3-008`). See the Data Dictionary appendix.
 
 ## Superseded and retired
 
@@ -176,4 +176,4 @@ retired as part of the participant/entity work (`ENG-V3-008`). See Data Dictiona
 **Retired fields, columns physically retained and unwritten:** `is_platform_investment` ·
 `is_add_on` · `hostile` · `is_divestiture` · `is_down_round` · `round_stage_category` ·
 `is_de_spac` · `includes_earnout`. A kept column is not a claim of continued authorship;
-stored history is untouched and nothing is backfilled. See the Data Dictionary §4.
+stored history is untouched and nothing is backfilled. See the Data Dictionary appendix.

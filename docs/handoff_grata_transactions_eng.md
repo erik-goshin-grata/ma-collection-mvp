@@ -137,6 +137,35 @@ suite is a regression check on the current codebase, not evidence of V3.
 evidence of canonical-model importance or priority, and upstream provider categories are
 **not** canonical classification nor a proxy for what our pipeline can classify or test.
 
+### 0.6 Extraction, reconciliation and entity resolution are separate concerns
+
+This is a semantic requirement, not an architecture. It does not prescribe stages, layers or
+names.
+
+**Extraction records what a source asserted.** It does not require that the transaction be
+deduplicated first, and it does not require a match to an existing Grata entity. A source
+assertion is admissible on its own terms.
+
+**Transaction reconciliation and deduplication are a separate concern** — deciding that two
+source assertions describe the same transaction is not extraction's job.
+
+**Entity resolution — linking parties to canonical Grata entities — is a separate and later
+concern** again. Nothing upstream should block on it.
+
+**After resolution, the integrated representation may use authoritative Grata company and
+entity attributes where those are the better source.** That is a legitimate outcome, not a
+loss of fidelity.
+
+**Source-observed values and their provenance are preserved regardless.** Using an
+authoritative attribute in the integrated view never means discarding what the source said or
+where it came from.
+
+**Company attributes extracted in the reference implementation are not a requirement to
+permanently duplicate authoritative Grata company data in the integrated model.** They exist
+because extraction runs before resolution and must record what the source stated. Read them as
+source assertions awaiting resolution, not as a target-model instruction to hold a second copy
+of company data.
+
 ---
 
 ## 1. Executive summary
