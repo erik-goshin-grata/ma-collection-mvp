@@ -5,22 +5,69 @@
 
 ---
 
-> ## QA NOTES — from the 2026-08-01 MergerLinks review
-> See `docs/qa_runbook_mergerlinks_2026_08_01.md` for detail + manual-validation steps.
+> ## HISTORICAL NOTE — 2026-08-01 MergerLinks QA review
+> **This block is documentation, not a backlog.** It sits outside the §4/§5 fences and is
+> never delivered to the model. It records what one review round produced; it is **not** the
+> current Product backlog and must not be actioned as one. Current Product state lives in
+> `docs/v3_change_decision_register.md` (`V3-PC-1.0`); the authoritative field contract is
+> `docs/v3_data_dictionary.md`. Detail and manual-validation steps:
+> `docs/qa_runbook_mergerlinks_2026_08_01.md`.
 >
-> **✅ APPLIED in this revision** (active in the rules below):
-> - **#1 Close date (rule b):** an announcement with **no forward/pending-close language** ⇒ closed on announcement (`closed_date = announced_date`); funding / minority close on announcement; **guard** against flipping deals with "subject to..." language. See `closed_date`.
-> - **#4 Currency:** `value.currency = null` when `value.amount` is null (no orphan currency). See `value.currency`.
-> - **#5 Financials:** capture stated revenue/EBITDA even when in running prose; capture a **stated aggregate value even when a per-share is present**. See `value.amount` and TARGET FINANCIALS *capture discipline*.
-> - **#6 Periods:** anchor `period_end` to a stated year (else null, keep period_type); **ARR is not revenue** — don't record ARR in `revenue_amount`. See TARGET FINANCIALS.
+> **Applied at the time, and still live in the delivered rules below.** Verified against the
+> loaded §4 contract, not against this note:
+> - **#1 Close date (rule b)** — an announcement with no forward/pending-close language closes
+>   on announcement (`closed_date = announced_date`); funding and minority close on
+>   announcement; the "subject to…" guard prevents flipping pending deals. See the
+>   PENDING-CLOSE LANGUAGE section.
+> - **#4 Currency** — `value.currency = null` when `value.amount` is null; no orphan currency.
+> - **#5 Financials in prose** — a stated revenue/EBITDA figure is captured even in running
+>   prose, and a stated aggregate value is captured even when a per-share price is present.
+>   See CAPTURE DISCIPLINE.
+> - **#6 Periods** — `period_end` is anchored to a stated year, else null with `period_type`
+>   kept; ARR is not recorded as revenue. See PERIOD ANCHOR and ARR IS NOT REVENUE.
 >
-> **⏳ STILL PENDING** (notes only — not yet implemented):
-> - **#3 SPLIT:** do **not** split when multiple targets share one consideration / combine into a single platform (e.g. Apax/Centor+PPP). Only split when each target would stand alone.
-> - **#7 Value type / disclosure** *(needs schema — eng note):* drop `UNDISCLOSED` from `value.type`; move disclosure to **two axes** — `deal_value_disclosure` + `target_financials_disclosure`.
-> - **#11 Exchange ratio** *(needs schema — eng note):* capture the stock-deal `exchange_ratio` into a **structured field** (today it lands in `consideration_components.description` free-text; Olin/Huntsman `0.5476`).
-> - **ARR field** *(needs schema — eng note):* dedicated ARR capture, distinct from GAAP revenue.
+> ### ⛔ SUPERSEDED — DO NOT ACTION
+> - **#7a Drop `UNDISCLOSED` from `value.type`.** **Superseded by `V3-PC-1.0`.** The current
+>   contract *depends* on `value_type = UNDISCLOSED` as an **affirmative disclosure signal**:
+>   `deal_summary` 0.16 licenses "Financial terms were not disclosed" only on an affirmative
+>   signal — `financials_disclosure_status = UNDISCLOSED` or `value_type = UNDISCLOSED` —
+>   precisely so that absent input can never become a false non-disclosure claim. Removing the
+>   value would break that rule. Do not action this item.
 >
-> **Derivation JOB (#8) — BUILT** in `stages/aggregate.py`: equity / implied-equity / EV / multiples and `is_take_private`. `is_divestiture` (§T4) and `is_add_on` (§T7) are **no longer authored** — the first is removed from V3, the second is replaced by the extracted `deal.sponsor_transaction_role`; both columns are retained but unwritten. The model **captures primitives only** — it must not compute or infer any of these (see rule 1).
+> ### Unresolved — reference only, not Product requirements
+> Each is recorded with its **current factual state**. None is a Product requirement by virtue
+> of appearing here; classification belongs to the Data Dictionary and the Register.
+> - **#3 SPLIT — extraction/cardinality.** The original note asked not to split when multiple
+>   targets share one consideration or combine into a single platform (Apax/Centor+PPP), and to
+>   split only where each target would stand alone. *Current state:* the delivered contract
+>   **does** carry multi-transaction rules — one array element per transaction, no splitting for
+>   roundup/tombstone/digest sources, and a shared announcement/event context requirement — but
+>   the specific shared-consideration / single-platform test is **not** among them. To be
+>   reconciled against the current source-decomposition contract.
+> - **#7b Second disclosure axis.** *Current state:* one axis exists and is live
+>   (`financials_disclosure_status`, covering company financial metrics). A second axis for deal
+>   economics does not exist. The V2 reconciliation names it `transaction_terms_disclosure_status`;
+>   the field names in the original note (`deal_value_disclosure` / `target_financials_disclosure`)
+>   were never adopted. A target data-model question.
+> - **#11 Exchange ratio.** *Current state:* a real Product/security concept, not a missing
+>   schema. It appears in the V2 security-and-share-mechanics reconciliation; today the value
+>   lands in `consideration_components.description` as free text (Olin/Huntsman `0.5476`). What
+>   remains open is its **target home and wiring**, not whether the concept exists.
+> - **ARR.** *Current state:* **not a new schema need.** `ARR` and `MRR` are already canonical
+>   metric names in Grata's financial-metric vocabulary. The remaining issue is **MVP collection
+>   coverage** — this prompt captures no ARR figure and deliberately keeps ARR out of
+>   `revenue_amount` (see ARR IS NOT REVENUE).
+>
+> **Derived fields — built in `stages/aggregate.py`, not authored by the model.** The model
+> **captures primitives only** and must not compute or infer any derived value (see rule 1).
+> Currently derived there: equity value, implied equity value, enterprise value, multiples,
+> `transaction_size`, and `is_take_private`. **`is_take_private` requires three conditions** —
+> a public standalone target, a qualifying private-ownership buyer, and affirmative going-private
+> evidence supplied by the captured primitive `features.is_going_private_outcome` (`true | null`).
+> The model supplies that primitive; it never decides the flag. `is_divestiture` (§T4) and
+> `is_add_on` (§T7) are **no longer authored** — the first is removed from V3, the second
+> replaced by the extracted `deal.sponsor_transaction_role`; their columns are retained in the
+> reference implementation and simply unwritten.
 
 ---
 
