@@ -1,5 +1,12 @@
 # Grata V2 Transaction Data Dictionary — Revised Draft v0.4.1
 
+
+> ## 🗄️ **HISTORICAL — superseded by `V3-PC-1.0`.**
+> Retained as the decision / source record. **Do not read as current Product state.**
+> Current state: `docs/v3_data_dictionary.md` (field contract) and
+> `docs/v3_change_decision_register.md` (decisions). This document remains the authority for
+> **why** a decision was taken; it is no longer an authority on **what is true now**.
+
 **Status:** Engineering review incorporated  
 **Basis:** Current Grata schemas/enums plus accepted/tested transaction-model decisions through 2026-08-13.  
 **Important:** Physical storage/table placement remains an ENG decision unless cardinality requires a repeating child/relationship.

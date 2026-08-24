@@ -2,9 +2,29 @@
 
 **From:** Transactions data-model assessment
 **To:** Grata / Transactions Engineering
-**Baseline:** `main` @ `a24feb0`
-**Status:** Product/data semantics settled for this pass. Remaining work is implementation,
-external definitions, or evidence-triggered validation.
+**Product Contract:** Transactions V3 — `V3-PC-1.0`
+**Status:** CURRENT · **Reconciled:** 2026-08-22 · **MVP reference baseline:** `ma-collection-mvp` `origin/main` @ `2e2ccb7`
+**MVP schema:** `010_v3_take_private_outcome.sql` · **MVP deterministic suite:** 47 scripts
+**Package:** Release Manifest · Change & Decision Register · Data Dictionary · Engineering Handoff
+
+*Target Product contract, MVP evidence, known MVP/target gaps, and considerations for
+Engineering adoption. Field detail lives in the Data Dictionary.*
+
+> **This is not an audit of Engineering's implementation.** It describes the target
+> Transactions V3 Product contract, the evidence produced by the **`ma-collection-mvp`
+> reference implementation**, the gaps between that reference and the target, and what
+> Engineering should know or align to when adopting the contract. Every status, version and
+> test result quoted here is MVP state unless explicitly stated otherwise; none of it asserts
+> what the Engineering production implementation currently does.
+
+> **Reconciled to `V3-PC-1.0` (2026-08-22).** The actionable list is now maintained in
+> `docs/v3_change_decision_register.md`, where every item carries a durable ID
+> (`ENG-V3-###`) and a Product/implementation/validation status. §6 below is retained and
+> cross-referenced to those IDs. Where this document and the Register disagree on current
+> state, **the Register wins**; this document remains the narrative front door.
+
+Product/data semantics are settled for this pass. Remaining work is implementation, external
+definitions, or evidence-triggered validation.
 
 This is the **front door**, not the specification. Every claim here is summarised from the
 detailed documents listed in §10; drill there for field-level detail and the evidence behind
@@ -294,13 +314,45 @@ reopen them by default:
 
 **Standing decisions from earlier passes**, also settled: `EQUITY_VALUE_ONLY` records *debt
 unknown*, never debt = 0; stake-level values are never multiple numerators; the funding
-family derives no `transaction_value` or `equity_value`; PIPE is recognized but not
-profiled; and a single stated qualified anchor ("over $140 million") is normalized to the
-stated figure with the original wording preserved in provenance.
+family derives no `transaction_value` or `equity_value`; PIPE is **recognized, then
+terminal** (see below); and a single stated qualified anchor ("over $140 million") is
+normalized to the stated figure with the original wording preserved in provenance.
+
+**PIPE — the two layers, amended at `V3-PC-1.0` (`ENG-V3-018`).** "Recognized but not
+profiled" means, precisely: **recognize/tag the PIPE → terminate profiling → no HC, no LC, no
+downstream transaction profiling.** Stage 3 sets `RECOGNIZED_NOT_PROFILED`; Stage 4 and Stage
+4b gate on `status = 'CLASSIFIED'` and Stage 7 on `status IN ('HC_EXTRACTED',
+'SEC_NOT_TRIGGERED', 'SEC_ENRICHED')`, so a recognized PIPE reaches none of them. Verified in
+production code at this baseline — **CURRENT / IMPLEMENTED, not outstanding Engineering work.**
+
+Two layers must be kept apart:
+
+- **Product semantics.** A transaction is a PIPE when the source facts establish the
+  structure. Literal use of the word "PIPE" is **not inherently required**.
+- **Implementation safety.** Because recognition is terminal, a false positive suppresses an
+  otherwise processable transaction. The recognizer may therefore stay deliberately
+  conservative. **That narrower threshold is an implementation safety choice, not the Product
+  definition of PIPE.**
+
+QIP is **not** settled by this decision and remains OPEN (`ENG-V3-015`).
 
 ---
 
 ## 6. Engineering decisions / actionable work
+
+> **Register IDs (`V3-PC-1.0`).** Items 1–6 below are `ENG-V3-001`, `ENG-V3-002`,
+> `ENG-V3-003`, `ENG-V3-004`, `ENG-V3-005` and `ENG-V3-006` respectively. All six were
+> re-verified against `main` at this baseline and remain outstanding — none has been
+> silently implemented. Item 6 is **TABLED**, not schedulable: it is blocked on the
+> §R7 + §R9 + §S2.1 Product decision. The prompt/legacy-compatibility review below is
+> `ENG-V3-012`.
+>
+> **Items new since this section was written** are not listed below — see the Register:
+> `ENG-V3-008` (participant/entity representation, which also retires the prototype
+> consortium residue), `ENG-V3-025` (the Deal Summary take-private framing rule sits outside
+> the delivered fences), and the six `OPEN` rows awaiting a Product position. `ENG-V3-007` was
+> **withdrawn** — the target model has never used a consortium construct, so there was no gap
+> to close and no subtype to design.
 
 Two groups, kept separate because they unblock differently. **Six items are schedulable
 Engineering implementation.** One is a prompt / legacy-compatibility review that is **not**
@@ -559,6 +611,11 @@ avoid. No prompt edit until it is decided.
 every recommendation in this handoff.
 
 ## 10. Detailed reference documents
+
+> **Read the `V3-PC-1.0` package first:** `docs/v3_release_manifest.md` (release identity) →
+> `docs/v3_change_decision_register.md` (decisions and the Jira-facing list) →
+> `docs/v3_data_dictionary.md` (current field contract). The documents below are the
+> historical/source record and remain the authority for **why** a decision was taken.
 
 | Document | What it holds |
 | --- | --- |

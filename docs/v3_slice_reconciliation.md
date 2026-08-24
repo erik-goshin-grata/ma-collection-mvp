@@ -1,9 +1,16 @@
 # V3 Slices S-A – S-F — Implementation and Validation Reconciliation
 
-**Date:** 2026-08-20 · **Reconciled against:** the working tree at the commit that adds this file.
+**Date:** 2026-08-20 · **Updated:** 2026-08-22 for `V3-PC-1.0`
+**Product Contract:** Transactions V3 — `V3-PC-1.0` (this document is **historical detail**, not the contract)
 
 One page covering what shipped, what was validated, what is known-broken, and what is
-deliberately parked. Written after six vertical slices and five real-text validation runs.
+deliberately parked. Written after six vertical slices and five real-text validation runs;
+updated at `V3-PC-1.0` to cover S-G and S-H and to record the two integration remediations.
+
+> **Current state lives in the `V3-PC-1.0` package** — `docs/v3_release_manifest.md`,
+> `docs/v3_change_decision_register.md`, `docs/v3_data_dictionary.md`. This document remains
+> the slice-level record of how the work was validated. Where it disagrees with the Register
+> on current state, the Register wins.
 
 ---
 
@@ -58,6 +65,22 @@ unvalidated (S-E, S-F), or validated and still carrying an open defect (S-A).
 observations of its own. Omitting a classifier field from that group strands it on staging.
 
 ---
+
+### S-G and S-H — added at `V3-PC-1.0`
+
+| Slice | Subject | Status | Evidence |
+| --- | --- | --- | --- |
+| **S-G** | Prompt provenance is caller-owned; `sponsor_transaction_role` replaces the `is_add_on` / `is_platform_investment` pair (§T7) | SHIPPED | `test_prompt_provenance_caller_owned.py`, `test_prompt_stage_version_parity.py`, `test_sponsor_transaction_role.py` |
+| **S-H** | The 24-code relevancy `reason_code` vocabulary is delivered inside the §4 system prompt | SHIPPED | `test_reason_code_parity.py`; PL Relevancy 0.8 run, 745 of 746 unique sources classified |
+
+### Post-slice remediations — `V3-PC-1.0`
+
+| Item | Subject | Status | Evidence |
+| --- | --- | --- | --- |
+| `ENG-V3-020` | Take-private semantics + `is_going_private_outcome` | REMEDIATED | §7 below; `test_take_private_derivation.py` (33 + 8 + 3); 0/26 on the PL corpus |
+| `ENG-V3-021` | Deal Summary funding transport and non-disclosure semantics | REMEDIATED | `test_summary_attitude_transport.py` — 4 live anchors, null-preservation, 2 controls |
+
+Both were found by **reading integration artifacts**, not by the exception detector.
 
 ## 3. Gate 2 results
 
@@ -217,49 +240,48 @@ Researcher review remains available for ambiguous or misclassified secondary fie
 
 ---
 
-## 7. `is_take_private` — known executable defect, next bounded remediation
+## 7. `is_take_private` — RESOLVED at `V3-PC-1.0`
 
-**`is_take_private` is structurally 0 for every new transaction.**
+**This section described a live defect. It has been remediated.** Retained for the record;
+the current contract is in the Data Dictionary §2 and the Register row `ENG-V3-020`.
 
-Stage 3 validates lowercase `target_type`, and Stage 4's `_normalize_acquirer_type()` converts
-legacy uppercase down to the V2 lowercase vocabulary — so storage is lowercase.
-`stages/aggregate.py` compares uppercase:
+**What was wrong.** The derivation reached 1 on a public standalone target plus a broad
+acquirer type, with an acquirer-ticker guard standing in for "the buyer is private". Both
+halves were wrong. The type test admitted `strategic_corporate` and eleven other types that
+establish no going-private structure. The ticker guard was never a proxy for private
+ownership — a listed sponsor taking a company private is a genuine take-private, and the guard
+returned 0 for every one of them, making it a false-negative source rather than a safeguard.
 
-```python
-if fields.get("target_type") != "STANDALONE_COMPANY":                       # always true
-_PRIVATE_TAKE_PRIVATE_ACQUIRER_TYPES = frozenset({"PRIVATE_EQUITY", ...})   # 12 uppercase
-```
+**How it surfaced.** All three positives in the 29-source PL integration run were wrong:
+Monte dei Paschi twice (both `strategic_corporate` acquirers) and Pontiac/Ottawa Bancorp. One
+propagated into a generated summary asserting the deal was "structured as a take-private".
 
-`scripts/test_take_private_derivation.py` passes because it calls `_derive_flags()` directly with
-**synthetic uppercase** values, bypassing storage. **The test certifies the defect.** This is the
-clearest available case for the Gate 1 rule about production paths versus manufactured inputs.
+**Why a new primitive was needed.** No existing field could establish the ownership outcome.
+`pct_acquired` is documented "Null if 100% or unstated", so its null is ambiguous by
+construction; the §2.6 resolver's assumed 100 fires on every silent control acquisition;
+`stake_transition_type` is populated only on explicit ownership evidence and is sparse;
+`offer_mechanism` is `TENDER_OFFER | null` and most take-privates are one-step mergers;
+`target_status` is pre-transaction with no post-transaction counterpart. The HC prompt's own
+worked public take-private (Example 2) emits none of them — any rule built from current
+primitives would have scored the reference example negative.
 
-This is a live V3-derived concept with no supersession: casing is the whole defect, and repairing
-the comparison repairs the field. **Scheduled as the next bounded remediation after this
-documentation checkpoint lands.**
+**What shipped.** Three required conditions: public standalone target; a qualifying
+private-ownership buyer (`private_equity`, `pe_portfolio`, `management`, `employee_group`,
+`other_financial_sponsor`); and the affirmative extracted `is_going_private_outcome`
+(`true | null`, never persisted as 0). The ticker guard is gone. Migration `010`, HC 0.24.
 
-**Requirement for its regression:** it must exercise production-normalized **lowercase** values
-through the real path — not call `_derive_flags()` with synthetic uppercase, which is precisely
-how the existing test came to certify a broken field.
+**Note on the regression.** The earlier version of `scripts/test_take_private_derivation.py`
+**certified the behaviour Product later ruled wrong** — it asserted
+`private_strategic_take_private = 1` and `public_acquirer_blocks_flag = 0` — and would have
+blocked the fix. Both are now inverted. Six of seven decisive cases fail against the
+pre-change derivation, in both directions.
 
-### `is_add_on` is not part of that fix
-
-`is_add_on` shows the same uppercase comparison — `int(acquirer_type == "PE_PORTFOLIO")`, which is
-also always 0 — but it is **a superseded field awaiting retirement of authorship, not an executable
-defect awaiting a casing fix.**
-
-- **§T7** supersedes the `is_platform_investment` / `is_add_on` pair with
-  `sponsor_transaction_role` (`PLATFORM` / `ADD_ON` / null), and records that *"the V2 derivation
-  `is_add_on := acquirer_type == PE_PORTFOLIO` is not carried forward."*
-- **§T8** removes `PE_PORTFOLIO` from the acquirer vocabulary entirely — a portfolio company
-  retains its underlying entity type, so `PE_PORTFOLIO` is not an entity type at all.
-
-**Do not repair the casing here.** Doing so would revive a derivation V3 intentionally retires,
-using an input V3 removes. The historical column is **kept for now** under the standing
-retained-column rule, and **new authorship stops as part of implementing
-`sponsor_transaction_role`** — not as a casing repair, and not before that work.
-
----
+**Consortium.** `consortium` is not a qualifying buyer type, and it is not a V3 acquirer
+type at all: the target model represents the actual participating firms and investors with
+their roles, including the lead where the source establishes one. The `consortium` value and
+the synthetic `CONSORTIUM` group in the prototype implementation are residue retired under
+`ENG-V3-008`. A multi-buyer PE transaction is evaluated from its actual buyers and ownership
+structure.
 
 ## 8. Deliberate legacy compatibility — do not "clean up"
 
