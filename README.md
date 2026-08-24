@@ -38,7 +38,7 @@ Authoritative current-state docs, in freshness order:
 | Extraction / classification / summarization stages (14 + funding branch) | Implemented |
 | Anthropic + OpenAI providers, per-stage model tiering | Implemented |
 | SQLite schema (migrations 001–003) | Implemented |
-| Funding path (VC / growth / venture debt) | Implemented; `funding_lc_extract` stage still pending |
+| Funding path (VC / growth / venture debt) | Implemented — Funding HC (Stage 4b) plus the shared deal-type-agnostic Stage 7 LC, which runs on funding rows. There is no separate Funding LC stage and none is required |
 | Two-tier value model | Design + §4.1/§4.2/§4.7 code landed; canonical `implied_enterprise_value` rewire implemented; first §4.2 re-aggregation discharged on live DBs; second re-aggregation owed after broader `total_debt` + `Cash_ST` extraction |
 
 ---

@@ -3,6 +3,11 @@
 **Last commit:** `52c4e94` Add Grata V2 inventory and data dictionary
 **Branch:** `main`
 
+> ## ⏳ **DATED SNAPSHOT — 2026-08-14. Do not read as current state.**
+> Everything below is the project as it stood on that date and has not been refreshed
+> since. The prompt versions listed here in particular are superseded; the live table is
+> `docs/prompt_versions.md`. Individual statements corrected in place are marked inline.
+
 ---
 
 ## Current Checkpoint: Transaction Value Model + Minority Cleanup
@@ -79,7 +84,7 @@ Current versions:
 - `deal_type_classifier` 0.7 (minority-as-flag routing; no core `MINORITY_INVESTMENT`)
 - `high_confidence_extraction` 0.14 (0.14: nullable explicit `stake_transition_type`)
 - `funding_hc_extraction` 0.1 (NEW)
-- `funding_lc_extraction` 0.1 (NEW — stage code not yet written)
+- `funding_lc_extraction` 0.1 (NEW — **never became an executable contract; see the correction below**)
 - `low_confidence_extraction` 0.5
 - `aggregation` 0.4
 - `deal_summary` 0.9
@@ -334,7 +339,11 @@ for releases that name the structure; it did not close it for releases that only
 structure.
 
 **Funding path (partial):**
-- `stages/funding_lc_extract.py` — not written; prompt exists
+- ~~`stages/funding_lc_extract.py` — not written; prompt exists~~ — **corrected 2026-08-24.**
+  This was never a pending stage. `docs/funding_path_design.md` §4 routes funding events
+  through the existing Stage 7 LC (*"unchanged; deal-type-agnostic"*) and introduces Funding
+  HC as the only funding-specific stage. The draft prompt is retained at
+  `docs/historical_funding_lc_extraction_prompt.md`; no Funding LC stage is required.
 - `adapters/sec_api.py` Form D extension — deferred
 - `deal_summary` funding framing — deferred to v0.10
 
@@ -463,8 +472,9 @@ on 2026-08-17 (`docs/runbook_second_reaggregation.md` §8). Path B re-extraction
 deliberately deferred until a naturally occurring or manually collected debt/cash case
 exists.
 
-Still open, lower priority: write `stages/funding_lc_extract.py`; `deal_summary` v0.10
-funding framing.
+Still open, lower priority: `deal_summary` v0.10 funding framing. (~~write
+`stages/funding_lc_extract.py`~~ — **corrected 2026-08-24**: not a pending stage, and not
+required. See the funding-path correction above.)
 
 _(The former "apply `AGGREGATION_READ_SOURCE=observation` after a validation run" item
 is discharged — the default switched on 2026-08-17. Note this changed the default only;

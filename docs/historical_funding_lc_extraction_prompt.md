@@ -1,7 +1,42 @@
-# Funding Low-Confidence Extraction Prompt
+# Funding Low-Confidence Extraction Prompt — HISTORICAL DRAFT
 
-**Version:** 0.2 (provenance is caller-owned)
-**Repo path:** `prompts/funding_lc_extraction.md`
+> ## 🗄️ **HISTORICAL — never executable. Not a prompt contract.**
+> **The drafted Funding LC prompt never became an executable contract. The implemented
+> funding path uses specialized Funding HC plus the shared deal-type-agnostic LC stage.
+> Subsequent Product reconciliation confirms that no separate Funding LC stage is
+> required.**
+>
+> This file was moved out of `prompts/` so it cannot be mistaken for a live prompt. It is
+> not loadable: `load_prompt_file()` reads `prompts/<name>.md`, and no file by this name
+> exists there. Nothing here describes current collection behaviour, and none of it should
+> be read as a field contract.
+
+**Why it never shipped.** `docs/funding_path_design.md` §4 specifies the funding stage map,
+and it routes funding events through the **existing** Stage 7 LC extractor —
+*"Stage 7: lc_extract — unchanged; deal-type-agnostic"*. Funding HC (Stage 4b) is the only
+funding-specific stage the design introduces. This draft, that design, `schema/003_funding_path.sql`
+and `stages/funding_hc_extract.py` all landed in the same commit (`97fe6b1`, 2026-08-07);
+the design simply never called for a stage to load this file. The repository recorded the
+absence as "stage code not yet written", which read as an unfinished task rather than the
+design outcome it was.
+
+**Where its fields actually live.** A 2026-08-24 Product reconciliation traced every field
+below to a current owner:
+
+| Drafted here | Actual owner |
+| --- | --- |
+| `advisors` | Stage 7 LC, which runs on funding rows. Its current contract — specialty, advised party name, advised side — supersedes the `type` / `advised_party` pair drafted below |
+| `regulatory_approvals_required` | Stage 7 LC |
+| `pct_acquired` | Funding HC (Stage 4b), from `funding_hc_extraction` 0.4 |
+| `use_of_proceeds` | **No current collection requirement; no owner assigned in this implementation.** Not added to Funding HC, and no collection path is being asked for. The existing nullable staging and canonical columns can stay as they are |
+| `has_board_seat`, `board_seat_notes` | Not a funding scalar. Board representation is a participant/person relationship and belongs to the participant model |
+
+**The historical draft body follows unchanged from here.**
+
+---
+
+**Version:** 0.2 (provenance is caller-owned) — historical draft version, never executed
+**Original repo path:** `prompts/funding_lc_extraction.md` (removed)
 
 ---
 

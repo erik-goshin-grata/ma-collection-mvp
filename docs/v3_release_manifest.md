@@ -79,16 +79,21 @@ this package is silent on reasoning, they are the record.
 | Prompt | Version | Prompt | Version |
 | --- | --- | --- | --- |
 | `relevancy_filter` | 0.8 | `deal_summary` | 0.16 |
-| `deal_type_classifier` | 0.13 | `strategic_rationale` | 0.6 |
+| `deal_type_classifier` | 0.14 | `strategic_rationale` | 0.6 |
 | `high_confidence_extraction` | 0.24 | `agreement_recitals` | 0.3 |
-| `funding_hc_extraction` | 0.3 | `agreement_consideration` | 0.2 |
-| `low_confidence_extraction` | 0.10 | `agreement_capitalization` | 0.2 |
-| `funding_lc_extraction` | 0.2 | `agreement_termination` | 0.2 |
-| `aggregation` | 0.6 | `agreement_conditions` | 0.2 |
+| `funding_hc_extraction` | 0.4 | `agreement_consideration` | 0.2 |
+| `low_confidence_extraction` | 0.11 | `agreement_capitalization` | 0.2 |
+| `aggregation` | 0.6 | `agreement_termination` | 0.2 |
+| | | `agreement_conditions` | 0.2 |
 
 `prompts/prompt_conventions.md` 0.5 is a convention document, not a delivered prompt.
 Each stage's `_VERSION` constant matches its prompt; parity is asserted by
 `scripts/test_prompt_stage_version_parity.py`.
+
+The drafted Funding LC prompt never became an executable contract and is **not** part of
+this inventory. The funding path uses specialized Funding HC plus the shared
+deal-type-agnostic LC stage; no separate Funding LC stage is required. The draft is
+retained at `docs/historical_funding_lc_extraction_prompt.md`.
 
 ## MVP reference — schema / migration baseline
 

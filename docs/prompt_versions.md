@@ -1,6 +1,6 @@
 # Prompt Versions
 
-**Product Contract:** Transactions V3 — `V3-PC-1.0` · **Reconciled:** 2026-08-22
+**Product Contract:** Transactions V3 — `V3-PC-1.0` · **Reconciled:** 2026-08-24
 
 Single-page view across all pipeline prompts. Each prompt maintains its own versioning table
 and few-shot history internally; this doc tracks the cross-prompt state at a glance.
@@ -23,11 +23,11 @@ by `scripts/test_prompt_stage_version_parity.py`.
 | Prompt | File | Current Version | Stage `_VERSION` | Last Changed | Notes |
 |---|---|---|---|---|---|
 | Relevancy Filter | `prompts/relevancy_filter.md` | **0.8** | 0.8 | 2026-08-21 | 0.8: the authoritative 24-code `reason_code` vocabulary is delivered **inside the §4 system prompt** — it previously lived outside the delivered fences and the model never saw it (S-H). Reason codes are a separate vocabulary from `v2_event_type` |
-| Deal Type Classifier | `prompts/deal_type_classifier.md` | **0.13** | 0.13 | 2026-08-21 | §T1/§T2/§T3. 0.11: transaction form alone does not determine `target_type`. 0.10: `spinco` removed. 0.9: merger family → `combination_structure`. 0.8: `PIPE` recognized-not-profiled (see `ENG-V3-018`) |
+| Deal Type Classifier | `prompts/deal_type_classifier.md` | **0.14** | 0.14 | 2026-08-22 | 0.14: the classifier no longer authors `deal_type` — one model-authored event classification, not two. §T1/§T2/§T3. 0.11: transaction form alone does not determine `target_type`. 0.10: `spinco` removed. 0.9: merger family → `combination_structure`. 0.8: `PIPE` recognized-not-profiled (see `ENG-V3-018`) |
 | High Confidence Extraction | `prompts/high_confidence_extraction.md` | **0.24** | 0.24 | 2026-08-22 | 0.24: `is_going_private_outcome` added to `features` (`ENG-V3-020`). 0.21: `sponsor_transaction_role` (§T7). 0.20: `offer_mechanism` (§T12). 0.19: `asset_type` (§T13). 0.18: `EQUITY_VALUE` is stake-level only |
 | Funding HC Extraction | `prompts/funding_hc_extraction.md` | **0.4** | 0.4 | 2026-08-24 | 0.4: `pct_acquired` — stated or null, never inferred from control framing. §T14 / §A6.3 round, stage and price-direction semantics |
-| Low Confidence Extraction | `prompts/low_confidence_extraction.md` | **0.10** | 0.10 | 2026-08-21 | §T11 attitude/approach split; typed contingent consideration (S-F) |
-| Funding LC Extraction | `prompts/funding_lc_extraction.md` | **0.2** | — | 2026-08-21 | |
+| Low Confidence Extraction | `prompts/low_confidence_extraction.md` | **0.11** | 0.11 | 2026-08-22 | 0.11: advisor participation carries a specialty and the specific advised participant, replacing the compressed type/side pair. Runs on funding rows as well as M&A — it is deal-type-agnostic. §T11 attitude/approach split; typed contingent consideration (S-F) |
+| ~~Funding LC Extraction~~ | `docs/historical_funding_lc_extraction_prompt.md` | — | — | 2026-08-24 | **HISTORICAL — never an executable contract.** The drafted Funding LC prompt never became an executable contract. The implemented funding path uses specialized Funding HC plus the shared deal-type-agnostic LC stage. Subsequent Product reconciliation confirms that no separate Funding LC stage is required. Moved out of `prompts/` so it cannot be mistaken for a live prompt |
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | **0.6** | 0.6 | 2026-08-21 | Resolver vocabulary aligned to the values it actually resolves |
 | Deal Summary | `prompts/deal_summary.md` | **0.16** | 0.16 | 2026-08-22 | 0.16: canonical funding fields reach the summary; non-disclosure language requires an affirmative signal (`ENG-V3-021`). 0.13: `sponsor_transaction_role`. 0.12: attitude/approach replace `hostile` |
 | Strategic Rationale | `prompts/strategic_rationale.md` | **0.6** | 0.6 | 2026-08-21 | Three structure-derived defaults remain live — **tabled**, see §R7+§R9+§S2.1 and `ENG-V3-006` |
@@ -111,14 +111,17 @@ These are tracked in `pipeline_prompt_todo.md` Phase 3 (Schema / Pipeline Change
 
 ## Pending Work
 
-**Funding path (new workstream — see `docs/funding_path_design.md`):**
-- `funding_hc_extraction` v0.1 — written, not yet in pipeline
-- `stages/funding_hc_extract.py` — not yet written
-- `run.py` branch on `v2_event_type` for funding routing — not yet implemented
-- `schema/003_funding_path.sql` — not yet written
-- `adapters/sec_api.py` Form D extension — not yet implemented
-- `prompts/deal_summary.md` v0.10 — funding framing block needed
-- VC/funding event types in classifier (`VC_ROUND`, `GROWTH_EQUITY`, `VENTURE_DEBT`) — pending funding path design
+**Funding path (see `docs/funding_path_design.md`).** Corrected 2026-08-24 — this block
+described the workstream as unstarted long after it shipped:
+- ~~`funding_hc_extraction` v0.1 — written, not yet in pipeline~~ — **shipped.** Now 0.4 and loaded by Stage 4b
+- ~~`stages/funding_hc_extract.py` — not yet written~~ — **shipped**
+- ~~`run.py` branch on `v2_event_type` for funding routing — not yet implemented~~ — **shipped** (Stage 4b in the stage list)
+- ~~`schema/003_funding_path.sql` — not yet written~~ — **shipped**
+- ~~`prompts/deal_summary.md` v0.10 — funding framing block needed~~ — **shipped**; the funding block is in `deal_summary` 0.16
+- ~~VC/funding event types in classifier~~ — **shipped**; `VC_ROUND`, `GROWTH_EQUITY` and `VENTURE_DEBT` are in the delivered classifier vocabulary
+- `adapters/sec_api.py` Form D extension — **still not implemented**
+- There is **no** pending Funding LC stage. The funding path is Funding HC plus the shared
+  deal-type-agnostic Stage 7 LC, which runs on funding rows
 - Multi-party array output from HC extraction — pending `transaction_party` schema finalization
 - `transaction_participant` → `transaction_party` rename in pipeline
 - `financial_metric` table as write target for deal values

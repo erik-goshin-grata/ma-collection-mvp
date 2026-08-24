@@ -25,10 +25,12 @@ WHY IT CHECKS BOTH DIRECTIONS
 A one-directional test (walk the stages, check their prompts) silently skips any prompt
 no stage claims — which is how an orphaned prompt file stays orphaned. So this walks
 both sides and additionally asserts that every declared orphan is *still* an orphan:
-if a stage later starts loading `funding_lc_extraction`, the allowlist entry becomes
-stale and the test fails until it is removed. The allowlist cannot quietly become a
-permanent escape hatch, because carrying an entry that no longer applies is itself a
-failure.
+if a stage later starts loading an allowlisted prompt, or that prompt file is removed,
+the entry becomes stale and the test fails until it is removed. The allowlist cannot
+quietly become a permanent escape hatch, because carrying an entry that no longer applies
+is itself a failure. `funding_lc_extraction` was carried here until 2026-08-24, when the
+draft was moved to `docs/historical_funding_lc_extraction_prompt.md`: it was never an
+executable contract, and the funding path uses Funding HC plus the shared Stage 7 LC.
 
 TWO STAGE PATTERNS
 ------------------
@@ -58,10 +60,6 @@ ALLOWED_ORPHANS = {
     "prompt_conventions": (
         "Shared authoring conventions, not a callable prompt — it has no System Prompt "
         "or User Prompt Template section for load_prompt_file() to read."
-    ),
-    "funding_lc_extraction": (
-        "Written 2026-07-28; the stage that would load it has never been built. "
-        "Recorded as 'stage code not yet written' in docs/project_state.md."
     ),
 }
 

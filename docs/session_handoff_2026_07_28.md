@@ -1,5 +1,15 @@
 # Session Handoff — 2026-07-28
 
+> ## 🗄️ **HISTORICAL RECORD — 2026-07-28. Body preserved unchanged.**
+> A dated session handoff, retained as written. **Do not read as current state.**
+> One statement in it has since been superseded and is recorded here rather than edited
+> into the body: the "stage code not written" entries for `stages/funding_lc_extract.py`
+> did not describe a pending task. The drafted Funding LC prompt never became an executable
+> contract; the implemented funding path uses specialized Funding HC plus the shared
+> deal-type-agnostic LC stage, and Product reconciliation on 2026-08-24 confirmed that no
+> separate Funding LC stage is required. The draft is retained at
+> `docs/historical_funding_lc_extraction_prompt.md`.
+
 **Repo:** `erik-goshin-grata/ma-collection-mvp`
 **Last commit:** `2f05aa6` — run: add funding_hc_extract (Stage 4b) to extraction pipeline routing
 **DB:** `data/ma_mvp.db` — migrations 001, 002, 003 all applied

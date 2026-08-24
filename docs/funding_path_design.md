@@ -11,10 +11,14 @@
 >
 > This is the **2026-07-28 design draft**, preserved as written. The header above still
 > says *"Status: Design — not yet implemented"*; **that is no longer true.** The funding
-> path shipped — `stages/funding_hc_extract.py`, `prompts/funding_hc_extraction.md`,
-> `prompts/funding_lc_extraction.md`, and the `staging_investor` table
-> (`schema/003_funding_path.sql`) all exist and run. Read the header status line as
-> historical.
+> path shipped — `stages/funding_hc_extract.py`, `prompts/funding_hc_extraction.md`, and
+> the `staging_investor` table (`schema/003_funding_path.sql`) all exist and run. Read the
+> header status line as historical.
+>
+> The drafted `funding_lc_extraction` prompt is the one artifact here that never ran. §4 of
+> this document is the reason: it routes funding events through the **existing** Stage 7 LC
+> (*"unchanged; deal-type-agnostic"*) and introduces Funding HC as the only funding-specific
+> stage. The draft is retained at `docs/historical_funding_lc_extraction_prompt.md`.
 >
 > Two further items in this document are superseded and are **not** open questions:
 >

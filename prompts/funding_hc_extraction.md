@@ -844,9 +844,6 @@ Output:
       },
       "investors": [{"name": "Calder Ventures", "investor_type": "VENTURE_CAPITAL", "is_lead": true}],
       "dates": {"announced_date": "2026-05-04", "announced_date_precision": "exact"},
-      "use_of_proceeds": null,
-      "has_board_seat": null,
-      "board_seat_notes": null,
       "pct_acquired": null,
       "model_confidence": "HIGH",
       "notes": "round_price_direction DOWN on the source's own statement that the round was completed below the prior Series B. The post-money figure alone would not have licensed that; only the stated comparison does."

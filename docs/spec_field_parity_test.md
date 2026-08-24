@@ -82,7 +82,8 @@ Every field the extraction prompts declare in their output schema has a correspo
 output is declared by some prompt.
 
 Covers `high_confidence_extraction`, `low_confidence_extraction`, `funding_hc_extraction`,
-`funding_lc_extraction`, `deal_type_classifier`.
+`deal_type_classifier`. (`funding_lc_extraction` was listed here until 2026-08-24; it never
+became an executable contract and declares no fields to check.)
 
 **Rationale:** this is the failure mode `handoff_hc_value_capture.md` is guarding against — a
 prompt instructed to record a value into a field that has no home. Also catches the reverse: a
