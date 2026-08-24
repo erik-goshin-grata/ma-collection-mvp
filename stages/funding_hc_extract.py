@@ -27,7 +27,7 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 from lib.observation_writer import write_staging_observations_for_extraction
 
 _PROMPT_NAME = "funding_hc_extraction"
-_VERSION = "0.3"
+_VERSION = "0.4"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
@@ -78,6 +78,76 @@ def _validate(result: dict) -> str | None:
 
 def _fmt(val) -> str:
     return str(val) if val is not None else ""
+
+
+# A leading approximation word in front of ONE number is hedging language, not a
+# second value: "approximately 65%" states 65. The prompt itself tells the model that
+# "approximately 65%" and "roughly 65%" are stated, so the parser must accept what the
+# contract invites. Closed set -- anything not listed here is not stripped.
+_PCT_APPROX_PREFIXES = (
+    "approximately", "approx.", "approx", "about", "roughly", "circa", "~",
+)
+
+# A bound or a range is NOT a stated value: "at least 65%" and "30-40%" each leave the
+# actual percentage unknown, and silently taking the endpoint would invent precision the
+# source never gave. Checked before the approximation strip, so "about 30-40%" clears.
+_PCT_REJECT_MARKERS = (
+    "-", "\u2013", "\u2014", "+", " to ", "between", "at least", "at most", "no less",
+    "no more", "more than", "less than", "greater than", "up to", "over ", "under ",
+    "above", "below", "minimum", "maximum", "or more", "or less",
+)
+
+
+def _clean_pct(raw, log, eid: int) -> float | None:
+    """Normalize an explicitly stated ownership percentage, or clear it.
+
+    Normalization only, never inference. A plain number, a simple percentage
+    string ("65%", "65.0 %"), or one number behind an approximation word
+    ("approximately 65%", "approx. 65%", "about 65%") all become 65.0 -- each
+    states a single value and the wording is hedging, not a second number.
+
+    Cleared with a warning: ranges and bounds ("30-40%", "at least 65%", "up to
+    65%"), zero, negative, above 100, empty strings, and any other non-numeric
+    text including bare control language such as "majority".
+
+    Clearing, not rejecting. `_validate` failure marks the whole extraction
+    PROMPT_FAILED, and discarding an entire funding row over one malformed
+    optional percentage is out of proportion to the fact lost. This follows the
+    advisor precedent: an unusable value clears its own field and the rest of
+    the extraction stands.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):                      # bool is an int subclass; not a percentage
+        log.warning("extraction_id=%d clearing non-numeric pct_acquired: %r", eid, raw)
+        return None
+    if isinstance(raw, str):
+        text = raw.strip().rstrip("%").strip().lower()
+        if any(marker in text for marker in _PCT_REJECT_MARKERS):
+            log.warning("extraction_id=%d clearing bounded or ranged pct_acquired: %r",
+                        eid, raw)
+            return None
+        for prefix in _PCT_APPROX_PREFIXES:        # longest-first; see the tuple order
+            if text.startswith(prefix):
+                text = text[len(prefix):].strip()
+                break
+        try:
+            value = float(text)
+        except ValueError:
+            log.warning("extraction_id=%d clearing unparseable pct_acquired: %r", eid, raw)
+            return None
+    elif isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        log.warning("extraction_id=%d clearing non-numeric pct_acquired: %r", eid, raw)
+        return None
+
+    # 0 is not a stake and 100+ is either a whole-company buy the source should have
+    # stated differently or a parse error. Both clear rather than propagate.
+    if not (0.0 < value <= 100.0):
+        log.warning("extraction_id=%d clearing out-of-range pct_acquired: %r", eid, raw)
+        return None
+    return value
 
 
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
@@ -201,6 +271,11 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             if hc_notes:
                 nd["hc"] = hc_notes
 
+            # One cleaned value for both write paths below. The INSERT path builds its
+            # own tuple by design (bug #6), so a value computed inline in round_params
+            # would silently never reach a multi-transaction row.
+            pct_acquired = _clean_pct(txn.get("pct_acquired"), log, eid)
+
             round_params = (
                 co.get("name"), co.get("domain"), co.get("ticker"),
                 co.get("description"),
@@ -222,6 +297,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 dt.get("closed_date_precision"),
                 txn.get("financials_disclosure_status"),
                 txn.get("consideration_type"),
+                pct_acquired,
                 txn.get("model_confidence"),
                 _VERSION,
                 json.dumps(nd) if nd else None,
@@ -257,6 +333,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         closed_date_precision = ?,
                         financials_disclosure_status = ?,
                         consideration_type = COALESCE(consideration_type, ?),
+                        pct_acquired = ?,
                         model_confidence = ?,
                         hc_prompt_version = ?,
                         notes = ?,
@@ -282,16 +359,16 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         is_extension_round, round_price_direction, is_bridge_round,
                         announced_date, announced_date_precision,
                         closed_date, closed_date_precision,
-                        financials_disclosure_status, consideration_type,
+                        financials_disclosure_status, consideration_type, pct_acquired,
                         model_confidence, hc_prompt_version, notes,
                         dt_prompt_version,
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
-                    # Explicit param tuple matching the 35-column list above.
+                    # Explicit param tuple matching the 36-column list above.
                     # (Do NOT reuse round_params here — that tuple is shaped for the
                     # i==0 UPDATE SET clause and carries extra fields, causing a
                     # binding crash on multi-transaction funding sources. bug #6)
@@ -309,6 +386,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         dt.get("announced_date"), dt.get("announced_date_precision"),
                         dt.get("closed_date"), dt.get("closed_date_precision"),
                         txn.get("financials_disclosure_status"), txn.get("consideration_type"),
+                        pct_acquired,
                         txn.get("model_confidence"), _VERSION,
                         json.dumps(nd) if nd else None,
                         row["dt_prompt_version"], i, multi_total,

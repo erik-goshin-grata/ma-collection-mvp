@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.3 (provenance is caller-owned)
+**Version:** 0.4 (adds `pct_acquired`)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -189,6 +189,26 @@ For funding events, consideration_type captures the security issued:
 - warrant — warrant-only instrument
 - null — not determinable
 
+PCT ACQUIRED
+
+pct_acquired: The ownership or stake percentage acquired by the investor(s),
+ONLY when the source explicitly states it. Number only (e.g. 65.0 for 65%).
+Null when not stated.
+
+This is the single most commonly over-extracted field on the funding path.
+It is a stated number or it is nothing:
+- Do NOT infer a percentage from "majority investment", "majority stake",
+  "control investment", "acquired control", or any similar framing. Those
+  establish that a stake is large; they do not state its size.
+- Do NOT infer a percentage from the transaction being described as an
+  acquisition or a buyout.
+- Do NOT compute it from round size and valuation, or from any two other
+  numbers. A computed percentage is not a stated percentage.
+- Do NOT round an unstated percentage to 100. A financing that transfers the
+  whole company is still null here unless the source says the number.
+- "approximately 65%", "roughly 65%" and "a 65% stake" ARE stated. Use 65.0.
+- A stated range ("between 30% and 40%") is not a single stated value. Null.
+
 MULTI-INVESTMENT SOURCES
 
 When a single source directly announces multiple investments in the same
@@ -270,6 +290,7 @@ code fences, no preamble.
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
+      "pct_acquired": null,
       "model_confidence": "HIGH",
       "notes": null
     }
@@ -346,6 +367,7 @@ Extract all funding transactions from this source.
       },
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "equity | safe | convertible_note | debt | warrant | null",
+      "pct_acquired": "number | null",
       "model_confidence": "HIGH | MEDIUM | LOW",
       "notes": "string | null"
     }
@@ -442,6 +464,7 @@ Output:
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
+      "pct_acquired": null,
       "model_confidence": "HIGH",
       "notes": null
     }
@@ -513,8 +536,9 @@ Output:
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
+      "pct_acquired": 65.0,
       "model_confidence": "HIGH",
-      "notes": "pct_acquired stated as approximately 65%; pre-money valuation stated explicitly. Goldman Sachs advisor captured by LC extraction."
+      "notes": "Pre-money valuation stated explicitly. Goldman Sachs advisor captured by LC extraction."
     }
   ]
 }
@@ -581,6 +605,7 @@ Output:
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "debt",
+      "pct_acquired": null,
       "model_confidence": "HIGH",
       "notes": "facility_size populated; round.size null (debt facility, not equity round size)."
     }
@@ -637,6 +662,7 @@ Output:
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
+      "pct_acquired": null,
       "model_confidence": "MEDIUM",
       "notes": "Portfolio page — date precision month only; investor name (Acme Ventures) inferred as source but not named as investor in the text."
     },
@@ -669,6 +695,7 @@ Output:
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
+      "pct_acquired": null,
       "model_confidence": "MEDIUM",
       "notes": "Portfolio page — date precision month only."
     },
@@ -701,6 +728,7 @@ Output:
       },
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
+      "pct_acquired": null,
       "model_confidence": "MEDIUM",
       "notes": "Portfolio page — date precision month only."
     }
@@ -769,6 +797,7 @@ Output:
       },
       "financials_disclosure_status": "UNDISCLOSED",
       "consideration_type": "safe",
+      "pct_acquired": null,
       "model_confidence": "HIGH",
       "notes": "YC typically invests via SAFE; consideration_type inferred from investor type and pre-seed stage. Amount explicitly undisclosed."
     }
@@ -818,6 +847,7 @@ Output:
       "use_of_proceeds": null,
       "has_board_seat": null,
       "board_seat_notes": null,
+      "pct_acquired": null,
       "model_confidence": "HIGH",
       "notes": "round_price_direction DOWN on the source's own statement that the round was completed below the prior Series B. The post-money figure alone would not have licensed that; only the stated comparison does."
     }
@@ -840,6 +870,8 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | Empty transactions array | Parser marks `PROMPT_FAILED` |
 | Model puts portfolio page source investor as investor in all transactions | Prompt explicitly says do not infer investor from source name |
 | Model computes pre-money from round size and ownership % | Prompt explicitly forbids; QA monitors |
+| Model infers `pct_acquired` from "majority investment" or control framing | Prompt states the anti-inference rules explicitly and Example 2 shows a stated figure; a stated number or null |
+| Model returns `pct_acquired` as `"65%"`, `0`, `>100`, or a range | Parser clears the field with a warning and keeps the extraction; a bad optional percentage never fails the row |
 | Model returns single transaction for a multi-investment portfolio page | Few-shot Example 4 addresses; parser checks array length vs source signals |
 | Model conflates facility_size and round.size for VENTURE_DEBT | Example 3 addresses; notes field captures |
 | Model returns SAFE for all pre-seed rounds regardless of source language | Example 5 note flags that this is an inference; monitor via QA |
@@ -854,3 +886,4 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | 0.1 | 2026-07-28 | Initial version — VC_ROUND, GROWTH_EQUITY, VENTURE_DEBT extraction. Multi-investment source support. Sparse source handling. Five examples covering PR release, growth equity, venture debt, portfolio page, SAFE/undisclosed. |
 | 0.2 | 2026-08-20 | **`round_price_direction` replaces `is_down_round` (V3 §A6.3 / §T14).** `UP` | `DOWN` | `FLAT` | null. The boolean could only ever record DOWN — `is_up_round` never existed anywhere in the codebase — so `is_down_round = 0` fused *up*, *flat* and *unknown* into one bit. All three values now have extraction vocabulary, and **null stays distinct from `FLAT`**: "not stated" and "unchanged" are different facts. The existing anti-inference rule is preserved and widened — two disclosed valuations do not license a comparison unless the source makes it. Example 6 added for an explicitly stated down round. Canonical `round` and `vc_stage` are **not** prompt fields: they are deterministic normalizations of `round_label`, which is unchanged and still verbatim. |
 | 0.3 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.4 | 2026-08-24 | **`pct_acquired` added to the funding contract.** The funding path had no author for it: Stage 4 excludes funding event types and Stage 4b never asked, so an explicitly stated stake — routine in growth equity — was lost even though the staging column, the observation group and the canonical column all already carried it. The field is **stated or null**: majority/control framing, acquisition framing, and any computation from round size and valuation are all explicitly forbidden, and an unstated percentage is never rounded to 100. Example 2 already described a stated 65% in prose because the response had nowhere to put it; it now carries the value. |
