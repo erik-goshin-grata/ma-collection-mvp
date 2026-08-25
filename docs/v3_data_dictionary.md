@@ -50,7 +50,7 @@ transaction occurred. Merger, reverse merger and de-SPAC left that vocabulary an
 can be an acquisition *and* be effected as a merger; the old model made you choose.
 
 **2. Separate what happened from what has happened since.** A transaction accumulates
-lifecycle events — rumored, announced, amended, closed. Those are repeating event-history
+lifecycle events — rumored, announced, amended, closed, terminated. Those are repeating event-history
 rows, not a single status field. Grata already models it this way and the target keeps it. This
 document calls the classifying attribute **event history type** to keep it distinct from
 `event_type`; Grata's existing child column is named `type`, and nothing here asks for it to be
@@ -101,13 +101,14 @@ negative.
 > **Changed** `event_type` vocabulary · `is_take_private` becomes derived · sponsor flags collapse to one dimension
 > **Removed** `event_category` · `is_divestiture` · `is_de_spac` · four recap flags ·
 > `is_mbo` / `is_mbi` · `is_stock_for_stock`
-> **Derived** `is_take_private` · `has_earnout` · `has_cvr` · `consideration_type`
+> **Derived** `is_take_private` · `has_earnout` · `has_cvr` · `consideration_type` ·
+> current transaction status · headline lifecycle dates, from Event History
 
 | Field / Concept | Action | Current Grata | Definition | Type / Values | Population | Applicability / Null | Replaces / Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `transaction_id` | KEEP | Exists | Canonical transaction identifier | ID | System | | |
 | `event_type` | CHANGE | Exists | What transaction occurred | ENUM — ACQUISITION · JOINT_VENTURE · VC_ROUND · GROWTH_EQUITY · VENTURE_DEBT · SPIN_OFF · SPLIT_OFF · RECAPITALIZATION | Collected | | The field survives; the vocabulary changes. Merger, reverse merger, de-SPAC and minority investment leave it |
-| **event history** | KEEP | **Child table** — event id, transaction, `type`, date, date precision | What has happened to this transaction over time | RELATIONSHIP — repeating rows | Collected | | A transaction may carry rumored, announced, amended and closed events. **Not a single status field**. Grata already models this correctly and the target keeps it |
+| **event history** | KEEP | **Child table** — event id, transaction, `type`, date, date precision | Repeating lifecycle history for the transaction. Each Event History record carries an event-history type, date, and date precision | RELATIONSHIP — repeating rows | Collected | | Lifecycle concepts include RUMORED · ANNOUNCED · AMENDED · CLOSED · TERMINATED. **Not a single status field.** Grata already models this correctly and the target keeps it |
 | `event_category` | REMOVE | Exists | — | — | — | | Broad families derive from `event_type`. A transaction should not have to choose between *M&A* and *divestiture* when it is both |
 | `combination_structure` | ADD | Missing | How an acquisition is legally effected | ENUM — MERGER · REVERSE_MERGER · DE_SPAC · null | Collected | Null when not established | Absorbs three retired event types and `is_de_spac`. Nested: de-SPAC is a reverse merger is a merger. Store the most specific; query broader questions by implication |
 | `is_de_spac` | REMOVE | Exists | — | — | — | | Rolls up from `combination_structure` |
@@ -135,10 +136,22 @@ negative.
 | `regulatory_approvals_required` | ADD | Not evidenced in Grata | Specific regulatory approvals are called out | FLAG | Collected | | |
 | `has_go_shop` · `go_shop_period_days` | ADD | Not evidenced in Grata | Go-shop provision and its duration | FLAG · NUMBER | Collected | Duration null when not stated | |
 | termination fees — target and acquirer, amount and percentage | ADD | Not evidenced in Grata | Termination fees by side | NUMBER | Collected | | |
-| `announced_date` · `closed_date` | **BASELINE TO CONFIRM** | Not evidenced in available artifacts | Announcement and completion dates, with stated precision | DATE + precision ENUM | Collected | | **Target requirement settled; Grata delta to confirm.** Dates also appear as event-history rows; the transaction-level values are the headline announcement and completion |
 | `linked_filings_count` | KEEP | Exists | Operational source linkage | NUMBER | System | | |
 | `has_cbi_data` | KEEP | Exists | Source-system metadata | FLAG | System | | Operational, not business semantics |
 | `platform_transaction_id` | **HOLD — baseline semantics to confirm** | Exists | — | — | — | | The field exists but available materials do not define its semantics. Not reinterpreted and not removed without a supported definition |
+
+**Event History is the underlying lifecycle record, and a transaction may have multiple
+lifecycle events.** Applications, Collection review tools and exports may expose convenient
+headline dates such as Announcement Date, Close Date, Rumor Date or Termination Date from the
+corresponding Event History records. These are **projections of Event History** rather than
+independently collected lifecycle facts, and there is no separate transaction-level
+announcement or completion field in the target model.
+
+**Collection tooling should expose Event History type, date and date precision for researcher
+review and correction.** Corrections should apply to the underlying Event History facts;
+dependent status and headline-date projections should update from those facts rather than
+requiring researchers to maintain both independently. This is a Product and tooling
+requirement, not a prescription of Engineering's physical implementation.
 
 ## 2. Parties & Participants
 
@@ -352,6 +365,19 @@ Mechanics.
 Everything below is computed from other canonical facts. None is ever asked of a source, and
 none may be authored alongside the facts it derives from. Where a derivation cannot be
 satisfied, the result is null or zero as stated — never a guess.
+
+## Current transaction status
+
+**A convenient current lifecycle-state representation, computed from Event History rather
+than extracted as an independent fact.** The intended status concepts are RUMORED ·
+ANNOUNCED · CLOSED · TERMINATED. `AMENDED` remains an Event History event; an amendment does
+not by itself create a separate current lifecycle state.
+
+Status follows the lifecycle history. It is never a competing source of truth, and it is
+never authored alongside the events it summarizes — if the two disagree, the Event History
+rows are right. No precedence or state-transition algorithm is fixed here beyond that; the
+Grata record names ANNOUNCED, CLOSED and TERMINATED as its primary current statuses, and the
+resolution rules are settled where the lifecycle model is, not in this document.
 
 ## `is_take_private`
 
