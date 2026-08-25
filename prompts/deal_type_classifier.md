@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.14 (one model-authored event classification)
+**Version:** 0.15 (target_type is structural, not transaction form)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -254,17 +254,26 @@ For all deal types that have a target, classify target_type:
 - business_unit — A division or operating segment of a Parent company, fully
   integrated and not a separate legal entity. Identifiable by language like
   "division," "business unit," "operating segment."
-- assets — A discrete set of assets, contracts, products, or operating rights
-  that does not constitute a separate operating subsidiary or business unit.
-  Use when the press release frames the deal as a sale of specific assets
-  rather than a going-concern unit. When in doubt between business_unit and
-  assets: if the target has employees, customers, and revenue as a unit, use
-  business_unit; if it's a discrete asset set being transferred, use assets.
+- assets — The transaction object itself is an asset or a collection of assets,
+  rather than a business. Examples: real estate or property, intellectual
+  property, a product line, contracts or operating rights, equipment, and
+  facilities. Choose this from what is being transacted, not from how the
+  release words the deal. An asset does not stop being an asset because it is
+  operating, tenanted, producing or income-generating when it changes hands.
+
+  When the target has employees, customers and revenue as a business, it is an
+  operating business, not an asset set — type it by its actual structure:
+  standalone_company if it is independent, business_unit or subsidiary if it is
+  part of a parent. Use assets only when a discrete asset or asset set is the
+  thing being transferred.
 
 Transaction form alone does not determine target type. Do not classify a transaction as
 `assets` solely because the source calls it an "asset purchase" or says the buyer acquired
 "the assets of" a company. Use the full source to determine whether the transaction is for
-a discrete asset or asset set (`assets`) or for an operating business (`business_unit`).
+a discrete asset or asset set (`assets`) or for an operating business. An operating
+business routes to its actual structure: `standalone_company` when it is independent,
+`business_unit` or `subsidiary` when it is part of a parent. A company does not become an
+asset set because the deal was papered as an asset purchase.
 Researcher review can resolve genuinely ambiguous cases.
 
 There is no `spinco` value. SPIN_OFF and SPLIT_OFF are recorded on v2_event_type; they
@@ -926,6 +935,56 @@ Output:
 }
 ```
 
+**Example 19 — Property sale (the transaction object is the asset):**
+
+Input:
+```
+TITLE: Greystar offloads Elan Yorktown apartments for $99M
+BODY: Greystar sold the 295-unit Elan Yorktown apartment complex in Lombard, Illinois to a venture of RPM Living and New York Life for $99 million, or about $335,000 per unit. The property was developed in 2018 and carried a $63.4 million mortgage...
+```
+
+Output:
+```json
+{
+  "v2_event_type": "ACQUISITION",
+  "combination_structure": null,
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "recap_type": null,
+  "target_type": "assets",
+  "event_history_type": "ANNOUNCED",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "The transaction object is a single apartment property, so target_type = assets. It is still assets even though the building is operating and tenanted — an operating asset is an asset. The downstream extraction assigns asset_type = REAL_ESTATE."
+}
+```
+
+**Example 20 — Assets of an independent operating company (mirror of Example 19):**
+
+Input:
+```
+TITLE: ePlus acquires assets of Daymark Solutions
+BODY: ePlus inc. (NASDAQ: PLUS) today announced the acquisition of assets of Daymark Solutions, a privately held IT solutions and professional services provider founded in 2001 and headquartered in Massachusetts. Daymark serves customers across healthcare, financial services and the public sector, and holds Microsoft Cloud Solution Provider status. "Joining the ePlus family," said Daymark's CEO, "lets our team..."
+```
+
+Output:
+```json
+{
+  "v2_event_type": "ACQUISITION",
+  "combination_structure": null,
+  "spin_split_type": null,
+  "distribution_mechanism": null,
+  "recap_type": null,
+  "target_type": "standalone_company",
+  "event_history_type": "ANNOUNCED",
+  "target_status": "PRIVATE",
+  "overrides_relevancy_hint": false,
+  "model_confidence": "HIGH",
+  "notes": "The source is titled \"acquisition of assets\" but describes an independent operating business throughout — founded 2001, its own customers, capabilities, partner status and CEO. A company does not become an asset set because the deal was papered as an asset purchase, so target_type = standalone_company and asset_type stays null. Contrast Example 19, where the transaction object really is the asset."
+}
+```
+
 ---
 
 ## 8. Failure Modes
@@ -962,3 +1021,4 @@ Output:
 | 0.12 | 2026-08-21 | **Active text brought onto the current lowercase vocabulary, and the failure-mode table corrected to describe the parser that exists.** IMPORTANT DISTINCTIONS instructed `target_type = BUSINESS_UNIT or SUBSIDIARY` and `acquirer_type = PRIVATE_EQUITY` while this same prompt declared uppercase target types no longer valid — one file asking for a value it forbids. Both are now lowercase, with `acquirer_type` marked as extracted downstream, since it is not an output of this prompt at all. `target_status = PUBLIC` is unchanged and correct: that vocabulary is genuinely uppercase. Separately, the failure-mode table claimed the parser **rejects** legacy uppercase `target_type`; it accepts it for rollout compatibility (`_VALID_LEGACY_TARGET_TYPES`) and normalizes it into `target_type_v2`, leaving the raw value on the legacy column that Stage 9 derivations read. The row now says so, and keeps the distinction that matters: **lowercase is valid current output, uppercase is tolerated legacy input and is not.** No parser change — the tolerance is deliberate, and `scripts/test_asset_type.py` now pins it behaviourally so ending it has to be an explicit decision. |
 | 0.13 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.14 | 2026-08-24 | **`deal_type` is no longer model-authored.** It was a transitional alias: the prompt itself instructed the model to "return the same value in both fields", so it carried no separate meaning and every consumer read `v2_event_type or deal_type`. Asking for it twice invited the two to disagree with nothing to arbitrate them. Removed from the delivered output template, from the output schema and from all worked examples; the delivered contract now states it must not be emitted. **Read compatibility is unchanged** — `_resolve_v2_event_type()` still accepts a stored `deal_type` (including the legacy `SPIN_SPLIT` normalization), and the stage still writes the `deal_type` column, falling back to the resolved `v2_event_type` exactly as it already did when the key was absent. No storage migration, and the physical `v2_event_type` → `event_type` rename is deliberately NOT bundled here. **`v2_event_type` remains MVP compatibility naming, not the target Product field name** — the target Product model calls this `event_type`; `event_history_type` carries lifecycle and `combination_structure` carries merger/reverse-merger/de-SPAC structure. Paired with a Stage 9 fix: the take-private derivation read the raw `deal_type` value directly while its sibling derivation used the resolved event-type helper, so removing the key without that fix would have silently broken the flag. |
+| 0.15 | 2026-08-25 | **`target_type` is structural, not transaction form.** A 30-deal acceptance run produced mirror failures from one clause. The `assets` gloss said to use it when the release "frames the deal as a sale of specific assets rather than a going-concern unit": the framing half selected `assets` for an acquisition of the assets of an independent IT services business, and the going-concern half pushed a 295-unit apartment property into `standalone_company` because it was sold operating. `assets` is now defined by the transaction object — real estate/property, IP, product lines, contracts/rights, equipment, facilities — and states that an asset does not stop being an asset because it is operating. 0.11's prohibition on selecting `assets` **solely** from "asset purchase" / "the assets of" wording is unchanged and keeps its load-bearing "solely"; what is repaired is its destination, which named only `business_unit` and so left an independent operating company with nowhere to go. The tie-breaker is widened for the same reason. No new values, no change to the four-value taxonomy, the spin/split rules, the parent_seller rule or `asset_type` subordination. Examples 19-20 added as a mirror pair (outside the delivered fence). |
