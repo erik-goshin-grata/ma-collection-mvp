@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.25 (buy-side coherence)
+**Version:** 0.26 (one fact, one value observation)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -437,6 +437,43 @@ EBITDA.
   identical. A "$210 million enterprise value" and "$210 million 2025 net
   sales" are different facts; the first belongs here and the second belongs in
   target_financials.revenue_amount.
+
+ONE ECONOMIC FACT, ONE OBSERVATION — CURRENCY REPRESENTATIONS
+
+A source may state the same economic value in more than one currency. Those are
+representations of ONE fact, not two facts. Emit ONE observation for it.
+
+- "EUR 850 million ($1 billion)" is one transaction value, not two.
+- A figure explicitly presented as an equivalent, conversion, translated amount,
+  or restatement in another currency — parentheses, "or about", "equivalent to",
+  "approximately X (approximately Y)" — is an ALTERNATE REPRESENTATION of the
+  fact you are already recording. It is not another structured observation.
+
+WHICH REPRESENTATION TO RETAIN:
+
+1. Retain the representation the source presents as the primary or headline
+   value for that fact, judged across the WHOLE source rather than one sentence.
+   A figure stated plainly and unqualified in a headline or summary line is
+   primary even if a later sentence restates it with a conversion in front.
+2. If the source does not clearly establish a primary representation, retain the
+   FIRST clearly stated representation of that fact.
+
+NEVER choose the retained representation from geography, party nationality,
+transaction location, where the assets sit, or an assumed "natural" currency for
+the deal. Those are not statements about how the value was denominated. The
+choice comes from the source's own wording, or from order of statement, and from
+nothing else.
+
+Keep the alternate representation in the evidence phrase or in notes, so the
+figure the source published is not lost. Do not give it its own array item, and
+do not give it its own amount or currency anywhere in the response.
+
+This does NOT relax the rule above. Genuinely distinct economic facts stay
+separate observations even when stated in one sentence and even when the amounts
+are similar: a consideration and an enterprise value are two facts and remain two
+observations. The test is whether the two figures describe the same economic
+quantity — if converting one into the other's currency would produce the other,
+it is one fact.
 - ENTERPRISE_VALUE is an extraction/observation type for a source-stated
   enterprise value. The canonical output downstream remains
   implied_enterprise_value; do not create or imply a separate canonical
@@ -1601,3 +1638,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.23 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.24 | 2026-08-22 | **`is_going_private_outcome` added to `features` (take-private ownership outcome).** `true | null`. The affirmative source primitive for the ownership-outcome half of the take-private definition: true only when the source establishes that the transaction results in the target's equity ceasing to be publicly held or traded. Explicit going-private/delisting language qualifies, and those exact words are not required when explicit mechanics unambiguously establish the same outcome; null is the common case and means not established. Five anti-inference rules, mirroring the block's existing discipline: not from a PE/sponsor buyer, not from the target being public, not from a merger or tender-offer structure, not from `pct_acquired`, and not from an unstated percentage read as 100%. It records the OUTCOME only -- buyer identity belongs to `acquirer.type`. **Why a new primitive:** no existing field can establish this. `pct_acquired` is documented "Null if 100% or unstated", so null is ambiguous by construction; the aggregation §2.6 resolver's assumed 100 fires on every silent control acquisition; `stake_transition_type` is populated only on explicit prior/current/resulting ownership evidence and is empirically sparse; `offer_mechanism` is `TENDER_OFFER | null` and most take-privates are one-step mergers; `target_status` is pre-transaction with no post-transaction counterpart. Example 2 in §7 -- this prompt's own worked public take-private -- emits none of them, so any rule built from current primitives would score it negative. **`false` is not a Product state.** The model is never asked to establish that a target remains public, so a model-emitted `false` is normalized to null before persistence and logged rather than rejected: rejection is fatal to every transaction from the source, and the delivered contract here has never offered `false` (the word does not appear in this system prompt). Consumed by the Stage 9 `is_take_private` derivation as one of three required conditions; the flag stays derived and `deal_summary` still consumes only the flag. |
 | 0.25 | 2026-08-25 | **Buy-side coherence: `ADD_ON` yields, parties do not move.** A source can name a sponsor as the acquirer and separately state an intention to combine the target with a company that sponsor already owns. Reading that as `ADD_ON` produced a record asserting the buyer was both the sponsor and a company the sponsor backs — `acquirer.type = private_equity` with `ADD_ON` and no distinct operating-company acquirer. `ADD_ON` now requires the source to establish that an already sponsor-backed portfolio or platform company **is** the acquiring operating company; a sponsor owning another company and intending to merge the target into it is explicitly **not enough on its own**. A new delivered **BUY-SIDE COHERENCE** block ties `acquirer.name`, `acquirer.type`, `acquirer.sponsor_name` and `sponsor_transaction_role` together and resolves the contradiction in one direction only — **withhold `ADD_ON`, never move a party**. The source-stated acquirer is preserved; no party is promoted, invented, renamed or reassigned to make the fields agree. Ordinary sponsor-backed acquisitions ("X, a portfolio company of Y Capital, acquired Z") are unaffected. |
+| 0.26 | 2026-08-25 | **Currency representations of one fact are one observation.** A source stating "€850 million (approximately $1 billion)" was producing two `value_observations` of the same `value_type`, because the block prohibited collapsing facts and said nothing about currency equivalents. Downstream those decompose into independent `value_amount` and `value_currency` observations, so the resolver could pair an amount from one representation with the currency from the other — and did, emitting `850,000,000 USD`, a monetary pair no source stated. The block now states that multiple currency representations of one economic fact are one fact: retain the representation the source presents as primary or headline, judged across the whole source; failing that, the first clearly stated one; **never** chosen from geography, party nationality, transaction location or an assumed "natural" currency. The alternate stays in the evidence phrase or notes and gets no array item, no amount and no currency. The existing do-not-collapse rule is preserved and explicitly not relaxed — consideration and enterprise value remain two observations in one sentence. The distinguishing test is whether converting one figure into the other's currency would produce the other. |

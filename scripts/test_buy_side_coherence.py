@@ -72,6 +72,30 @@ def check(label: str, got, want) -> None:
         _failures.append(label)
 
 
+def _version_tuple(v: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in v.split("."))
+
+
+def check_version_floor(md: str, stage_version: str, introduced: str) -> None:
+    """Pin the rule's provenance without freezing the prompt at one version.
+
+    A rule guard that asserts the CURRENT version equals the version that
+    introduced it fails on the next unrelated bump, which is a false alarm about
+    a rule that is still delivered. What actually matters is: the versioning row
+    recording this rule still exists, the prompt is at or beyond it, and the
+    stage agrees with the prompt.
+    """
+    declared = re.search(r"^\*\*Version:\*\* ([0-9.]+)", md, re.M)
+    check(f"versioning table still carries the {introduced} row",
+          bool(re.search(rf"^\| {re.escape(introduced)} \|", md, re.M)), True)
+    check("prompt declares a version", bool(declared), True)
+    if not declared:
+        return
+    check(f"prompt version >= {introduced} (currently {declared.group(1)})",
+          _version_tuple(declared.group(1)) >= _version_tuple(introduced), True)
+    check("stage _VERSION agrees with the prompt", stage_version, declared.group(1))
+
+
 def main() -> None:
     print(__doc__.strip().split("\n")[0])
     prompt = load_prompt_file("high_confidence_extraction")
@@ -178,12 +202,8 @@ def main() -> None:
     # -----------------------------------------------------------------------
     print("\nVersion and contract integrity:")
     md = (ROOT / "prompts" / "high_confidence_extraction.md").read_text(encoding="utf-8")
-    check("prompt declares 0.25",
-          bool(re.search(r"^\*\*Version:\*\* 0\.25\b", md, re.M)), True)
-    check("versioning table carries a 0.25 row",
-          bool(re.search(r"^\| 0\.25 \|", md, re.M)), True)
     import stages.high_confidence_extract as hc
-    check("stage _VERSION matches the prompt", hc._VERSION, "0.25")
+    check_version_floor(md, hc._VERSION, "0.25")
     check("user template unchanged in shape",
           "{title}" in prompt["user_template"], True)
 
