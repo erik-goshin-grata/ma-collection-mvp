@@ -180,8 +180,16 @@ def main() -> None:
             failures.append(f"v2_event_type: {retired} is listed as a current event type — "
                             "V3 §T2/classifier 0.7 removed it; stored rows are read-tolerated "
                             "on the separate legacy line, never chosen for new output")
+    # `consortium` is retired current vocabulary, not a deleted value. Check 2 already fails
+    # if it returns to the acquirer_type line (the stage no longer accepts it); this pins the
+    # other half -- that it stays READABLE on the legacy line. Dropping it from both would
+    # leave stored rows with a value the prompt does not acknowledge at all.
+    if "consortium" in declared.get("acquirer_type", set()):
+        failures.append("acquirer_type: consortium is listed as a current buyer type — HC 0.27 "
+                        "retired it; classification describes an individual firm, and stored "
+                        "rows are read-tolerated on the separate legacy line")
     legacy = declared.get("legacy_read_only", set())
-    for expected_legacy in ("MERGER", "REVERSE_MERGER", "MINORITY_INVESTMENT"):
+    for expected_legacy in ("MERGER", "REVERSE_MERGER", "MINORITY_INVESTMENT", "consortium"):
         if expected_legacy not in legacy:
             failures.append(f"legacy_read_only: {expected_legacy} should be listed as a "
                             "read-tolerated historical value")

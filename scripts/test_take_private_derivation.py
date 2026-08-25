@@ -109,6 +109,12 @@ _QUALIFYING = ("PRIVATE_EQUITY", "PE_PORTFOLIO", "MANAGEMENT", "EMPLOYEE_GROUP",
 # strategic_corporate and consortium are the two that CHANGED verdict. The rest were never
 # positive, but they are enumerated so that widening the qualifying set silently is a test
 # failure rather than a discovery in production.
+#
+# CONSORTIUM is here as LEGACY READABILITY, not as current vocabulary. HC 0.27 retired it
+# from the accepted acquirer types and its owning stage now maps a newly-emitted value to
+# `unknown`, so no new row can carry it. Stored rows still do, and this derivation runs over
+# stored rows -- it must keep returning a safe non-qualifying verdict for them. Removing this
+# case because the value is retired would leave historical data deriving unchecked.
 _NON_QUALIFYING = ("STRATEGIC_CORPORATE", "CONSORTIUM", "VENTURE_CAPITAL", "INDIVIDUAL",
                    "FAMILY_OFFICE", "HEDGE_FUND", "PENSION_FUND", "SOVEREIGN_WEALTH_FUND",
                    "GROWTH_EQUITY", "SPAC", "UNKNOWN")

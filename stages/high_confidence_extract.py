@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.26"
+_VERSION = "0.27"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -61,8 +61,19 @@ _VALID_ACQUIRER_TYPES_V2 = frozenset({
     "strategic_corporate", "private_equity", "pe_portfolio", "venture_capital",
     "growth_equity", "sovereign_wealth_fund", "pension_fund", "hedge_fund",
     "family_office", "individual", "management", "employee_group", "spac",
-    "consortium", "other_financial_sponsor", "unknown",
+    "other_financial_sponsor", "unknown",
 })
+# Retired from NEW authoring, read-tolerated on stored rows. `consortium` is not a buyer
+# classification: classification describes an individual firm, and two firms buying together
+# may be different kinds of buyer, so one joint value asserts something true of neither.
+# Mapped to `unknown` rather than dropped from the alias table -- _normalize_acquirer_type
+# falls back to `.get(raw, raw)`, so an unmapped value is passed through and stored verbatim.
+# Deleting the entry would therefore RE-ENABLE the value it was meant to retire. Historical
+# rows are untouched: this maps a model response, never stored data.
+_RETIRED_ACQUIRER_TYPES: dict[str, str] = {
+    "consortium": "unknown",
+    "CONSORTIUM": "unknown",
+}
 _VALID_PERIOD_TYPES_V2 = frozenset({"LTM", "NTM", "ANNUAL", "QUARTERLY", "INTERIM_YTD"})
 _VALID_DATE_PRECISIONS = frozenset({"exact", "month", "quarter", "year"})
 _VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
@@ -109,7 +120,6 @@ _LEGACY_ACQUIRER_TYPE_MAP: dict[str, str] = {
     "MANAGEMENT": "management",
     "EMPLOYEE_GROUP": "employee_group",
     "SPAC": "spac",
-    "CONSORTIUM": "consortium",
     "OTHER_FINANCIAL_SPONSOR": "other_financial_sponsor",
     "UNKNOWN": "unknown",
 }
@@ -127,9 +137,17 @@ _SLEEP = 1.0  # conservative Opus throttle
 
 
 def _normalize_acquirer_type(raw: str | None) -> str | None:
-    """Normalize acquirer.type to V2 lowercase vocabulary."""
+    """Normalize acquirer.type to V2 lowercase vocabulary.
+
+    Retired values are resolved BEFORE the legacy map and before the passthrough. The
+    passthrough is why this matters: an unrecognized value returns unchanged and is stored,
+    so removing a value from the accepted set does not stop it being written -- only an
+    explicit mapping does.
+    """
     if raw is None:
         return None
+    if raw in _RETIRED_ACQUIRER_TYPES:
+        return _RETIRED_ACQUIRER_TYPES[raw]
     if raw in _VALID_ACQUIRER_TYPES_V2:
         return raw
     return _LEGACY_ACQUIRER_TYPE_MAP.get(raw, raw)

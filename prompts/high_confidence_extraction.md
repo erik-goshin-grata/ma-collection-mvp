@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.26 (one fact, one value observation)
+**Version:** 0.27 (buyers are firms, not a manufactured collective)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -204,7 +204,17 @@ target:
   information, choose the predominant one and say so in notes.
 
 acquirer:
-- name: Acquiring entity name as stated
+- name: Acquiring entity name as stated.
+
+  MULTIPLE BUYERS. When the source states that more than one firm is buying, name the
+  actual firms as the source names them, joined plainly with "and". Never manufacture a
+  collective entity out of them. Do not append or invent "venture", "joint venture",
+  "consortium", "group", "partnership" or any similar collective noun, and do not
+  reorder the firms into a possessive-style name for a party that does not exist.
+  "a venture of RPM Living and New York Life" is RPM Living and New York Life buying
+  together — the acquirer name is "RPM Living and New York Life", not
+  "RPM Living and New York Life venture". The buyers are the firms; the arrangement
+  between them is not a company and must not be named as one.
 - domain: Null if not stated
 - ticker: Exchange:ticker format if stated; null if private
 - type: Acquirer classification — use V2 lowercase vocabulary:
@@ -221,9 +231,15 @@ acquirer:
     management — management team or MBO
     employee_group — employee ownership (ESOP or similar)
     spac — special purpose acquisition company
-    consortium — multiple buyers acting jointly
     other_financial_sponsor
     unknown — cannot be determined
+
+  There is deliberately no value for "multiple buyers acting jointly". Buyer
+  classification describes an individual firm, and two firms buying together may be
+  different kinds of buyer; one joint value would assert a classification that is not
+  true of either. When the acquirer name carries more than one distinct buyer, return
+  unknown. That is a compatibility answer for this single scalar field, not a claim
+  that the buyers are unclassifiable.
 - description: 1-2 sentence description. Use source language.
 - sponsor_name: The PE / private-capital sponsor associated with the acquirer,
   when the source establishes it. Not gated on any acquirer.type value. Null when
@@ -1639,3 +1655,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.24 | 2026-08-22 | **`is_going_private_outcome` added to `features` (take-private ownership outcome).** `true | null`. The affirmative source primitive for the ownership-outcome half of the take-private definition: true only when the source establishes that the transaction results in the target's equity ceasing to be publicly held or traded. Explicit going-private/delisting language qualifies, and those exact words are not required when explicit mechanics unambiguously establish the same outcome; null is the common case and means not established. Five anti-inference rules, mirroring the block's existing discipline: not from a PE/sponsor buyer, not from the target being public, not from a merger or tender-offer structure, not from `pct_acquired`, and not from an unstated percentage read as 100%. It records the OUTCOME only -- buyer identity belongs to `acquirer.type`. **Why a new primitive:** no existing field can establish this. `pct_acquired` is documented "Null if 100% or unstated", so null is ambiguous by construction; the aggregation §2.6 resolver's assumed 100 fires on every silent control acquisition; `stake_transition_type` is populated only on explicit prior/current/resulting ownership evidence and is empirically sparse; `offer_mechanism` is `TENDER_OFFER | null` and most take-privates are one-step mergers; `target_status` is pre-transaction with no post-transaction counterpart. Example 2 in §7 -- this prompt's own worked public take-private -- emits none of them, so any rule built from current primitives would score it negative. **`false` is not a Product state.** The model is never asked to establish that a target remains public, so a model-emitted `false` is normalized to null before persistence and logged rather than rejected: rejection is fatal to every transaction from the source, and the delivered contract here has never offered `false` (the word does not appear in this system prompt). Consumed by the Stage 9 `is_take_private` derivation as one of three required conditions; the flag stays derived and `deal_summary` still consumes only the flag. |
 | 0.25 | 2026-08-25 | **Buy-side coherence: `ADD_ON` yields, parties do not move.** A source can name a sponsor as the acquirer and separately state an intention to combine the target with a company that sponsor already owns. Reading that as `ADD_ON` produced a record asserting the buyer was both the sponsor and a company the sponsor backs — `acquirer.type = private_equity` with `ADD_ON` and no distinct operating-company acquirer. `ADD_ON` now requires the source to establish that an already sponsor-backed portfolio or platform company **is** the acquiring operating company; a sponsor owning another company and intending to merge the target into it is explicitly **not enough on its own**. A new delivered **BUY-SIDE COHERENCE** block ties `acquirer.name`, `acquirer.type`, `acquirer.sponsor_name` and `sponsor_transaction_role` together and resolves the contradiction in one direction only — **withhold `ADD_ON`, never move a party**. The source-stated acquirer is preserved; no party is promoted, invented, renamed or reassigned to make the fields agree. Ordinary sponsor-backed acquisitions ("X, a portfolio company of Y Capital, acquired Z") are unaffected. |
 | 0.26 | 2026-08-25 | **Currency representations of one fact are one observation.** A source stating "€850 million (approximately $1 billion)" was producing two `value_observations` of the same `value_type`, because the block prohibited collapsing facts and said nothing about currency equivalents. Downstream those decompose into independent `value_amount` and `value_currency` observations, so the resolver could pair an amount from one representation with the currency from the other — and did, emitting `850,000,000 USD`, a monetary pair no source stated. The block now states that multiple currency representations of one economic fact are one fact: retain the representation the source presents as primary or headline, judged across the whole source; failing that, the first clearly stated one; **never** chosen from geography, party nationality, transaction location or an assumed "natural" currency. The alternate stays in the evidence phrase or notes and gets no array item, no amount and no currency. The existing do-not-collapse rule is preserved and explicitly not relaxed — consideration and enterprise value remain two observations in one sentence. The distinguishing test is whether converting one figure into the other's currency would produce the other. |
+| 0.27 | 2026-08-25 | **Multiple buyers stay the firms they are; `consortium` is retired from `acquirer.type`.** An acceptance source read "a venture of RPM Living and New York Life" and the extraction returned `acquirer_name = "RPM Living and New York Life venture"` with `acquirer_type = consortium` — a buyer that does not exist, composed by reordering the source into a possessive-style name. `name: Acquiring entity name as stated` was the only guard and a single unelaborated line did not hold. A MULTIPLE BUYERS rule now names the failure directly: name the actual firms, join them plainly, never append or invent a collective noun. Separately, `consortium` is not a buyer classification — classification describes an individual firm, and two firms buying together may be different kinds of buyer — so it leaves the vocabulary and the multi-buyer scalar returns `unknown`, stated as MVP compatibility rather than a claim about the buyers. Historical `consortium` rows stay readable: the owning stage maps a newly-emitted value to `unknown` rather than passing it through, and no legacy read path or derivation changes. |
