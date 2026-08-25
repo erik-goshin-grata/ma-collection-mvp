@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.8 (reason_code vocabulary delivered to the model)
+**Version:** 0.9 (a sale process is not a transaction)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -81,6 +81,17 @@ EDGE CASES:
 - If a release announces both a product and an acquisition, classify as RELEVANT (the acquisition is the higher-priority signal).
 - If a release is about a previously announced deal being amended, terminated, or extended, classify as RELEVANT.
 - If a release is about a rumored deal without a definitive agreement, classify as NOT_RELEVANT (rumor coverage is out of MVP scope).
+- If a release describes only a process for seeking a buyer — a formal sale process, a
+  court-supervised or bankruptcy auction, a strategic-alternatives review, a stated
+  intention to sell, a solicitation of bids, or the engagement of advisors to pursue a
+  sale — and no counterparty to a specific acquisition or divestiture has been announced
+  or agreed, classify as NOT_RELEVANT with OTHER_NOT_RELEVANT. Seeking a buyer is not a
+  transaction. This turns on whether a counterparty is established, not on how formal or
+  how likely the sale is: a court-supervised auction with a filed motion, an engaged
+  banker and a target completion date is still out of scope while the buyer is
+  unidentified. A later release naming a stalking-horse bidder, a winning bidder or
+  acquirer, a definitive sale agreement, or a completed sale is a separate source and may
+  be RELEVANT on its own terms.
 - If a release is about a company being added to an index, going IPO, or completing a direct listing, classify as NOT_RELEVANT (IPOs are not in MVP scope).
 
 REASON CODES — RELEVANT side:
@@ -288,6 +299,24 @@ Output:
 }
 ```
 
+**Example 6 — Edge case, sale process with no counterparty:**
+
+Input:
+```
+TITLE: BFG Supply files Chapter 11 bankruptcy, seeks asset sale
+BODY: BFG Supply, a distributor of horticultural and agricultural supplies, filed for Chapter 11 bankruptcy protection on August 18 in Delaware, seeking to sell all of its assets through a court-supervised auction process. SSG Capital Advisors is running a going-concern sale process for some or all of the company's businesses and assets, with a target completion date within roughly 60 days. Potential buyers have already expressed interest, and the Debtors are in active negotiations with parties that could serve as a stalking horse bidder...
+```
+
+Output:
+```json
+{
+  "classification": "NOT_RELEVANT",
+  "reason_code": "OTHER_NOT_RELEVANT",
+  "model_confidence": "HIGH",
+  "notes": "Court-supervised sale process with advisors engaged and interested parties, but no established transaction counterparty — seeking a buyer is not a transaction"
+}
+```
+
 ---
 
 ## 8. Failure Modes
@@ -314,3 +343,4 @@ Output:
 | 0.6 | 2026-08-18 | Added `PIPE` to the RELEVANT reason_code enum (24 total, up from 23) and to IN SCOPE, gated on the source explicitly naming the structure. RELEVANT rather than NOT_RELEVANT on purpose: marking it not-relevant would drop the row before deal-type classification and lose the recognized-exclusion record. Added invented-value mappings for PIPE_FINANCING / PIPE_TRANSACTION / PIPE_OFFERING / PRIVATE_INVESTMENT_IN_PUBLIC_EQUITY. |
 | 0.7 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.8 | 2026-08-21 | **The reason_code vocabulary is now delivered to the model.** The authoritative 24-code list moved from §6 into the §4 system prompt; §4 and §5 are the only sections `load_prompt_file` sends, so the list previously reached nothing. The prompt asserted the codes were "listed in the in-scope and out-of-scope enumerations above" — prose category descriptions containing no enum values — so the model saw codes only incidentally, as the right-hand side of the invented-value correction list. Ten codes, including the in-scope `MERGER_ANNOUNCEMENT`, `SPIN_OFF_OR_SPLIT`, `REVERSE_MERGER` and `JOINT_VENTURE`, were never delivered at all; eight of those have no alias path and folded into the catch-alls. Taxonomy, side assignments, glosses, alias table and relevancy semantics are unchanged — this delivers the existing vocabulary, it does not redefine it. |
+| 0.9 | 2026-08-25 | **A sale process is not a transaction.** One EDGE CASES bullet: where a source describes only a process for seeking a buyer — formal sale process, court-supervised or bankruptcy auction, strategic-alternatives review, stated intention to sell, solicitation of bids, or advisors engaged to pursue a sale — and no counterparty to a specific acquisition or divestiture has been announced or agreed, classify NOT_RELEVANT with OTHER_NOT_RELEVANT. The counterparty test is scoped to this boundary and is not a general transaction requirement. A later source naming a stalking-horse bidder, winning bidder, definitive sale agreement or completed sale may be RELEVANT on its own terms. No reason code added (24 unchanged); the in-scope asset-sale/divestiture line and the rumor bullet are untouched. §7 Example 6 added as documentation (outside the delivered fence). |
