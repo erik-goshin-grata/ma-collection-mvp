@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.24 (take-private ownership outcome)
+**Version:** 0.25 (buy-side coherence)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -466,15 +466,23 @@ EBITDA.
       platform", "platform investment") or transaction context that establishes
       it. A PE firm being the buyer does NOT establish this on its own. This is
       deliberately a higher evidence bar than ADD_ON.
-    ADD_ON — a company that is ALREADY sponsor/PE-backed — a portfolio company or
-      an existing platform — is making this acquisition. Literal "add-on",
-      "bolt-on" or "tuck-in" wording is NOT required, and the sponsor does not
-      have to be named. Establishable from the transaction language, from the
-      source establishing the acquirer's portfolio/platform status, or from the
-      company description supplying that context alongside this acquisition.
+    ADD_ON — the source establishes that an ALREADY sponsor/PE-backed portfolio
+      or platform operating company is making this acquisition, or is serving as
+      the operating-company buyer in it. Literal "add-on", "bolt-on" or "tuck-in"
+      wording is NOT required, and the sponsor does not have to be named.
+      Establishable from the transaction language, from the source establishing
+      the acquirer's portfolio/platform status, or from the company description
+      supplying that context alongside this acquisition.
       Ordinary wording qualifies: "X, a portfolio company of Y Capital, acquired
       Z", or "X, a private-equity-backed company, acquired Z" where current
       sponsor backing is genuinely established.
+      NOT ENOUGH ON ITS OWN: that the sponsor already owns another company and
+      intends to combine the target with it. "Sponsor S is acquiring T and will
+      merge it with P" names S as the acquirer and states an intention about P;
+      it does not establish P as the acquiring operating company. Where the
+      source identifies the SPONSOR ITSELF as the acquirer and does not establish
+      the portfolio/platform company as the operating-company buyer, return null
+      here and keep the source-stated acquirer.
     null — neither is established. Sponsor or PE involvement ALONE is not enough,
       and null is expected to be common.
     Generic VC backing is not ADD_ON: the relevant fact is PE/sponsor ownership of
@@ -486,6 +494,28 @@ EBITDA.
       sponsor-backed portfolio company is ADD_ON.
     This is a transaction classification, independent of acquirer.type. Do not
       derive it from any acquirer-type value.
+
+BUY-SIDE COHERENCE
+
+acquirer.name, acquirer.type, acquirer.sponsor_name and
+deal.sponsor_transaction_role all describe one buy side and must be coherent
+with each other. Check them together before returning them.
+
+ADD_ON asserts that an already sponsor-backed operating company is the buyer. So
+ADD_ON combined with acquirer.type = private_equity and no distinct
+sponsor-backed operating-company acquirer is a contradiction: it says the buyer
+is both the sponsor and a company the sponsor backs.
+
+RESOLVE IT BY WITHHOLDING ADD_ON, NEVER BY MOVING A PARTY. Return the acquirer
+the source states and set sponsor_transaction_role = null. Do not promote a
+portfolio company into the acquirer seat, and do not invent, rename or reassign
+a party, to make the fields agree. The parties are what the source says; the
+classification is what the evidence supports. When they disagree, the
+classification yields.
+
+This cuts one way only. It never licenses changing acquirer.name,
+acquirer.type or acquirer.sponsor_name — those follow their own definitions
+above, from the source.
 
 features:
 Use this object for explicit, qualified transaction feature evidence. Return
@@ -1570,3 +1600,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.22 | 2026-08-21 | **Input note corrected to describe the values the stage actually sends; stale vocabulary and derivation claims removed.** The note said `deal_type` and `event_type` "reflect legacy classifier output (v0.5 and earlier)" and promised they would become `v2_event_type` / `event_history_type` "when classifier is updated to v0.6+". The classifier is at 0.12 and that rename never happened: the template keeps the legacy **labels** while `stages/high_confidence_extract.py` supplies the **current values** under them. `target_type` in particular arrives normalized — the stage passes `target_type_v2` when present — which is why it is lowercase. That is stated as specific to `target_type` and `acquirer.type`, with a reminder that `target_status`, `value.type`, `asset_type`, `offer_mechanism` and `sponsor_transaction_role` are uppercase by design, so the note cannot be read as a general lowercasing rule. `spinco` is dropped from the vocabulary (§T3 removed it, so it cannot arrive). The derivation note no longer presents `is_divestiture` and `is_add_on` as built: §T4 removed one and §T7 replaced the other with `sponsor_transaction_role`, and both columns are retained but unwritten. |
 | 0.23 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.24 | 2026-08-22 | **`is_going_private_outcome` added to `features` (take-private ownership outcome).** `true | null`. The affirmative source primitive for the ownership-outcome half of the take-private definition: true only when the source establishes that the transaction results in the target's equity ceasing to be publicly held or traded. Explicit going-private/delisting language qualifies, and those exact words are not required when explicit mechanics unambiguously establish the same outcome; null is the common case and means not established. Five anti-inference rules, mirroring the block's existing discipline: not from a PE/sponsor buyer, not from the target being public, not from a merger or tender-offer structure, not from `pct_acquired`, and not from an unstated percentage read as 100%. It records the OUTCOME only -- buyer identity belongs to `acquirer.type`. **Why a new primitive:** no existing field can establish this. `pct_acquired` is documented "Null if 100% or unstated", so null is ambiguous by construction; the aggregation §2.6 resolver's assumed 100 fires on every silent control acquisition; `stake_transition_type` is populated only on explicit prior/current/resulting ownership evidence and is empirically sparse; `offer_mechanism` is `TENDER_OFFER | null` and most take-privates are one-step mergers; `target_status` is pre-transaction with no post-transaction counterpart. Example 2 in §7 -- this prompt's own worked public take-private -- emits none of them, so any rule built from current primitives would score it negative. **`false` is not a Product state.** The model is never asked to establish that a target remains public, so a model-emitted `false` is normalized to null before persistence and logged rather than rejected: rejection is fatal to every transaction from the source, and the delivered contract here has never offered `false` (the word does not appear in this system prompt). Consumed by the Stage 9 `is_take_private` derivation as one of three required conditions; the flag stays derived and `deal_summary` still consumes only the flag. |
+| 0.25 | 2026-08-25 | **Buy-side coherence: `ADD_ON` yields, parties do not move.** A source can name a sponsor as the acquirer and separately state an intention to combine the target with a company that sponsor already owns. Reading that as `ADD_ON` produced a record asserting the buyer was both the sponsor and a company the sponsor backs — `acquirer.type = private_equity` with `ADD_ON` and no distinct operating-company acquirer. `ADD_ON` now requires the source to establish that an already sponsor-backed portfolio or platform company **is** the acquiring operating company; a sponsor owning another company and intending to merge the target into it is explicitly **not enough on its own**. A new delivered **BUY-SIDE COHERENCE** block ties `acquirer.name`, `acquirer.type`, `acquirer.sponsor_name` and `sponsor_transaction_role` together and resolves the contradiction in one direction only — **withhold `ADD_ON`, never move a party**. The source-stated acquirer is preserved; no party is promoted, invented, renamed or reassigned to make the fields agree. Ordinary sponsor-backed acquisitions ("X, a portfolio company of Y Capital, acquired Z") are unaffected. |
