@@ -27,7 +27,7 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 from lib.observation_writer import write_staging_observations_for_extraction
 
 _PROMPT_NAME = "funding_hc_extraction"
-_VERSION = "0.4"
+_VERSION = "0.5"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
@@ -298,6 +298,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 txn.get("financials_disclosure_status"),
                 txn.get("consideration_type"),
                 pct_acquired,
+                txn.get("use_of_proceeds"),
                 txn.get("model_confidence"),
                 _VERSION,
                 json.dumps(nd) if nd else None,
@@ -334,6 +335,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         financials_disclosure_status = ?,
                         consideration_type = COALESCE(consideration_type, ?),
                         pct_acquired = ?,
+                        use_of_proceeds = ?,
                         model_confidence = ?,
                         hc_prompt_version = ?,
                         notes = ?,
@@ -360,15 +362,16 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         announced_date, announced_date_precision,
                         closed_date, closed_date_precision,
                         financials_disclosure_status, consideration_type, pct_acquired,
+                        use_of_proceeds,
                         model_confidence, hc_prompt_version, notes,
                         dt_prompt_version,
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
-                    # Explicit param tuple matching the 36-column list above.
+                    # Explicit param tuple matching the 37-column list above.
                     # (Do NOT reuse round_params here — that tuple is shaped for the
                     # i==0 UPDATE SET clause and carries extra fields, causing a
                     # binding crash on multi-transaction funding sources. bug #6)
@@ -387,6 +390,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         dt.get("closed_date"), dt.get("closed_date_precision"),
                         txn.get("financials_disclosure_status"), txn.get("consideration_type"),
                         pct_acquired,
+                        txn.get("use_of_proceeds"),
                         txn.get("model_confidence"), _VERSION,
                         json.dumps(nd) if nd else None,
                         row["dt_prompt_version"], i, multi_total,

@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.4 (adds `pct_acquired`)
+**Version:** 0.5 (adds `use_of_proceeds`)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -209,6 +209,37 @@ It is a stated number or it is nothing:
 - "approximately 65%", "roughly 65%" and "a 65% stake" ARE stated. Use 65.0.
 - A stated range ("between 30% and 40%") is not a single stated value. Null.
 
+USE OF PROCEEDS
+
+use_of_proceeds: What the company states it will do with the capital. This is a
+field, not prose.
+
+- Capture ONLY uses the source explicitly states.
+- Each use is a short noun phrase — one or two words. Strip the verb, the
+  possessive, and any promotional or contextual wording around it.
+- Preserve every distinct stated use, comma-separated, in the order stated.
+- Null when the source does not say what the capital is for.
+
+"The proceeds will be used to expand the company's sales team and accelerate
+product development" is two distinct uses: "sales team, product development".
+Each is reduced to the thing being funded — not "expand the company's sales
+team", not "accelerate product development".
+
+"The company will use the proceeds to build its founding team and launch its
+initial product" is "founding team, product launch".
+
+Do NOT infer a use from growth, strategy or momentum language. "The round
+positions the company for its next phase of growth" and "the investment
+validates our market leadership" state no use at all: return null. A round being
+described as a growth round is not a statement of what the money buys.
+
+A stated use that is itself broad is still a stated use. "general corporate
+purposes" is captured as "general corporate purposes", because the source said
+it. The test is whether the source states a use, not whether the use is specific.
+
+Do not write a sentence here, and do not carry the source's marketing adjectives
+("aggressive", "transformative", "world-class") into the value.
+
 MULTI-INVESTMENT SOURCES
 
 When a single source directly announces multiple investments in the same
@@ -291,6 +322,7 @@ code fences, no preamble.
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "pct_acquired": null,
+      "use_of_proceeds": "sales team, product development",
       "model_confidence": "HIGH",
       "notes": null
     }
@@ -368,6 +400,7 @@ Extract all funding transactions from this source.
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "equity | safe | convertible_note | debt | warrant | null",
       "pct_acquired": "number | null",
+      "use_of_proceeds": "string | null",
       "model_confidence": "HIGH | MEDIUM | LOW",
       "notes": "string | null"
     }
@@ -884,3 +917,4 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | 0.2 | 2026-08-20 | **`round_price_direction` replaces `is_down_round` (V3 §A6.3 / §T14).** `UP` | `DOWN` | `FLAT` | null. The boolean could only ever record DOWN — `is_up_round` never existed anywhere in the codebase — so `is_down_round = 0` fused *up*, *flat* and *unknown* into one bit. All three values now have extraction vocabulary, and **null stays distinct from `FLAT`**: "not stated" and "unchanged" are different facts. The existing anti-inference rule is preserved and widened — two disclosed valuations do not license a comparison unless the source makes it. Example 6 added for an explicitly stated down round. Canonical `round` and `vc_stage` are **not** prompt fields: they are deterministic normalizations of `round_label`, which is unchanged and still verbatim. |
 | 0.3 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.4 | 2026-08-24 | **`pct_acquired` added to the funding contract.** The funding path had no author for it: Stage 4 excludes funding event types and Stage 4b never asked, so an explicitly stated stake — routine in growth equity — was lost even though the staging column, the observation group and the canonical column all already carried it. The field is **stated or null**: majority/control framing, acquisition framing, and any computation from round size and valuation are all explicitly forbidden, and an unstated percentage is never rounded to 100. Example 2 already described a stated 65% in prose because the response had nowhere to put it; it now carries the value. |
+| 0.5 | 2026-08-26 | **`use_of_proceeds` added to the funding contract.** A V3 §7 `ADD` field — "source-stated intended use of the capital raised" — with a staging column, a place in the funding observation group, a canonical column Stage 9 owns and a slot on the funding review sheet, and no author anywhere. It was drafted in full for a **Funding LC** stage the design never called for; that prompt was archived to `docs/` and the columns outlived it. Both of this prompt's own worked examples contain the sentence — "the proceeds will be used to expand the company's sales team and accelerate product development" — in a contract that never asked for it. **Field-like, not prose**, by Product ruling: explicitly stated uses only, each a one- or two-word noun phrase with the verb, possessive and promotional wording stripped, every distinct use preserved comma-separated in the order stated, and null when unstated. The scalar `TEXT` datatype is preserved — V3 types it `DATA POINT`, not a repeating relationship — so multiple uses share one field, following the comma-delimit convention this repository already uses for co-sponsors. Growth, strategy and momentum framing states no use and yields null; a stated-but-broad use like "general corporate purposes" is captured as stated, because the test is whether the source states a use, not whether the use is specific. `has_board_seat` and `board_seat_notes` were drafted alongside it and are deliberately NOT added: V3 lists a flat board-representation flag and note as residue, superseded by a participant relationship with the named representative. |
