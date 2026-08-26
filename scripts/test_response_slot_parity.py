@@ -180,10 +180,17 @@ def test_response_slots() -> None:
           {"basis", "evidence"} <= set(txn["value_observations"][0])
           if isinstance(txn.get("value_observations"), list) and txn["value_observations"]
           else False, True)
-    check("target_financials unchanged — this slice does NOT open the balance sheet",
+    # This began as a 0.29 scope control -- R1.1 must not silently do R1.2's work, so
+    # target_financials was pinned to its seven revenue/EBITDA/currency keys. R1.2 was
+    # then approved and added the five balance-sheet keys at 0.30, so the control is
+    # updated to its successor form rather than deleted: the object is still pinned
+    # exactly, and scripts/test_balance_sheet_slots.py owns the five it gained.
+    check("target_financials carries exactly the 0.30 key set",
           sorted(txn.get("target_financials", {})),
-          ["currency", "ebitda_amount", "ebitda_period_end", "ebitda_period_type",
-           "revenue_amount", "revenue_period_end", "revenue_period_type"])
+          ["balance_sheet_as_of_date", "cash_st", "cash_st_currency", "currency",
+           "ebitda_amount", "ebitda_period_end", "ebitda_period_type",
+           "revenue_amount", "revenue_period_end", "revenue_period_type",
+           "total_debt", "total_debt_currency"])
     check("the required-fields sentence still closes the block",
           "All fields in each transaction element are required" in system, True)
 

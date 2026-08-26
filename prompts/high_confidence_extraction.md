@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.29 (every instructed field has a response slot)
+**Version:** 0.30 (balance-sheet facts can be answered)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -775,7 +775,12 @@ code fences, no preamble.
         "ebitda_amount": null,
         "ebitda_period_type": null,
         "ebitda_period_end": null,
-        "currency": null
+        "currency": null,
+        "total_debt": null,
+        "total_debt_currency": null,
+        "cash_st": null,
+        "cash_st_currency": null,
+        "balance_sheet_as_of_date": null
       },
       "model_confidence": "HIGH",
       "notes": null
@@ -885,7 +890,12 @@ Extract all transactions from this source.
         "ebitda_amount": "number | null",
         "ebitda_period_type": "LTM | NTM | ANNUAL | QUARTERLY | INTERIM_YTD | null",
         "ebitda_period_end": "YYYY-MM-DD | YYYY | null",
-        "currency": "string | null"
+        "currency": "string | null",
+        "total_debt": "number | null",
+        "total_debt_currency": "string | null",
+        "cash_st": "number | null",
+        "cash_st_currency": "string | null",
+        "balance_sheet_as_of_date": "YYYY-MM-DD | null"
       },
       "model_confidence": "HIGH | MEDIUM | LOW",
       "notes": "string | null"
@@ -1675,3 +1685,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.27 | 2026-08-25 | **Multiple buyers stay the firms they are; `consortium` is retired from `acquirer.type`.** An acceptance source read "a venture of RPM Living and New York Life" and the extraction returned `acquirer_name = "RPM Living and New York Life venture"` with `acquirer_type = consortium` — a buyer that does not exist, composed by reordering the source into a possessive-style name. `name: Acquiring entity name as stated` was the only guard and a single unelaborated line did not hold. A MULTIPLE BUYERS rule now names the failure directly: name the actual firms, join them plainly, never append or invent a collective noun. Separately, `consortium` is not a buyer classification — classification describes an individual firm, and two firms buying together may be different kinds of buyer — so it leaves the vocabulary and the multi-buyer scalar returns `unknown`, stated as MVP compatibility rather than a claim about the buyers. Historical `consortium` rows stay readable: the owning stage maps a newly-emitted value to `unknown` rather than passing it through, and no legacy read path or derivation changes. |
 | 0.28 | 2026-08-26 | **`MARKET_CAPITALIZATION` retired from the transaction-value vocabulary; the supported-concept boundary made explicit.** A de-SPAC source stating "a pre-money equity valuation of approximately $1.6 billion and a post-transaction equity valuation of approximately $2.3 billion" produced two observations typed `MARKET_CAPITALIZATION` and a canonical `value_amount` of $1.6B — although the source never uses the words market capitalization and the target was private, so the figure did not satisfy even the type it was given. The array's own scope rule already said to return `[]` when there is no explicitly supported, qualified deal-value fact; `MARKET_CAPITALIZATION` contradicted it, being defined in the same breath as "a property of the company, not of the transaction" while sitting in a deal-value vocabulary, with an instruction to capture it on source-statedness alone. It was never a Product-approved transaction field — it appears in neither Data Dictionary nor the schema, and originated as engineering containment to keep market caps out of `equity_value` (decision 2026-08-17). A WHAT IS NOT A DEAL-VALUE FACT block now states the boundary as a scope test rather than a size test: a source-stated ENTERPRISE_VALUE remains whole-company and supported. `UNDISCLOSED` is unchanged and stays reserved for a source that says terms are not disclosed. The value remains in the owning stage's `_VALID_VALUE_TYPES` purely as tolerance, so an emitted retired type is dropped and logged rather than failing the whole extraction; no stored data is rewritten and every derivation guard against legacy market-cap observations is untouched. |
 | 0.29 | 2026-08-26 | **`stake_transition_type` and `round_size` restored to the `RESPONSE FORMAT` block.** Both are instructed in this system prompt and both are already declared in section 6's output schema; neither had a key in the response structure the model is actually shown. Section 6 is documentation and reaches no model, so the delivered contract asked for two facts and offered nowhere to put them. `stake_transition_type` survived on prose alone -- the model emitted it anyway, which is precisely what hid the defect. `round_size` did not: the PRIMARY CAPITAL rule tells the model to null `value.amount` and record the figure "in `round_size` (below)", and there was no `round_size` below, so a primary-capital amount on the M&A path was nulled out of `value` and had nowhere to land. Every downstream link already existed for both -- Stage 4 reads `deal.stake_transition_type` and `txn.round_size`, both sit in the production HC observation group, and Stage 9 owns both canonical columns. **No rule text changes and no new field.** Key order follows section 6: `stake_transition_type` after `pct_acquired` in `deal`, `round_size` after `features` at transaction level. Section 7's examples are outside the fence, reach no model, and are left as they are. |
+| 0.30 | 2026-08-26 | **The five balance-sheet fields restored to the response structure.** `total_debt`, `total_debt_currency`, `cash_st`, `cash_st_currency` and `balance_sheet_as_of_date` are instructed at length in this system prompt -- with the net-figure trap, the combined-cash rule, the per-figure currency rule and a full POINT_IN_TIME paragraph -- and had no key in the `RESPONSE FORMAT` object the prose names, `target_financials`. Unlike 0.29's two fields, section 6 did not declare these either, so they existed only as prose: instructed, read by Stage 4 at `:539-543`, carried by the production HC observation group, owned as canonical columns by Stage 9, and unanswerable. Null across all 47 M&A extractions in both live corpora. **No substantive rule changed** -- the extraction rules were already complete and correct, and are deliberately untouched. `net_debt`, `net_debt_currency` and `balance_sheet_period_type` are NOT added: this prompt forbids computing net debt, and the other two are reference-derived (`balance_sheet_period_type` is the constant `POINT_IN_TIME`, written where the model cannot mislabel it). What the capture makes reachable in the reference aggregation -- calculated net debt, `implied_enterprise_value`, the `EQUITY_PLUS_TOTAL_DEBT` transaction-value branch and the first non-null multiples -- is existing behaviour becoming observable, recorded for Product inspection rather than changed here. |
