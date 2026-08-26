@@ -97,9 +97,13 @@ def _check_per_share_gate(failures: list[str]) -> None:
 # B. Taxonomy: the type exists, and the prompt no longer conflates it
 # --------------------------------------------------------------------------
 def _check_taxonomy(failures: list[str]) -> None:
+    # Still required in the stage frozenset, now as TOLERANCE rather than authorization:
+    # prompt 0.28 retired the type, and _validate fails a whole extraction on an unknown
+    # value type, so delisting it here would turn a model still emitting it into a total
+    # loss of that transaction rather than the loss of one unsupported observation.
     if "MARKET_CAPITALIZATION" not in _VALID_VALUE_TYPES:
         failures.append(
-            "MARKET_CAPITALIZATION missing from _VALID_VALUE_TYPES — a 0.18 extraction "
+            "MARKET_CAPITALIZATION missing from _VALID_VALUE_TYPES — an extraction "
             "emitting it would be rejected wholesale, not just dropped"
         )
 
@@ -118,8 +122,16 @@ def _check_taxonomy(failures: list[str]) -> None:
                 "a whole-company figure in a stake-level field"
             )
 
-    if "MARKET_CAPITALIZATION" not in text:
-        failures.append("prompt does not define a MARKET_CAPITALIZATION value type")
+    # Inverted at 0.28. The type was never a Product-approved transaction field; it was
+    # engineering containment to keep market caps out of `equity_value`. That job is now
+    # done by the supported-concept boundary, which declines to capture the figure at all.
+    from prompts.base import load_prompt_file
+    delivered = load_prompt_file("high_confidence_extraction")["system"]
+    if "MARKET_CAPITALIZATION" in delivered:
+        failures.append("prompt still offers MARKET_CAPITALIZATION as a value type — 0.28 "
+                        "retired it from current authoring")
+    if "WHAT IS NOT A DEAL-VALUE FACT" not in delivered:
+        failures.append("prompt lost the supported-concept boundary that replaced the type")
 
     # The invariant is that the version moved to or past the release that introduced
     # MARKET_CAPITALIZATION -- not that the prompt is frozen there. Compare numerically:
@@ -127,9 +139,9 @@ def _check_taxonomy(failures: list[str]) -> None:
     m = re.search(r"^\*\*Version:\*\* (\d+)\.(\d+)", text, re.M)
     if m is None:
         failures.append("HC prompt has no parseable version line")
-    elif (int(m.group(1)), int(m.group(2))) < (0, 18):
-        failures.append(f"HC prompt version {m.group(0)!r} predates the taxonomy change "
-                        f"that introduced MARKET_CAPITALIZATION (0.18)")
+    elif (int(m.group(1)), int(m.group(2))) < (0, 28):
+        failures.append(f"HC prompt version {m.group(0)!r} predates the retirement of "
+                        f"MARKET_CAPITALIZATION from current authoring (0.28)")
 
 
 # --------------------------------------------------------------------------
@@ -316,20 +328,44 @@ def _check_end_to_end(failures: list[str]) -> None:
             _check(failures, "market-cap-only transaction_value", row["transaction_value"], None)
             _check(failures, "market-cap-only enterprise_value", row["enterprise_value"], None)
 
-        # The fact is retained, not discarded — it just does not flow into
-        # canonical consideration. Both fixtures must keep their observation.
-        for txn_id in (STAKE_TXN, MARKETCAP_TXN):
-            kept = conn.execute(
+        # INVERTED AT 0.28. This previously asserted the fact was retained, on the old
+        # position that a market cap should be kept even though it is not canonical.
+        # Product reversed that: a market cap is not a deal-value fact, so new authoring
+        # does not capture it at all. These fixtures build their observations through
+        # `_value_observations_json`, the authoring path, so nothing survives there.
+        #
+        # The legacy half of the invariant is still covered, by section D above: those
+        # rows write the market cap straight into the staging value_amount/value_type
+        # columns, exactly as a stored pre-0.28 row carries it, and every canonical
+        # economic field it could reach is asserted None.
+        # The two fixtures reach the ledger by different routes, and 0.28 treats them
+        # differently on purpose:
+        #
+        #   STAKE_TXN     carries the market cap inside `value_observations`, i.e. through
+        #                 `_value_observations_json` -- the AUTHORING path. Dropped.
+        #   MARKETCAP_TXN carries it in the staging value_amount/value_type COLUMNS, which
+        #                 is what a stored pre-0.28 row looks like -- the LEGACY path.
+        #                 Retained and read-tolerated, and section D above proves it
+        #                 reaches no canonical economic field.
+        def _mc_observations(txn_id: str) -> int:
+            return conn.execute(
                 "SELECT COUNT(*) FROM transaction_field_observation "
                 "WHERE transaction_id = ? AND field_name = 'value_type' "
                 "AND field_value = 'MARKET_CAPITALIZATION'",
                 (txn_id,),
             ).fetchone()[0]
-            if kept < 1:
-                failures.append(
-                    f"{txn_id}: MARKET_CAPITALIZATION observation was not retained — the "
-                    "fact should survive in the ledger even though it is not canonical"
-                )
+
+        if _mc_observations(STAKE_TXN):
+            failures.append(
+                f"{STAKE_TXN}: a MARKET_CAPITALIZATION observation was authored — the type "
+                "is retired from current authoring (prompt 0.28) and must be dropped "
+                "before persistence"
+            )
+        if not _mc_observations(MARKETCAP_TXN):
+            failures.append(
+                f"{MARKETCAP_TXN}: the legacy market cap was not read-tolerated — retiring "
+                "the type from authoring must not erase what stored rows already carry"
+            )
 
         conn.close()
 

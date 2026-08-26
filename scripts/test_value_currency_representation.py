@@ -208,8 +208,6 @@ def main() -> None:
         ("The `value_observations` key is required on every transaction element",
          "key still required on every element"),
         ("Return an empty array", "empty-array instruction intact"),
-        ("MARKET_CAPITALIZATION observation is never the primary value",
-         "market-cap rule intact"),
         ("Keep the legacy value object populated with the primary/most transaction-",
          "legacy value object rule intact"),
         ("do not create or imply a separate canonical", "ENTERPRISE_VALUE rule intact"),

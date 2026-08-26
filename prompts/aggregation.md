@@ -1,6 +1,6 @@
 # Aggregation Prompt (Conflict Resolution)
 
-**Version:** 0.7 (consortium retired from the acquirer_type vocabulary)
+**Version:** 0.8 (market capitalization retired from the value_type vocabulary)
 **Repo path:** `prompts/aggregation.md`
 
 ---
@@ -98,7 +98,7 @@ value is canonical — not whether the fact is established.
      scripts/test_aggregation_vocabulary_parity.py. Every list below must match the
      enum the owning stage validates; add a field here when a slice adds one. -->
 - v2_event_type: ACQUISITION | SPIN_OFF | SPLIT_OFF | JOINT_VENTURE | RECAPITALIZATION | VC_ROUND | GROWTH_EQUITY | VENTURE_DEBT | PIPE | UNKNOWN
-- legacy_read_only: MERGER | REVERSE_MERGER | MINORITY_INVESTMENT | consortium
+- legacy_read_only: MERGER | REVERSE_MERGER | MINORITY_INVESTMENT | consortium | MARKET_CAPITALIZATION
 - event_history_type: ANNOUNCED | CLOSED | AMENDED | TERMINATED
 - combination_structure: MERGER | REVERSE_MERGER | DE_SPAC
 - target_type: standalone_company | subsidiary | business_unit | assets
@@ -108,7 +108,7 @@ value is canonical — not whether the fact is established.
 - deal_attitude: FRIENDLY | HOSTILE
 - approach_type: SOLICITED | UNSOLICITED
 - round_price_direction: UP | DOWN | FLAT
-- value_type: EQUITY_VALUE | TRANSACTION_VALUE | ENTERPRISE_VALUE | MARKET_CAPITALIZATION | UNDISCLOSED
+- value_type: EQUITY_VALUE | TRANSACTION_VALUE | ENTERPRISE_VALUE | UNDISCLOSED
 - acquirer_type: strategic_corporate | private_equity | pe_portfolio | venture_capital | growth_equity | sovereign_wealth_fund | pension_fund | hedge_fund | family_office | individual | management | employee_group | spac | other_financial_sponsor | unknown
 - consideration_components.form: CASH | ACQUIRER_STOCK | TARGET_STOCK | EARNOUT | CVR | CONTINGENT_CONSIDERATION | DEBT_ASSUMED | RETAINED_EQUITY | OTHER
 <!-- AGG_VOCAB_END -->
@@ -116,10 +116,13 @@ value is canonical — not whether the fact is established.
 `legacy_read_only` values appear on historical rows and may be observed. They are
 NEVER valid new output: MERGER and REVERSE_MERGER are combination structures of an
 ACQUISITION, not event types; minority status is derived downstream rather than
-typed; and `consortium` is not a buyer classification, because classification
+typed; `consortium` is not a buyer classification, because classification
 describes an individual firm and two firms buying together may be different kinds of
-buyer. If observations disagree between a legacy value and a current one for the same
-fact, prefer the current representation.
+buyer; and `MARKET_CAPITALIZATION` is not a deal-value fact at all — a market cap is a
+property of the company, not of the transaction, and nothing was bought at that price.
+A stored market cap is never resolved into consideration. If observations disagree
+between a legacy value and a current one for the same fact, prefer the current
+representation.
 
 RESOLVING TYPED DIMENSIONS
 
@@ -427,3 +430,4 @@ Output:
 | 0.5 | 2026-08-21 | **V3 field vocabulary (§T2, §T3, §T7, §T11–T14).** This prompt reasons about every canonical field — Stage 9 calls it once per disputed field — and had not been opened by any V3 slice, so it still enumerated `MERGER` and `REVERSE_MERGER` as event types, lacked `MARKET_CAPITALIZATION`, and had no vocabulary at all for `combination_structure`, `asset_type`, `offer_mechanism`, `deal_attitude`, `approach_type`, `sponsor_transaction_role` or `round_price_direction`. Vocabularies are now in a marker-delimited block checked against the owning stages' frozensets by `scripts/test_aggregation_vocabulary_parity.py`. Retired event types move to a labelled `legacy_read_only` line: observable on stored rows, never valid new output. A typed-dimension section states the tie-breaks that plain string resolution gets wrong — `combination_structure` is hierarchical and DE_SPAC vs MERGER is not a conflict; `asset_type` is subordinate to `target_type = assets`; `PLATFORM` is not a more specific `ADD_ON`; attitude and approach are independent; `FLAT` is not a compromise between disagreeing price directions. The `pe_portfolio` specificity preference is removed — §T7 forbids acquirer type as a sponsor-status proxy and §T8 removes the value. Deliberately compact: no extraction rules, evidence bars or null policy, because `_pick_value` drops nulls before escalating and this prompt only ever chooses between observed non-null values. |
 | 0.6 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.7 | 2026-08-25 | **`consortium` retired from the current `acquirer_type` vocabulary, read-tolerated on the legacy line.** Buyer classification describes an individual firm, and two firms buying together may be different kinds of buyer, so a single joint value asserts a classification true of neither. It moves to `legacy_read_only` under the mechanism 0.5 established for retired event types: observable on stored rows, never valid new output. Historical rows keep their value and downstream derivations are unchanged — the take-private derivation still treats a stored `CONSORTIUM` as safely non-qualifying. Authoring is closed at the source: `high_confidence_extraction` 0.27 drops the value and its owning stage maps a newly-emitted `consortium` to `unknown`. No other vocabulary, resolution rule or typed-dimension guidance changes. |
+| 0.8 | 2026-08-26 | **`MARKET_CAPITALIZATION` retired from the current `value_type` vocabulary, read-tolerated on the legacy line.** It is not a deal-value fact — a market cap describes the company, not the transaction — and it was never a Product-approved transaction field. It moves to `legacy_read_only` under the mechanism 0.5 established: observable on stored rows, never valid new output. Every derivation guard is unchanged: `_derive_equity_value`, `_derive_transaction_value` and `_derive_enterprise_value` each gate on an exact type, so a stored market cap still reaches neither them nor the implied values nor the multiples. Authoring is closed at the source in `high_confidence_extraction` 0.28, whose owning stage drops a retired observation rather than failing the extraction. |

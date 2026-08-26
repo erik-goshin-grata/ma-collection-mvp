@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.27"
+_VERSION = "0.28"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -50,13 +50,23 @@ _REQUIRED_KEYS = frozenset({
     "deal",
     "financials_disclosure_status",
 })
-# MARKET_CAPITALIZATION (prompt 0.18) is a whole-company observation, deliberately
-# outside the stake-level consideration vocabulary. It must be listed here or a 0.18
-# extraction emitting it is rejected wholesale rather than merely ignored.
+# TOLERANCE, NOT AUTHORIZATION. `MARKET_CAPITALIZATION` is retired from the delivered
+# vocabulary (prompt 0.28): a market cap is not a deal-value fact, and Product never
+# approved it as a transaction field -- it exists only as engineering containment from
+# the 2026-08-17 `equity_value` scope finding. It stays listed here on purpose, because
+# _validate REJECTS THE WHOLE EXTRACTION on an unknown value type: removing it would
+# turn a model still emitting the retired type into a total loss of that transaction --
+# every party, date and advisor with it. Listed, it is dropped and logged instead.
 _VALID_VALUE_TYPES = frozenset({
     "EQUITY_VALUE", "TRANSACTION_VALUE", "ENTERPRISE_VALUE",
     "MARKET_CAPITALIZATION", "UNDISCLOSED",
 })
+# Retired from NEW authoring. An observation carrying one of these is discarded before
+# persistence and never promoted into the legacy value object. Stored rows keep theirs:
+# nothing here rewrites history, and the aggregation guards that stop a legacy market cap
+# reaching equity_value, transaction_value, enterprise_value, the implied values or the
+# multiples are untouched.
+_RETIRED_VALUE_TYPES = frozenset({"MARKET_CAPITALIZATION"})
 _VALID_ACQUIRER_TYPES_V2 = frozenset({
     "strategic_corporate", "private_equity", "pe_portfolio", "venture_capital",
     "growth_equity", "sovereign_wealth_fund", "pension_fund", "hedge_fund",
@@ -248,7 +258,13 @@ def _validate(result: dict) -> str | None:
     return None
 
 
-def _value_observations_json(txn: dict) -> str | None:
+def _value_observations_json(txn: dict, log=None, source_raw_id=None) -> str | None:
+    """Serialize the observation array, discarding retired types.
+
+    A retired type is dropped here rather than refused in `_validate`, which fails the
+    entire extraction. Dropping one unsupported observation and keeping the rest is the
+    same treatment `asset_type` and `is_going_private_outcome` already get.
+    """
     items = txn.get("value_observations")
     if not isinstance(items, list):
         return None
@@ -259,6 +275,14 @@ def _value_observations_json(txn: dict) -> str | None:
         amount = item.get("amount")
         vtype = item.get("type")
         if amount is None and vtype is None:
+            continue
+        if vtype in _RETIRED_VALUE_TYPES:
+            if log is not None:
+                log.warning(
+                    "source_raw_id=%s dropping value observation typed %r — retired from "
+                    "the transaction-value vocabulary (prompt 0.28); it is not a "
+                    "deal-value fact", source_raw_id, vtype,
+                )
             continue
         clean.append({
             "amount": amount,
@@ -272,11 +296,22 @@ def _value_observations_json(txn: dict) -> str | None:
 
 
 def _primary_value(txn: dict) -> dict:
-    """Return the compatibility value object, sourced from the first typed fact when present."""
+    """Return the compatibility value object, sourced from the first supported typed fact.
+
+    Retired types are skipped rather than promoted: the legacy slot is what reaches
+    canonical `value_amount`/`value_type`, and a figure that is not a deal-value fact
+    must not become the transaction's value merely because it came first. When nothing
+    supported survives, the legacy object stands -- and it is itself null when the
+    source stated no consideration.
+    """
     legacy = txn.get("value") or {}
+    if legacy.get("type") in _RETIRED_VALUE_TYPES:
+        legacy = {k: v for k, v in legacy.items() if k in ("type_confidence", "per_share_price")}
     items = txn.get("value_observations")
     if isinstance(items, list) and items:
-        first = items[0] if isinstance(items[0], dict) else {}
+        first = next((i for i in items
+                      if isinstance(i, dict) and i and i.get("type") not in _RETIRED_VALUE_TYPES),
+                     None) or {}
         if first:
             return {
                 "amount": first.get("amount"),
@@ -419,7 +454,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             v = _primary_value(txn)
             features = txn.get("features") or {}
             tf = txn.get("target_financials") or {}
-            value_observations_json = _value_observations_json(txn)
+            value_observations_json = _value_observations_json(
+                txn, log, row["source_raw_id"])
 
             nd = dict(base_nd)
             hc_notes = txn.get("notes")

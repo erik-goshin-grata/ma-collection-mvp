@@ -129,6 +129,15 @@ _FIELD_ENUMS = {
     "round_price_direction": fhc._VALID_ROUND_PRICE_DIRECTION,
 }
 
+# Values the owning stage still ACCEPTS but the prompt must no longer OFFER. A retired
+# value stays in the stage frozenset deliberately -- _validate rejects a whole extraction
+# on an unknown type, so delisting it there would turn a model still emitting it into a
+# total loss -- but it must not appear as current output vocabulary. Subtracted from the
+# expected set, and required on the legacy line instead.
+RETIRED = {
+    "value_type": hc._RETIRED_VALUE_TYPES,
+}
+
 _BLOCK_RE = re.compile(r"<!-- AGG_VOCAB_START.*?-->(.*?)<!-- AGG_VOCAB_END -->", re.S)
 _LINE_RE = re.compile(r"^- ([A-Za-z0-9_.]+): (.+)$", re.M)   # digits matter: v2_event_type
 _VERSION_RE = re.compile(r"^\*\*Version:\*\* (\d+)\.(\d+)", re.M)
@@ -168,6 +177,7 @@ def main() -> None:
         if label not in declared:
             failures.append(f"block: {label} is missing")
             continue
+        expected = set(expected) - RETIRED.get(label, set())
         got = declared[label]
         for extra in sorted(got - set(expected)):
             failures.append(f"{label}: prompt declares {extra!r}, which the owning stage rejects")
@@ -184,6 +194,14 @@ def main() -> None:
     # if it returns to the acquirer_type line (the stage no longer accepts it); this pins the
     # other half -- that it stays READABLE on the legacy line. Dropping it from both would
     # leave stored rows with a value the prompt does not acknowledge at all.
+    for retired in sorted(hc._RETIRED_VALUE_TYPES):
+        if retired in declared.get("value_type", set()):
+            failures.append(f"value_type: {retired} is listed as a current value type — HC 0.28 "
+                            "retired it; a market cap is not a deal-value fact, and stored rows "
+                            "are read-tolerated on the separate legacy line")
+        if retired not in declared.get("legacy_read_only", set()):
+            failures.append(f"legacy_read_only: {retired} should be listed as a read-tolerated "
+                            "historical value")
     if "consortium" in declared.get("acquirer_type", set()):
         failures.append("acquirer_type: consortium is listed as a current buyer type — HC 0.27 "
                         "retired it; classification describes an individual firm, and stored "

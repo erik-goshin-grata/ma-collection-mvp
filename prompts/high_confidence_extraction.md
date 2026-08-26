@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.27 (buyers are firms, not a manufactured collective)
+**Version:** 0.28 (only supported deal-value facts are captured)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -415,21 +415,13 @@ value:
       or a per-share × shares aggregate the source itself states (do not
       compute the product yourself — see rule 1). This is consideration that
       changed hands, NOT a valuation of the whole company. A market
-      capitalization is not an EQUITY_VALUE — see MARKET_CAPITALIZATION below.
+      capitalization is not an EQUITY_VALUE, and it is not a deal-value fact
+      under any other type either — see WHAT IS NOT A DEAL-VALUE FACT below.
     TRANSACTION_VALUE — total consideration including assumed debt; often
       labelled "transaction value" or "total consideration"
     ENTERPRISE_VALUE — source-stated whole-company EV; often labelled
       "enterprise value" or "including net debt." Do not compute EV from
       equity value, debt, or cash in this extraction prompt.
-    MARKET_CAPITALIZATION — the target's or acquirer's public market value of
-      equity, as stated by the source. This is a whole-company figure and a
-      property of the company, not of the transaction: nothing was bought at
-      this price. Capture it when the source states it, so the fact is kept,
-      but never use it as the deal's equity purchase price or consideration.
-      A minority stake bought for $600 million in a company with a $2.2
-      billion market cap is a $600 million transaction — the $2.2 billion is
-      context, and recording it as the equity value overstates the deal by
-      nearly 4x.
     UNDISCLOSED — source explicitly states terms are not disclosed
   Null if no value is stated and source does not say undisclosed.
 - type_confidence: HIGH / MEDIUM / LOW — how confident you are in the type
@@ -453,6 +445,34 @@ EBITDA.
   identical. A "$210 million enterprise value" and "$210 million 2025 net
   sales" are different facts; the first belongs here and the second belongs in
   target_financials.revenue_amount.
+
+WHAT IS NOT A DEAL-VALUE FACT
+
+A monetary figure is captured here ONLY when it satisfies one of the supported
+definitions above. A valuation that does not satisfy a supported deal-value
+definition is not captured at all — not under a nearby type, and not in the
+legacy value object. Being stated by the source, and being financially
+interesting, is not the test.
+
+This is a scope rule, not a size rule. A whole-company figure can be perfectly
+in scope: a source-stated ENTERPRISE_VALUE is whole-company and supported. What
+decides capture is whether the figure IS one of the supported concepts.
+
+Not captured, because none of the supported definitions covers them:
+
+- a market capitalization — the company's public market value of equity;
+- a pre-money, post-money or post-transaction valuation of a company;
+- an implied, reference or headline valuation that is not the consideration and
+  is not labelled by the source as an enterprise value.
+
+"The transaction reflects a pre-money equity valuation of approximately $1.6
+billion and a post-transaction equity valuation of approximately $2.3 billion"
+states no consideration. Neither figure is a deal-value fact: emit NO
+observation for either, and leave the legacy value object null. Do not relabel
+such a figure as EQUITY_VALUE, ENTERPRISE_VALUE or TRANSACTION_VALUE to make it
+fit, and do not report UNDISCLOSED — that value is reserved for a source that
+explicitly says the terms or value are not disclosed, which is a different
+statement from a source that simply never states consideration.
 
 ONE ECONOMIC FACT, ONE OBSERVATION — CURRENCY REPRESENTATIONS
 
@@ -502,12 +522,7 @@ it is one fact.
 - Include at minimum amount, currency, type, basis or qualifier if stated, and
   a short evidence phrase.
 - Valid type values are the same as value.type: EQUITY_VALUE,
-  TRANSACTION_VALUE, ENTERPRISE_VALUE, MARKET_CAPITALIZATION, UNDISCLOSED.
-- A MARKET_CAPITALIZATION observation is never the primary value. The primary
-  fact is the most transaction-specific one — the equity purchase price or the
-  total consideration. A market cap describes the company, not the deal, so it
-  belongs later in the array and never in the legacy value object unless the
-  source states no transaction value at all.
+  TRANSACTION_VALUE, ENTERPRISE_VALUE, UNDISCLOSED.
 - Use basis="STATED" for source-stated values when no more specific basis is
   needed. Use qualifier for words like "approximately", "up to", or "subject to
   adjustment".
@@ -1656,3 +1671,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.25 | 2026-08-25 | **Buy-side coherence: `ADD_ON` yields, parties do not move.** A source can name a sponsor as the acquirer and separately state an intention to combine the target with a company that sponsor already owns. Reading that as `ADD_ON` produced a record asserting the buyer was both the sponsor and a company the sponsor backs — `acquirer.type = private_equity` with `ADD_ON` and no distinct operating-company acquirer. `ADD_ON` now requires the source to establish that an already sponsor-backed portfolio or platform company **is** the acquiring operating company; a sponsor owning another company and intending to merge the target into it is explicitly **not enough on its own**. A new delivered **BUY-SIDE COHERENCE** block ties `acquirer.name`, `acquirer.type`, `acquirer.sponsor_name` and `sponsor_transaction_role` together and resolves the contradiction in one direction only — **withhold `ADD_ON`, never move a party**. The source-stated acquirer is preserved; no party is promoted, invented, renamed or reassigned to make the fields agree. Ordinary sponsor-backed acquisitions ("X, a portfolio company of Y Capital, acquired Z") are unaffected. |
 | 0.26 | 2026-08-25 | **Currency representations of one fact are one observation.** A source stating "€850 million (approximately $1 billion)" was producing two `value_observations` of the same `value_type`, because the block prohibited collapsing facts and said nothing about currency equivalents. Downstream those decompose into independent `value_amount` and `value_currency` observations, so the resolver could pair an amount from one representation with the currency from the other — and did, emitting `850,000,000 USD`, a monetary pair no source stated. The block now states that multiple currency representations of one economic fact are one fact: retain the representation the source presents as primary or headline, judged across the whole source; failing that, the first clearly stated one; **never** chosen from geography, party nationality, transaction location or an assumed "natural" currency. The alternate stays in the evidence phrase or notes and gets no array item, no amount and no currency. The existing do-not-collapse rule is preserved and explicitly not relaxed — consideration and enterprise value remain two observations in one sentence. The distinguishing test is whether converting one figure into the other's currency would produce the other. |
 | 0.27 | 2026-08-25 | **Multiple buyers stay the firms they are; `consortium` is retired from `acquirer.type`.** An acceptance source read "a venture of RPM Living and New York Life" and the extraction returned `acquirer_name = "RPM Living and New York Life venture"` with `acquirer_type = consortium` — a buyer that does not exist, composed by reordering the source into a possessive-style name. `name: Acquiring entity name as stated` was the only guard and a single unelaborated line did not hold. A MULTIPLE BUYERS rule now names the failure directly: name the actual firms, join them plainly, never append or invent a collective noun. Separately, `consortium` is not a buyer classification — classification describes an individual firm, and two firms buying together may be different kinds of buyer — so it leaves the vocabulary and the multi-buyer scalar returns `unknown`, stated as MVP compatibility rather than a claim about the buyers. Historical `consortium` rows stay readable: the owning stage maps a newly-emitted value to `unknown` rather than passing it through, and no legacy read path or derivation changes. |
+| 0.28 | 2026-08-26 | **`MARKET_CAPITALIZATION` retired from the transaction-value vocabulary; the supported-concept boundary made explicit.** A de-SPAC source stating "a pre-money equity valuation of approximately $1.6 billion and a post-transaction equity valuation of approximately $2.3 billion" produced two observations typed `MARKET_CAPITALIZATION` and a canonical `value_amount` of $1.6B — although the source never uses the words market capitalization and the target was private, so the figure did not satisfy even the type it was given. The array's own scope rule already said to return `[]` when there is no explicitly supported, qualified deal-value fact; `MARKET_CAPITALIZATION` contradicted it, being defined in the same breath as "a property of the company, not of the transaction" while sitting in a deal-value vocabulary, with an instruction to capture it on source-statedness alone. It was never a Product-approved transaction field — it appears in neither Data Dictionary nor the schema, and originated as engineering containment to keep market caps out of `equity_value` (decision 2026-08-17). A WHAT IS NOT A DEAL-VALUE FACT block now states the boundary as a scope test rather than a size test: a source-stated ENTERPRISE_VALUE remains whole-company and supported. `UNDISCLOSED` is unchanged and stays reserved for a source that says terms are not disclosed. The value remains in the owning stage's `_VALID_VALUE_TYPES` purely as tolerance, so an emitted retired type is dropped and logged rather than failing the whole extraction; no stored data is rewritten and every derivation guard against legacy market-cap observations is untouched. |
