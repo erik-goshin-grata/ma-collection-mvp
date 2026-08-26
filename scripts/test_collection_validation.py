@@ -241,9 +241,13 @@ def main() -> None:
     ma, funding = fv.build_review_rows(conn)
     check("one M&A row", len(ma), 1)
     check("one Funding row", len(funding), 1)
-    # 57 approved fields + the 4 termination-fee fields added on approval.
-    check("M&A column count is 61", len(fv._MA_COLS), 61)
-    check("Funding column count is 41", len(fv._FUNDING_COLS), 41)
+    # Sheet 1.0 was 57 approved fields + the 4 termination-fee fields added on approval.
+    # Sheet 1.1 (R4.1) adds 22 M&A and 4 funding columns that were already captured and
+    # merely hidden. The counts stay pinned so a column set cannot drift silently; they
+    # move only alongside a _REVIEW_SHEET_VERSION bump, which is asserted here with them.
+    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.1")
+    check("M&A column count is 83", len(fv._MA_COLS), 83)
+    check("Funding column count is 45", len(fv._FUNDING_COLS), 45)
     check("M&A row emits exactly the declared columns", list(ma[0].keys()), fv._MA_COLS)
     check("Funding row emits exactly the declared columns",
           list(funding[0].keys()), fv._FUNDING_COLS)

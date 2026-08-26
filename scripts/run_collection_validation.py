@@ -356,27 +356,41 @@ def sources_by_transaction(conn) -> dict:
     return out
 
 
+# Bumped whenever the review column set changes. Emitted into diagnostics/run_summary.json
+# so a sheet can be tied to the columns that produced it -- otherwise a 61-column and an
+# 83-column ma_review.csv are indistinguishable after the fact. Deliberately NOT a column:
+# it describes the sheet, not any transaction.
+_REVIEW_SHEET_VERSION = "1.1"
+
 # Column order is the review order. Lifecycle scalars are displayed under readable
 # names -- status/announced_date/closed_date -- while their MVP provenance stays in
 # the database. No mvp_* labels, no transaction-level acquirer_type, no RELEVANT.
 _MA_COLS = [
     "source_ref", "source_url", "transaction_id",
-    "status", "event_type", "announced_date", "closed_date",
-    "deal_type", "combination_structure",
-    "target_name", "target_status", "target_type", "asset_type", "target_description",
-    "acquirer_name", "acquirer_sponsor_name", "sponsor_transaction_role",
-    "parent_seller_name",
-    "pct_acquired", "pct_acquired_source", "stake_transition_type",
-    "consideration_type", "consideration_components",
+    "status", "event_type",
+    "announced_date", "announced_date_precision",
+    "closed_date", "closed_date_precision",
+    "signing_date", "signing_date_precision", "rumor_date",
+    "deal_type", "combination_structure", "spin_split_type",
+    "target_name", "target_domain", "target_ticker", "target_status",
+    "target_type", "asset_type", "target_description",
+    "acquirer_name", "acquirer_domain", "acquirer_ticker", "acquirer_description",
+    "acquirer_sponsor_name", "sponsor_transaction_role",
+    "parent_seller_name", "parent_seller_ticker", "parent_seller_description",
+    "pct_acquired", "pct_acquired_source", "stake_transition_type", "is_minority",
+    "offer_mechanism",
+    "consideration_type", "consideration_components", "has_earnout", "has_cvr",
     "transaction_value", "transaction_value_basis",
+    "transaction_size", "transaction_size_basis",
     "equity_value", "equity_value_basis",
     "enterprise_value", "enterprise_value_basis",
     "per_share_price",
-    "value_amount", "value_currency", "value_type",
+    "value_amount", "value_currency", "value_type", "deal_value_currency",
     "target_revenue", "target_revenue_period_type", "target_revenue_period_end",
     "target_ebitda", "target_ebitda_period_type", "target_ebitda_period_end",
     "financials_currency", "financials_disclosure_status",
-    "is_take_private", "is_secondary_buyout", "is_merger_of_equals",
+    "is_take_private", "is_going_private_outcome",
+    "is_secondary_buyout", "is_merger_of_equals", "hostile",
     "deal_attitude", "approach_type", "competing_bid", "regulatory_approvals_required",
     "has_go_shop", "go_shop_period_days",
     "target_fee_amount", "target_fee_percentage",
@@ -388,8 +402,10 @@ _MA_COLS = [
 
 _FUNDING_COLS = [
     "source_ref", "source_url", "transaction_id",
-    "status", "event_type", "announced_date",
-    "company_name", "company_description",
+    "status", "event_type",
+    "announced_date", "announced_date_precision",
+    "closed_date", "closed_date_precision",
+    "company_name", "company_domain", "company_description",
     "round_label", "round", "vc_stage",
     "round_size", "round_currency",
     "pre_money_valuation", "post_money_valuation", "valuation_currency",
@@ -435,6 +451,9 @@ def build_review_rows(conn):
             "status": t["transaction_status"],
             "event_type": t["event_history_type"],
             "announced_date": t["announced_date"],
+            "announced_date_precision": t["announced_date_precision"],
+            "closed_date": t["closed_date"],
+            "closed_date_precision": t["closed_date_precision"],
             "deal_summary": summaries.get(txn),
             "overall_review": "", "missing_or_wrong_fields": "", "review_notes": "",
             "advisors_side_not_established": "; ".join(a["unassigned"]),
@@ -453,6 +472,7 @@ def build_review_rows(conn):
             row = dict(common)
             row.update({
                 "company_name": t["target_name"],
+                "company_domain": t["target_domain"],
                 "company_description": t["target_description"],
                 "round_label": t["round_label"], "round": t["round"],
                 "vc_stage": t["vc_stage"],
@@ -476,20 +496,35 @@ def build_review_rows(conn):
         else:
             row = dict(common)
             row.update({
-                "closed_date": t["closed_date"],
                 "deal_type": t["v2_event_type"],
                 "combination_structure": t["combination_structure"],
+                "spin_split_type": t["spin_split_type_v2"],
+                "signing_date": t["signing_date"],
+                "signing_date_precision": t["signing_date_precision"],
+                "rumor_date": t["rumor_date"],
                 "target_name": t["target_name"], "target_status": t["target_status"],
+                "target_domain": t["target_domain"], "target_ticker": t["target_ticker"],
                 "target_type": t["target_type_v2"], "asset_type": t["asset_type"],
                 "target_description": t["target_description"],
                 "acquirer_name": t["acquirer_name"],
+                "acquirer_domain": t["acquirer_domain"],
+                "acquirer_ticker": t["acquirer_ticker"],
+                "acquirer_description": t["acquirer_description"],
                 "acquirer_sponsor_name": t["acquirer_sponsor_name"],
                 "sponsor_transaction_role": t["sponsor_transaction_role"],
                 "parent_seller_name": t["parent_seller_name"],
+                "parent_seller_ticker": t["parent_seller_ticker"],
+                "parent_seller_description": t["parent_seller_description"],
+                "is_minority": t["is_minority"],
+                "offer_mechanism": t["offer_mechanism"],
                 "consideration_type": t["consideration_type"],
                 "consideration_components": t["consideration_components"],
+                "has_earnout": t["has_earnout"], "has_cvr": t["has_cvr"],
                 "transaction_value": _num(t["transaction_value"]),
                 "transaction_value_basis": t["transaction_value_basis"],
+                "transaction_size": _num(t["transaction_size"]),
+                "transaction_size_basis": t["transaction_size_basis"],
+                "deal_value_currency": t["deal_value_currency"],
                 "equity_value": _num(t["equity_value"]),
                 "equity_value_basis": t["equity_value_basis"],
                 "enterprise_value": _num(t["enterprise_value"]),
@@ -500,8 +535,10 @@ def build_review_rows(conn):
                 "target_revenue_period_end": t["target_revenue_period_end"],
                 "target_ebitda_period_end": t["target_ebitda_period_end"],
                 "is_take_private": t["is_take_private"],
+                "is_going_private_outcome": t["is_going_private_outcome"],
                 "is_secondary_buyout": t["is_secondary_buyout"],
                 "is_merger_of_equals": t["is_merger_of_equals"],
+                "hostile": t["hostile"],
                 "deal_attitude": t["deal_attitude"], "approach_type": t["approach_type"],
                 "competing_bid": t["competing_bid"],
                 "regulatory_approvals_required": t["regulatory_approvals_required"],
@@ -631,6 +668,7 @@ def main() -> int:
               _REJECTION_COLS, rejections)
 
     summary = {
+        "review_sheet_version": _REVIEW_SHEET_VERSION,
         "stage_results": results,
         "counts": {
             "sources_seeded": len(mapping),
