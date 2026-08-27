@@ -348,6 +348,17 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "specialty" not in _existing("advisor"):
         conn.executescript((_mig_dir / "011_v3_advisor_participation.sql").read_text(encoding="utf-8"))
 
+    # 012 (V3 §6 multiples as normalized rows). Same hand-registered pattern, but this
+    # migration adds a TABLE rather than columns, so the sentinel asks sqlite_master
+    # whether the table exists instead of asking PRAGMA table_info for a column --
+    # _existing() on a table that does not exist returns an empty set, which would make
+    # a column sentinel fire forever. The script is CREATE TABLE IF NOT EXISTS
+    # throughout, so it is idempotent either way; the guard just avoids re-running it.
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transaction_multiple'"
+    ).fetchone():
+        conn.executescript((_mig_dir / "012_v3_transaction_multiple.sql").read_text(encoding="utf-8"))
+
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
     # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document
