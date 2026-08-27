@@ -413,6 +413,113 @@ def _write_value_observations(
     return inserted
 
 
+MULTIPLE_FIELD_PREFIX = "multiple."
+
+
+def reported_multiple_field_name(item: dict) -> str | None:
+    """The canonical fact key for one stated multiple.
+
+    Composed from the dimensions Product actually has -- multiple_type, period_basis and
+    the denominator period end -- in the same way the ledger already composes
+    `shares_outstanding.{type}[.{class}]` and `consideration.{form}.{attr}`. Two
+    observations that land on this key are two claims about ONE canonical fact, which is
+    what makes them candidates for reconciliation rather than two canonical rows.
+
+    Deliberately NOT part of the key: anything describing an adjustment. Product does
+    not distinguish adjusted from unadjusted multiples structurally, so Maverick's
+    headline 11.5x and its tax-adjusted 10.5x compose the SAME key. That is the point:
+    they arrive as a conflict at one key, not as two canonical values a reader cannot
+    tell apart.
+
+    An omitted basis or period end contributes an empty segment rather than being
+    dropped, so a multiple with no stated basis cannot silently collide with one that
+    has a basis.
+    """
+    mtype = item.get("multiple_type")
+    if not mtype:
+        return None
+    basis = item.get("period_basis") or ""
+    period_end = item.get("period_end_date") or ""
+    return f"{MULTIPLE_FIELD_PREFIX}{mtype}.{basis}.{period_end}"
+
+
+def _write_reported_multiples(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    prompt_version: str | None,
+    observation_source_stage: str,
+    columns: set[str],
+) -> int:
+    """Two rows per stated multiple: one preserved, one reconciled.
+
+    Modelled on `_write_value_observations`, which solved this exact problem for deal
+    values. Each stated multiple produces:
+
+      `reported_multiple`                  PRESERVATION. The whole item as JSON,
+                                           including the source's verbatim wording.
+                                           This field_name is absent from aggregate's
+                                           _FIELDS, so _load_observation_input drops it
+                                           from reconciliation -- it is a record, never
+                                           a candidate. Every stated multiple survives
+                                           here whatever reconciliation later decides.
+
+      `multiple.{type}.{basis}.{end}`      RECONCILIATION. The numeric value at the
+                                           canonical fact key. Two observations at one
+                                           key are one fact claimed twice.
+
+    Per-fact provenance comes from `observation_fact_key` (E4 rule 6), so two multiples
+    stated in one article stay distinguishable from one multiple corroborated by two
+    articles -- INSERT OR IGNORE would otherwise collapse them.
+
+    Nothing is computed, ranked or adjudicated here. This is a writer.
+    """
+    inserted = 0
+    source_type = _row_value(row, "source_type")
+    items = _value_observation_items(_row_value(row, "reported_multiples"))
+    for index, item in enumerate(items):
+        fact_key = f"reported_multiples[{index}]"
+        common = {
+            "transaction_id": _row_value(row, "transaction_cluster_id"),
+            "staging_extraction_id": _row_value(row, "extraction_id"),
+            "source_raw_id": _row_value(row, "source_raw_id"),
+            "source_type": source_type,
+            "source_tier": _row_value(row, "source_tier"),
+            "model_confidence": _row_value(row, "model_confidence"),
+            "source_published_date": _row_value(row, "published_date"),
+            "filing_type": _source_filing_type(source_type),
+            "extraction_prompt_version": prompt_version,
+            "observation_source_stage": observation_source_stage,
+            "observation_fact_key": fact_key,
+            "columns": columns,
+        }
+        # Preservation first, so a multiple whose type is unusable for a key is still
+        # recorded rather than lost.
+        inserted += insert_observation(
+            conn,
+            field_name="reported_multiple",
+            field_value=json.dumps({
+                "multiple_type": item.get("multiple_type"),
+                "multiple_value": item.get("multiple_value"),
+                "period_basis": item.get("period_basis"),
+                "period_end_date": item.get("period_end_date"),
+                "numerator_value_type": item.get("numerator_value_type"),
+                "as_reported_text": item.get("as_reported_text"),
+            }, ensure_ascii=False, sort_keys=True),
+            **common,
+        )
+        field_name = reported_multiple_field_name(item)
+        if field_name is None or item.get("multiple_value") is None:
+            continue
+        inserted += insert_observation(
+            conn,
+            field_name=field_name,
+            field_value=item.get("multiple_value"),
+            **common,
+        )
+    return inserted
+
+
 def _write_consideration_observations(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -581,6 +688,13 @@ def write_staging_observations_for_extraction(
             columns=columns,
         )
         inserted += _write_value_observations(
+            conn,
+            row,
+            prompt_version=_row_value(row, "hc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "HC_EXTRACT"),
+            columns=columns,
+        )
+        inserted += _write_reported_multiples(
             conn,
             row,
             prompt_version=_row_value(row, "hc_prompt_version"),

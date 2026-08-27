@@ -37,11 +37,15 @@ from typing import Any
 
 from config import DEFAULT_AGGREGATION_READ_SOURCE, Config
 from lib.field_priority import TIER_ORDER
+from lib.observation_writer import (
+    MULTIPLE_FIELD_PREFIX as _MULTIPLE_FIELD_PREFIX,
+    reported_multiple_field_name,
+)
 from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "aggregation"
-_VERSION = "0.9"
+_VERSION = "0.10"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -601,6 +605,151 @@ def _compute_multiples(
         result["multiple_quality"] = "NM"
 
     return result
+
+
+def _period_end_precision(period_end: str | None) -> str | None:
+    """Precision of a stated period end, read off its shape.
+
+    Formatting, not inference: "2026" is a year because the source wrote a year, and it
+    stays "2026". Expanding it to 2026-12-31 would assert a day the source never gave.
+    """
+    if not period_end:
+        return None
+    text = str(period_end).strip()
+    if len(text) == 4 and text.isdigit():
+        return "YEAR"
+    if len(text) == 7:
+        return "MONTH"
+    if len(text) >= 10:
+        return "DAY"
+    return None
+
+
+def _write_as_reported_multiples(
+    conn,
+    cluster_id: str,
+    field_values: dict,
+    flagged_keys: set,
+    observations: dict,
+    log: Any,
+) -> int:
+    """Write the RESOLVED multiple for each canonical key. Resolved facts only.
+
+    Reads what reconciliation decided, not what any one source said. The value comes
+    from `field_values` -- populated by the same _pick_value the scalar fields use --
+    and the key itself supplies the dimensions, parsed back out of
+    `multiple.{type}.{basis}.{end}`.
+
+    AN UNRESOLVED KEY PRODUCES NO ROW. Product ruling: transaction_multiple carries
+    resolved canonical facts only. Where two sources -- or one source twice -- claim
+    different values for one key and the generic machinery cannot choose, the claims
+    stay in `transaction_field_observation` and the disagreement stays in
+    `aggregation_conflict_log` with flagged_for_review set. Nothing is silently chosen,
+    and two indistinguishable canonical values are never surfaced.
+
+    That is why Maverick produces no canonical multiple: its 11.5x and its tax-adjusted
+    10.5x compose one key, differ, and share a source, a tier and a confidence, so
+    _pick_value cannot separate them and neither can the aggregation prompt -- Product
+    does not distinguish adjusted from unadjusted structurally, so there is nothing to
+    separate them BY. Both observations survive; no canonical row is asserted.
+
+    Three fields are NULL by rule on every row written here:
+
+      quality                  -- CALCULATED, NM and NOT_CALCULABLE all report the
+                                  outcome of a calculation, and none was performed.
+      denominator_financial_id -- "Expected on calculated rows" (V3 6) is a scoped
+                                  expectation whose scope excludes as-reported rows.
+      the denominator itself   -- never reconstructed. Nothing is divided here.
+
+    Re-aggregation replaces this transaction's as-reported rows. The delete is scoped to
+    source_flag = 'as_reported' so a calculated row is never removed by a writer that
+    does not own it.
+    """
+    conn.execute(
+        "DELETE FROM transaction_multiple WHERE transaction_id = ? AND source_flag = 'as_reported'",
+        (cluster_id,),
+    )
+    written = 0
+    for key in sorted(k for k in field_values if k.startswith(_MULTIPLE_FIELD_PREFIX)):
+        if key in flagged_keys:
+            log.info("cluster=%s %s unresolved — no canonical multiple written; the "
+                     "observations and the conflict record stand", cluster_id, key)
+            continue
+        value = field_values.get(key)
+        if value is None:
+            continue
+        # multiple.{type}.{basis}.{end} — split from the left on the fixed number of
+        # segments, so a period end containing a dot could not shift the others.
+        parts = key[len(_MULTIPLE_FIELD_PREFIX):].split(".", 2)
+        if len(parts) != 3:
+            log.warning("cluster=%s unparseable multiple key %r — skipped", cluster_id, key)
+            continue
+        multiple_type, period_basis, period_end = (part or None for part in parts)
+        # Provenance and the numerator family come from the observations behind the key.
+        # Any of them will do for the family -- it is determined by multiple_type, which
+        # is part of the key, so every observation here agrees on it.
+        obs = observations.get(key) or []
+        source_key = obs[0].get("source_key") if obs else None
+        numerator = ("implied_enterprise_value"
+                     if multiple_type in ("EV_REVENUE", "EV_EBITDA", "EV_EBIT", "EV_FCF")
+                     else "implied_equity_value")
+        conn.execute(
+            """
+            INSERT INTO transaction_multiple (
+                transaction_id, multiple_type, multiple_value,
+                period_basis, period_end_date, period_end_date_precision,
+                numerator_value_type, denominator_financial_id,
+                source_flag, quality, multiple_as_reported,
+                staging_extraction_id, source_raw_id, extraction_prompt_version
+            ) VALUES (?,?,?,?,?,?,?,NULL,'as_reported',NULL,?,?,?,?)
+            """,
+            (
+                cluster_id, multiple_type, value,
+                period_basis, period_end, _period_end_precision(period_end),
+                numerator,
+                _reported_multiple_text(conn, cluster_id, key, value),
+                source_key[0] if source_key else None,
+                source_key[1] if source_key else None,
+                _FULL_VERSION,
+            ),
+        )
+        written += 1
+    if written:
+        log.info("cluster=%s wrote %d resolved as-reported multiple row(s)", cluster_id, written)
+    return written
+
+
+def _reported_multiple_text(conn, cluster_id: str, key: str, value: Any) -> str | None:
+    """The verbatim wording behind a resolved value, read from the preservation rows.
+
+    Queried from the ledger rather than taken from the aggregation bundle, because the
+    bundle deliberately does not contain these rows: `reported_multiple` is absent from
+    _FIELDS, so _load_observation_input drops it. That exclusion is the point -- a
+    preserved record is not a reconciliation candidate -- and it means the wording has
+    to be fetched where it actually lives.
+
+    A convenience for a reader of the canonical row, recovered rather than re-derived.
+    The authoritative record of every stated multiple remains the observations
+    themselves; this only reads them, and returns None when none carries this value.
+    """
+    rows = conn.execute(
+        "SELECT field_value FROM transaction_field_observation "
+        "WHERE transaction_id = ? AND field_name = 'reported_multiple' AND is_current = 1 "
+        "ORDER BY observation_id",
+        (cluster_id,),
+    ).fetchall()
+    for row in rows:
+        try:
+            item = json.loads(row["field_value"])
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(item, dict):
+            continue
+        if reported_multiple_field_name(item) != key:
+            continue
+        if item.get("multiple_value") == value:
+            return item.get("as_reported_text")
+    return None
 
 
 def _event_type(fv: dict) -> str | None:
@@ -1514,8 +1663,13 @@ def _log_conflict(
 # ---------------------------------------------------------------------------
 
 def _empty_cluster() -> dict:
+    # defaultdict, because the multiple.* keys are composed from the data rather than
+    # declared in _FIELDS -- a plain dict would KeyError on the first one seen.
+    observations: dict[str, list[dict]] = defaultdict(list)
+    for field_name, _ in _FIELDS:
+        observations[field_name] = []
     return {
-        "field_observations": {field_name: [] for field_name, _ in _FIELDS},
+        "field_observations": observations,
         "deal_context": {},
         "sources": [],
     }
@@ -1730,10 +1884,17 @@ def _load_observation_input(conn: sqlite3.Connection) -> dict[str, dict]:
             })
 
         field_name = row["field_name"]
-        if field_name not in _FIELD_TYPE:
+        # A multiple's canonical fact key is composed from its own dimensions
+        # (multiple.{type}.{basis}.{end}), so it cannot be declared in _FIELDS. It is
+        # always numeric. The `reported_multiple` preservation rows are NOT admitted
+        # here and never will be -- they are the record of what each source said, not
+        # candidates to reconcile between.
+        if field_name.startswith(_MULTIPLE_FIELD_PREFIX):
+            field_type = "number"
+        elif field_name not in _FIELD_TYPE:
             continue
-
-        field_type = _FIELD_TYPE[field_name]
+        else:
+            field_type = _FIELD_TYPE[field_name]
         value = _value_from_observation(row, field_type)
         if field_name in _CONTEXT_FIELDS and bundle["deal_context"].get(field_name) is None:
             bundle["deal_context"][field_name] = value
@@ -1952,7 +2113,18 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Defer conflict log writes until after transaction_record exists (FK constraint)
             pending_conflicts: list[tuple[str, list, Any]] = []
 
-            for field_name, field_type in _FIELDS:
+            # Declared scalar fields, then whatever multiple keys this cluster's sources
+            # actually produced. Both go through the SAME _pick_value / _call_agg_prompt /
+            # _log_conflict path -- there is no multiples-specific reconciliation.
+            multiple_keys = sorted(
+                k for k in bundle["field_observations"]
+                if k.startswith(_MULTIPLE_FIELD_PREFIX)
+                and bundle["field_observations"][k]
+            )
+            flagged_multiple_keys: set[str] = set()
+            for field_name, field_type in (
+                list(_FIELDS) + [(k, "number") for k in multiple_keys]
+            ):
                 observations = bundle["field_observations"].get(field_name, [])
                 chosen, needs_llm, conflict_obs = _pick_value(field_name, field_type, observations)
 
@@ -1974,6 +2146,15 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         "cluster=%s field=%s LLM conflict resolved → %r",
                         cluster_id, field_name, chosen,
                     )
+                    # A conflicted multiple key yields NO canonical row. Product ruling:
+                    # transaction_multiple carries resolved canonical facts only, and an
+                    # unresolved key stays in the observation and conflict machinery
+                    # rather than becoming a canonical value a reader cannot trust. The
+                    # scalar fields keep their existing behaviour untouched.
+                    if field_name.startswith(_MULTIPLE_FIELD_PREFIX) and (
+                        result is None or result.get("flagged_for_review")
+                    ):
+                        flagged_multiple_keys.add(field_name)
 
                 field_values[field_name] = chosen
 
@@ -2276,6 +2457,13 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Flush deferred conflict logs (must follow transaction_record INSERT for FK)
             for f_name, c_obs, c_result in pending_conflicts:
                 _log_conflict(conn, cluster_id, f_name, c_obs, c_result)
+
+            # Resolved multiples become canonical rows now that a transaction_id
+            # exists. Must follow the transaction_record INSERT above for the FK.
+            _write_as_reported_multiples(
+                conn, cluster_id, field_values, flagged_multiple_keys,
+                bundle["field_observations"], log,
+            )
 
             # Insert transaction_source rows for each cluster member's source
             for source in bundle["sources"]:
