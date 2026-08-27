@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.34"
+_VERSION = "0.35"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -51,6 +51,7 @@ _REQUIRED_KEYS = frozenset({
     "parent_sellers",
     "parent_acquirers",
     "sell_side_sponsors",
+    "sellers",
     "reported_multiples",
     "model_confidence",
     "deal",
@@ -288,7 +289,7 @@ _REPORTED_MULTIPLE_KEYS = frozenset({
 
 _PARTY_ARRAY_KEYS = (
     "acquirers", "buy_side_sponsors", "parent_sellers",
-    "parent_acquirers", "sell_side_sponsors",
+    "parent_acquirers", "sell_side_sponsors", "sellers",
 )
 
 
@@ -618,6 +619,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             parent_sellers_json = _parties_json(txn, "parent_sellers", log, eid)
             parent_acquirers_json = _parties_json(txn, "parent_acquirers", log, eid)
             sell_side_sponsors_json = _parties_json(txn, "sell_side_sponsors", log, eid)
+            sellers_json = _parties_json(txn, "sellers", log, eid)
 
             nd = dict(base_nd)
             hc_notes = txn.get("notes")
@@ -692,6 +694,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 parent_sellers_json,
                 parent_acquirers_json,
                 sell_side_sponsors_json,
+                sellers_json,
                 txn.get("round_size"),   # primary-capital capture (value fields null when set)
                 tf.get("revenue_amount"),
                 tf.get("revenue_period_type"),       # legacy column
@@ -740,6 +743,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         reported_multiples = ?,
                         acquirers = ?,  buy_side_sponsors = ?,  parent_sellers = ?,
                         parent_acquirers = ?,  sell_side_sponsors = ?,
+                        sellers = ?,
                         round_size = ?,
                         target_revenue = ?,
                         target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
@@ -798,7 +802,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         value_observations,
                         reported_multiples,
                         acquirers, buy_side_sponsors, parent_sellers,
-                        parent_acquirers, sell_side_sponsors,
+                        parent_acquirers, sell_side_sponsors, sellers,
                         round_size,
                         target_revenue,
                         target_revenue_period_type, target_revenue_period_type_v2,
@@ -817,7 +821,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

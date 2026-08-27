@@ -231,6 +231,7 @@ def main() -> None:
             "parent_sellers": [],
             "parent_acquirers": [],
             "sell_side_sponsors": [],
+            "sellers": [],
             "value_observations": []}
     check("a clean response validates", hc._validate(dict(base)) is None, True)
     check("a response carrying a retired observation still validates",
@@ -268,6 +269,7 @@ def main() -> None:
                               "parent_sellers": [],
                               "parent_acquirers": [],
                               "sell_side_sponsors": [],
+                              "sellers": [],
                               "value_observations": []})
     check("Ursa Major: amount null", ursa.get("amount"), None)
     check("Ursa Major: currency null", ursa.get("currency"), None)

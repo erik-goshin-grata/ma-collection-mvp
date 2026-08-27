@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.34 (the other side of two party roles)
+**Version:** 0.35 (who is disposing, not who owns)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -249,7 +249,7 @@ acquirer:
 
 PARTIES, ONE PER PARTY
 
-Five arrays record the parties themselves. A party is one firm. When a source names
+Six arrays record the parties themselves. A party is one firm. When a source names
 two firms in a role, that is two parties -- two items -- not one item holding two names.
 
 The scalar fields above are unchanged and still required. They are how these firms are
@@ -270,6 +270,31 @@ one party the two say the same thing in different shapes, and that is expected.
   Same evidence rule as sponsor_name, unchanged: record a sponsor only when the source
   establishes one. Do NOT infer a sponsor because an acquirer appears sponsor-backed,
   and do not guess a fund name. Not gated on acquirer.type.
+
+- sellers: one item per party the source states is DISPOSING of the target, the
+  business, the assets or the ownership interest in this transaction.
+    name: the disposing party, as stated.
+  The mirror of acquirers. "X sells", "X is divesting", "X agreed to sell its stake"
+  each make X a seller. Multiple disposing parties are multiple items.
+
+  A PARENT SELLER IS NOT A SUBSTITUTE FOR A SELLER. The hierarchy runs the same way on
+  both sides: X acquires makes X the buyer, and X-a-subsidiary-of-Y acquires makes X the
+  buyer with Y the parent acquirer. So X sells makes X the seller, and
+  X-a-subsidiary-of-Y sells makes X the seller with Y the parent seller. When the source
+  names a disposing party, put it here -- do not promote its parent into its place, and
+  do not leave this array empty because parent_sellers is populated.
+
+  OWNING IS NOT SELLING. A party the source merely identifies as an owner, holder or
+  backer of the target is NOT a seller. This array records who the source says is
+  DISPOSING of something in this transaction, and ownership is a state rather than an
+  act. Do not infer a seller from who owned the target, from the target's own identity,
+  from sponsor backing, or from the transaction's structure. Where a source names no
+  disposing party -- as most acquisition releases do not -- return an empty array. That
+  is the ordinary answer and it is not a gap to be filled by reasoning.
+
+  THE TARGET IS NOT AUTOMATICALLY THE SELLER. A company being acquired is the target. It
+  becomes a seller here only where the source states that it is itself disposing of
+  something, which is a different sentence from being bought.
 
 - parent_sellers: one item per parent company divesting the target.
     name: the parent seller, as stated.
@@ -307,7 +332,7 @@ one party the two say the same thing in different shapes, and that is expected.
   divesting, or backing the target being sold. Where the side is not established, put
   the sponsor in neither array rather than choosing one.
 
-ALWAYS AN ARRAY, INCLUDING EMPTY. All five keys are required on every transaction
+ALWAYS AN ARRAY, INCLUDING EMPTY. All six keys are required on every transaction
 element. Return `[]` when a role has no party -- an absent array and an empty one are
 not the same statement, and "there is no parent seller" is a fact worth recording
 plainly. One party is an array of one.
@@ -897,6 +922,7 @@ code fences, no preamble.
         {"name": "Acme Corp", "type": "strategic_corporate"}
       ],
       "buy_side_sponsors": [],
+      "sellers": [],
       "parent_sellers": [],
       "parent_acquirers": [],
       "sell_side_sponsors": [],
@@ -1057,6 +1083,9 @@ Extract all transactions from this source.
         }
       ],
       "buy_side_sponsors": [
+        {"name": "string"}
+      ],
+      "sellers": [
         {"name": "string"}
       ],
       "parent_sellers": [
@@ -1888,3 +1917,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.32 | 2026-08-27 | **`pct_acquired` becomes evidence-only, and that includes 100.** The field previously instructed the opposite -- "Null if 100% or unstated ... Do not extract 100 -- leave null for full acquisitions" -- which collapsed two different facts into one null: a source that stated the whole company changed hands and a source that never said how much did. Aggregation compensated by assuming 100 for control event types, so an assumption reached `implied_equity_value`, `implied_enterprise_value` and the calculated multiples wearing the same clothes as a stated fact. Extracting a stated 100 is what lets the assumption be removed without losing the deals that really did say it. **A silent source stays null** -- null is "the source did not say", never a slot for the likeliest answer. The prior-ownership rule is unchanged and is now also stated as the trap it is for 100: "wholly owned subsidiary" describes ownership after the deal, so where any prior stake is in play it is consistent with acquiring the remainder and is not evidence of 100. No other field changes. |
 | 0.33 | 2026-08-27 | **Party cardinality survives collection.** Three roles were captured and then collapsed into a scalar before anything downstream could see how many parties there were: BUYER (`" and "`-joined by this prompt's own instruction), SPONSOR_BUYER (comma-delimited), and PARENT_SELLER (collapsed **silently** -- no instruction covered a joint divestiture at all). The contract already documented the loss for buyers: `acquirer.type` returns `unknown` for multiple buyers because one value cannot classify two firms, "a compatibility answer for this single scalar field". Each firm's own type was determinable and thrown away. `acquirers`, `buy_side_sponsors` and `parent_sellers` are new required arrays: **one item per party**, always an array including `[]`, since an absent array and an empty one are different statements. Only buyers carry a `type` -- the prompt defines no per-party attribute for sponsors or parent sellers and none is invented. **The scalars are unchanged** and remain the display projection for every current reader. **Role is carried by which array a party is in** -- BUYER, SPONSOR_BUYER and PARENT_SELLER are existing V3 §T5 roles, no role is invented, and no sub-role among co-buyers is added because Product specified none. **Cardinality is not a licence to infer**: every existing evidence and applicability rule is restated unchanged, and a party that would not have gone in the scalar does not go in the array. TARGET is excluded -- `target_name` does hold multi-name values, but that may be a decomposition question rather than a party one, and it is recorded rather than answered. |
 | 0.34 | 2026-08-27 | **PARENT_ACQUIRER and SPONSOR_SELLER are collected.** Two roles the target model requires and this implementation never authored at all. `parent_acquirers` is the mirror of `parent_sellers` -- the model calls its absence "an inventory omission, not a collapse", since PARENT_SELLER existed and its mirror was simply not listed. `sell_side_sponsors` is the mirror of `buy_side_sponsors` -- sponsor side is explicit in the model because side is meaningful role information, and only the buy side was being collected. Unlike 0.33 these are **coverage, not cardinality**: nothing was being flattened because nothing was being collected. The representation is the same either way, so this extends the existing array shape rather than adding a path. **Evidence mirrors the opposite side, unchanged, and no inference is broadened**: a parent acquirer needs the source to place a DIFFERENT, higher company above the buyer, and a sell-side sponsor needs the source to establish the selling side. Two mirror-image confusions are ruled out explicitly -- a corporate parent OWNS the buyer while a sponsor BACKS it, so the same firm is not put in both; and a sponsor's side comes from the source, never from the absence of the other side, so an unestablished side puts the sponsor in NEITHER array rather than one by elimination. A buyer is never repeated as its own parent. SELLER, JV_PARTNER and UNDERWRITER stay unauthored -- the model lists them and defines none of them, and authoring a role with no qualifying test would mean inventing it. |
+| 0.35 | 2026-08-27 | **SELLER: the party actually disposing.** The buyer side of the hierarchy was collected and the sell side was only half of it -- `parent_sellers` held the corporate parent above a disposing party, and the disposing party itself had nowhere to go. The mirror now runs the same way on both sides: X acquires makes X the buyer, X-a-subsidiary-of-Y acquires makes X the buyer with Y the parent acquirer, so X sells makes X the seller and X-a-subsidiary-of-Y sells makes X the seller with Y the parent seller. **A parent seller is not a substitute for a seller** -- promoting a parent into the seller's place, or leaving `sellers` empty because `parent_sellers` is populated, loses exactly the fact this array exists to hold. **Owning is not selling**: a party identified as an owner, holder or backer is not a seller, because ownership is a state and disposing is an act, and no seller is inferred from who owned the target, from the target's own identity, from sponsor backing or from the transaction's structure. **The target is not automatically the seller** -- being bought is a different sentence from disposing of something. Most acquisition releases name no disposing party, and an empty array is the ordinary answer rather than a gap to fill by reasoning. SPONSOR_SELLER stays a different participation: a sponsor backs a party on the selling side, a seller disposes, and a firm established as both is recorded once in each. JV_PARTNER and UNDERWRITER stay unauthored. |

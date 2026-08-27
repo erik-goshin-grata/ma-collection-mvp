@@ -1,0 +1,38 @@
+-- 019 — SELLER: the party actually disposing.
+--
+-- The buyer side of the hierarchy is collected; the sell side was only half of it.
+-- `parent_sellers` records the corporate parent above a disposing party, and there was
+-- nowhere to record the disposing party itself. The mirror was incomplete:
+--
+--   X acquires                    -> BUYER = X
+--   X, a subsidiary of Y, acquires -> BUYER = X, PARENT_ACQUIRER = Y
+--   X sells                       -> SELLER = X            <- had no home
+--   X, a subsidiary of Y, sells    -> SELLER = X, PARENT_SELLER = Y
+--
+-- One JSON column, one item per disposing party, following the shape every other party
+-- role already uses. The parser takes the array key as a parameter and the observation
+-- writer takes a tuple entry, so this adds no path.
+--
+-- A PARENT SELLER IS NOT A SUBSTITUTE. Promoting a parent into the seller's place, or
+-- leaving sellers empty because parent_sellers is populated, loses exactly the fact this
+-- column exists to hold. Both are recorded when both are established.
+--
+-- OWNING IS NOT SELLING. A party identified as an owner, holder or backer of the target
+-- is not a seller: ownership is a state, disposing is an act, and only the act is
+-- collected. No seller is inferred from who owned the target, from the target's own
+-- identity, from sponsor backing, or from the transaction's structure. Most acquisition
+-- releases name no disposing party at all, and an empty array is the ordinary answer
+-- rather than a gap to be filled by reasoning.
+--
+-- SPONSOR_SELLER remains a different participation. A sponsor backs a party on the
+-- selling side; a seller disposes. The same firm may be established as both, and each is
+-- recorded once.
+--
+-- NOT IN SCOPE. No entity resolution, deduplication, alias matching, canonical entity id,
+-- `entity` row or `transaction_participant` row. JV_PARTNER and UNDERWRITER stay
+-- unauthored -- the target model lists them and defines neither.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction ADD COLUMN sellers TEXT;

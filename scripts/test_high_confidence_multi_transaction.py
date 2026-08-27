@@ -72,6 +72,7 @@ def _txn(target: str, acquirer: str) -> dict:
         "parent_sellers": [],
         "parent_acquirers": [],
         "sell_side_sponsors": [],
+        "sellers": [],
         "value_observations": [],
         "features": {
             "is_platform_investment": None,
