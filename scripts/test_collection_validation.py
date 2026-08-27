@@ -243,10 +243,11 @@ def main() -> None:
     check("one Funding row", len(funding), 1)
     # Sheet 1.0 was 57 approved fields + the 4 termination-fee fields added on approval.
     # Sheet 1.1 (R4.1) adds 22 M&A and 4 funding columns that were already captured and
-    # merely hidden. The counts stay pinned so a column set cannot drift silently; they
-    # move only alongside a _REVIEW_SHEET_VERSION bump, which is asserted here with them.
-    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.1")
-    check("M&A column count is 83", len(fv._MA_COLS), 83)
+    # merely hidden. Sheet 1.2 adds one more M&A column, deal_rationale, once Stage 13
+    # became part of the run. The counts stay pinned so a column set cannot drift
+    # silently; they move only alongside a _REVIEW_SHEET_VERSION bump, asserted with them.
+    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.2")
+    check("M&A column count is 84", len(fv._MA_COLS), 84)
     check("Funding column count is 45", len(fv._FUNDING_COLS), 45)
     check("M&A row emits exactly the declared columns", list(ma[0].keys()), fv._MA_COLS)
     check("Funding row emits exactly the declared columns",
@@ -339,12 +340,19 @@ def main() -> None:
           all(f"import stages.{m}" in src for m in
               ("relevancy_filter", "deal_type_classify", "high_confidence_extract",
                "funding_hc_extract", "low_confidence_extract", "entity_cluster",
-               "aggregate", "summarize")), True)
-    check("SEC / agreement / rationale / export stages absent",
+               "aggregate", "summarize", "rationale_tag")), True)
+    # rationale_tag left this list when Stage 13 joined the run. The others stay out:
+    # they need filings, agreements or a production export target the validation run
+    # deliberately has none of.
+    check("SEC / agreement / export stages absent",
           any(s in src for s in ("sec_enrich", "sec_trigger", "agreement_extract",
-                                 "rationale_tag", "stages.export")), False)
+                                 "stages.export")), False)
     check("stage 2 runs first", fv.PIPELINE[0][0], "stage_2_relevancy")
-    check("pipeline is the eight approved stages", len(fv.PIPELINE), 8)
+    check("pipeline is the nine approved stages", len(fv.PIPELINE), 9)
+    # Stage 13 reads the current summary row, so it can only ever follow Stage 12.
+    check("rationale runs last, after summarize",
+          [n for n, _ in fv.PIPELINE][-2:],
+          ["stage_12_summarize", "stage_13_rationale_tag"])
     check("feeder writes no transaction/staging tables itself",
           any(s in src for s in ("INSERT INTO transaction_record",
                                  "INSERT INTO staging_extraction",

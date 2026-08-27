@@ -88,7 +88,7 @@ from db import get_connection, init_db                         # noqa: E402
 
 # The stage modules, imported and invoked unchanged. Stage 2 is the addition that
 # distinguishes this from the acceptance harness; stages 5/6 (SEC), 10/11
-# (agreement), 13 (rationale) and 14 (production export) are deliberately absent.
+# (agreement) and 14 (production export) are deliberately absent.
 import stages.relevancy_filter as _stage_2                     # noqa: E402
 import stages.deal_type_classify as _stage_3                   # noqa: E402
 import stages.high_confidence_extract as _stage_4              # noqa: E402
@@ -96,7 +96,8 @@ import stages.funding_hc_extract as _stage_4b                  # noqa: E402
 import stages.low_confidence_extract as _stage_7               # noqa: E402
 import stages.entity_cluster as _stage_8                       # noqa: E402
 import stages.aggregate as _stage_9                            # noqa: E402
-import stages.summarize as _stage_12                           # noqa: E402
+import stages.summarize as _stage_12                          # noqa: E402
+import stages.rationale_tag as _stage_13                      # noqa: E402
 
 PIPELINE = [
     ("stage_2_relevancy", _stage_2),
@@ -107,6 +108,10 @@ PIPELINE = [
     ("stage_8_entity_cluster", _stage_8),
     ("stage_9_aggregate", _stage_9),
     ("stage_12_summarize", _stage_12),
+    # Stage 13 reads the current summary row, so it can only follow Stage 12. It is a
+    # model call per transaction -- the validation run is one stage longer and one
+    # prompt more expensive, which is the cost of putting rationale in front of Product.
+    ("stage_13_rationale_tag", _stage_13),
 ]
 
 # Hosts whose releases are newswire distributions. This picks between two values
@@ -377,7 +382,7 @@ def sources_by_transaction(conn) -> dict:
 # so a sheet can be tied to the columns that produced it -- otherwise a 61-column and an
 # 83-column ma_review.csv are indistinguishable after the fact. Deliberately NOT a column:
 # it describes the sheet, not any transaction.
-_REVIEW_SHEET_VERSION = "1.1"
+_REVIEW_SHEET_VERSION = "1.2"
 
 # Column order is the review order. Lifecycle scalars are displayed under readable
 # names -- status/announced_date/closed_date -- while their MVP provenance stays in
@@ -413,7 +418,7 @@ _MA_COLS = [
     "target_fee_amount", "target_fee_percentage",
     "acquirer_fee_amount", "acquirer_fee_percentage",
     "buy_side_advisors", "sell_side_advisors", "advisors_side_not_established",
-    "deal_summary",
+    "deal_rationale", "deal_summary",
     "overall_review", "missing_or_wrong_fields", "review_notes",
 ]
 
@@ -445,9 +450,35 @@ _REJECTION_COLS = [
 ]
 
 
+def rationales_by_transaction(conn) -> dict:
+    """One review string per transaction: primary first, then secondaries as stored.
+
+    A projection, not a replacement. `rationale_tag` keeps its own columns and its
+    JSON `secondary_rationales` array untouched, Stage 14 still exports them
+    separately, and nothing here writes. The sheet gets one readable cell because a
+    reviewer reads rows, not arrays.
+
+    Confidence and notes are deliberately absent: this cell answers what the
+    rationale was, and a per-cell confidence invites reading it as a score.
+    """
+    out: dict[str, str] = {}
+    for r in _rows(conn, "SELECT transaction_id, primary_rationale, secondary_rationales "
+                         "FROM rationale_tag WHERE is_current = 1"):
+        parts = [r["primary_rationale"]] if r["primary_rationale"] else []
+        try:
+            secondaries = json.loads(r["secondary_rationales"] or "[]")
+        except (ValueError, TypeError):
+            secondaries = []
+        parts += [x for x in secondaries if isinstance(x, str) and x and x not in parts]
+        if parts:
+            out[r["transaction_id"]] = ", ".join(parts)
+    return out
+
+
 def build_review_rows(conn):
     """Split canonical transactions into the M&A and Funding review sheets."""
     adv = advisors_by_transaction(conn)
+    rationales = rationales_by_transaction(conn)
     inv = investors_by_transaction(conn)
     src = sources_by_transaction(conn)
     summaries = {r["transaction_id"]: r["summary_text"] for r in _rows(
@@ -567,6 +598,7 @@ def build_review_rows(conn):
                 "acquirer_fee_percentage": _num(t["acquirer_fee_percentage"]),
                 "buy_side_advisors": "; ".join(a["buy"]),
                 "sell_side_advisors": "; ".join(a["sell"]),
+                "deal_rationale": rationales.get(txn),
             })
             ma.append({c: row.get(c) for c in _MA_COLS})
     return ma, funding
@@ -642,8 +674,7 @@ def main() -> int:
     print(f"  sources to seed      : {len(sources)}")
     print(f"  isolated DB          : {db_path}")
     print(f"  stages               : {', '.join(n for n, _ in PIPELINE)}")
-    print("  NOT run              : scrape 1, SEC 5/6, agreement 10/11, rationale 13, "
-          "export 14")
+    print("  NOT run              : scrape 1, SEC 5/6, agreement 10/11, export 14")
     print("  seeding              : source_status=FETCHED, no relevancy pre-seed")
 
     if os.path.exists(db_path):

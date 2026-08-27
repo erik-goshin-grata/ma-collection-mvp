@@ -133,11 +133,12 @@ def main() -> int:
 
     # ------------------------------------------------------- 1. the approved shape
     print("\nThe approved column set, exactly:")
-    check("M&A sheet is 83 columns", len(ma), 83)
+    # 83 at sheet 1.1; deal_rationale made it 84 when Stage 13 joined the run.
+    check("M&A sheet is 84 columns", len(ma), 84)
     check("funding sheet is 45 columns", len(funding), 45)
     check("no duplicate M&A columns", len(ma), len(ma_set))
     check("no duplicate funding columns", len(funding), len(funding_set))
-    check("review sheet version", getattr(h, "_REVIEW_SHEET_VERSION", None), "1.1")
+    check("review sheet version", getattr(h, "_REVIEW_SHEET_VERSION", None), "1.2")
 
     print("\nThe 22 M&A facts sheet 1.1 surfaces:")
     for col in _ADDED_MA:
@@ -206,7 +207,9 @@ def main() -> int:
           bool(re.search(r"UPDATE\s+transaction_record", src)), False)
     check("never deletes from transaction_record",
           bool(re.search(r"DELETE\s+FROM\s+transaction_record", src)), False)
-    check("still runs the same eight stages", len(h.PIPELINE), 8)
+    # Eight when this file was written; nine since Stage 13 joined. The point of the
+    # check is that projecting a sheet does not add stages, not the number itself.
+    check("still runs the declared stage list", len(h.PIPELINE), 9)
     check("the sheet version is emitted with the run, not onto every row",
           '"review_sheet_version": _REVIEW_SHEET_VERSION' in src
           and "review_sheet_version" not in ma_set | funding_set, True)

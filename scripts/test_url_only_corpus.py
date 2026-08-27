@@ -229,9 +229,9 @@ def test_untouched(fv) -> None:
           "source_status=FETCHED, no relevancy pre-seed" in src, True)
     check("still exactly one INSERT", len(re.findall(r"INSERT INTO", src)), 1)
     check("and it is into source_raw", "INSERT INTO source_raw" in src, True)
-    check("still the same eight stages", len(fv.PIPELINE), 8)
-    check("review sheet version unchanged", fv._REVIEW_SHEET_VERSION, "1.1")
-    check("M&A sheet still 83 columns", len(fv._MA_COLS), 83)
+    check("still the same stage list", len(fv.PIPELINE), 9)
+    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.2")
+    check("M&A sheet 84 columns", len(fv._MA_COLS), 84)
     check("funding sheet still 45 columns", len(fv._FUNDING_COLS), 45)
     check("never writes to transaction_record",
           bool(re.search(r"(UPDATE|DELETE\s+FROM)\s+transaction_record", src)), False)
@@ -240,8 +240,9 @@ def test_untouched(fv) -> None:
     # property of the whole working tree, so any LATER slice that legitimately touched
     # stages/ or prompts/ failed this file. The checks above already pin what actually
     # matters about this slice -- one INSERT into source_raw, no write to
-    # transaction_record, eight stages, the 1.1 sheets -- and they hold whatever else
-    # the tree contains.
+    # transaction_record, the declared stage list and sheets -- and they hold whatever
+    # else the tree contains. The stage count and sheet version above move with the
+    # feeder itself; this slice only asserts it did not change them on its own.
 
 
 def main() -> int:
