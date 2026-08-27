@@ -60,6 +60,10 @@ Run from project root:
     python scripts/run_collection_validation.py --pages out/collection_20260826/pages \
         --pl-ids sheet2_pl_ids.txt --pl-tsv <pl_export.tsv> \
         --out-dir out/collection_20260826 [--dry-run]
+
+The PL half is optional, as a pair. A URL-only corpus simply omits both:
+    python scripts/run_collection_validation.py --pages out/collection_20260901/pages \
+        --out-dir out/collection_20260901 [--dry-run]
 """
 
 from __future__ import annotations
@@ -183,8 +187,21 @@ def load_url_captures(pages_dir: str) -> tuple[list[dict], list[dict]]:
     return healthy, quarantined
 
 
-def load_pl_sources(pl_ids_path: str, pl_tsv: str) -> tuple[list[dict], list[str]]:
-    """Resolve PL event IDs against a PL export. Returns (sources, unresolved)."""
+def load_pl_sources(pl_ids_path: str | None,
+                    pl_tsv: str | None) -> tuple[list[dict], list[str]]:
+    """Resolve PL event IDs against a PL export. Returns (sources, unresolved).
+
+    The two arguments are a pair. Neither is a URL-only corpus and resolves to no PL
+    sources -- an empty result, not a failure. One without the other is a mistake
+    rather than a corpus: ids with no export resolve nothing and would report every
+    id unresolved, and an export with no ids would silently contribute nothing. Both
+    look like a successful run in the summary, so this refuses instead of guessing.
+    """
+    if not pl_ids_path and not pl_tsv:
+        return [], []
+    if not (pl_ids_path and pl_tsv):
+        raise ValueError("load_pl_sources needs a PL id file and a PL export "
+                         "together, or neither")
     csv.field_size_limit(10 ** 9)
     wanted = [ln.strip() for ln in open(pl_ids_path, encoding="utf-8")
               if ln.strip() and not ln.startswith("#")]
@@ -590,12 +607,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--pages", required=True, help="page-harness output directory")
-    ap.add_argument("--pl-ids", required=True, help="file of PL event IDs, one per line")
-    ap.add_argument("--pl-tsv", required=True, help="PL export to resolve those IDs against")
+    ap.add_argument("--pl-ids", help="file of PL event IDs, one per line. Optional, "
+                                     "but only together with --pl-tsv")
+    ap.add_argument("--pl-tsv", help="PL export to resolve those IDs against. Optional, "
+                                     "but only together with --pl-ids")
     ap.add_argument("--out-dir", default="out/collection_20260826")
     ap.add_argument("--dry-run", action="store_true",
                     help="Assemble and seed only. No stage runs, no model call.")
     args = ap.parse_args()
+
+    # Enforced here so a half-specified corpus fails on the command line, before the
+    # output directory is created and before any capture is read.
+    if bool(args.pl_ids) != bool(args.pl_tsv):
+        ap.error("--pl-ids and --pl-tsv must be given together, or neither. "
+                 "A URL-only corpus supplies neither.")
 
     healthy, quarantined = load_url_captures(args.pages)
     pl_sources, unresolved = load_pl_sources(args.pl_ids, args.pl_tsv)
