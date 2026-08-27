@@ -69,56 +69,48 @@ def _check_unit(failures: list[str]) -> None:
         # A stated TRANSACTION_VALUE on a funding row is a mapping error, not a price.
         value, basis = aggregate._derive_transaction_value(
             {"v2_event_type": event, "value_type": "TRANSACTION_VALUE", "value_amount": 60_000_000},
-            None, None, None, equity_currency="USD", total_debt_currency=None,
-        )
+            None, None,
+            is_control=False, is_below_control=True, equity_currency="USD", total_debt_currency=None)
         _check(failures, f"{event} transaction_value", value, None)
         _check(failures, f"{event} transaction_value_basis", basis, None)
 
         # Even with an equity figure and a resolved pct, no purchase price exists.
         value, basis = aggregate._derive_transaction_value(
-            {"v2_event_type": event}, 60_000_000, None, 100.0,
-            equity_currency="USD", total_debt_currency=None,
-        )
+            {"v2_event_type": event}, 60_000_000, None,
+            is_control=True,
+            equity_currency="USD", total_debt_currency=None)
         _check(failures, f"{event} transaction_value via equity", value, None)
         _check(failures, f"{event} transaction_value basis via equity", basis, None)
 
         # A stated EQUITY_VALUE on a funding row is likewise inapplicable.
-        value, basis = aggregate._derive_equity_value(
-            {"v2_event_type": event, "value_type": "EQUITY_VALUE", "value_amount": 60_000_000},
-            None, None, 100.0,
-        )
+        value, basis = aggregate._derive_equity_value({"v2_event_type": event, "value_type": "EQUITY_VALUE", "value_amount": 60_000_000})
         _check(failures, f"{event} equity_value", value, None)
         _check(failures, f"{event} equity_value_basis", basis, None)
 
     # --- Boundary: the gate is the funding family, nothing wider ------------
     # MINORITY_INVESTMENT is non-control but NOT funding. A secondary purchase of a
     # stake is an ordinary acquisition and keeps a real equity consideration.
-    value, basis = aggregate._derive_equity_value(
-        {"v2_event_type": "MINORITY_INVESTMENT", "value_type": "EQUITY_VALUE",
-         "value_amount": 600_000_000}, None, None, 27.0,
-    )
+    value, basis = aggregate._derive_equity_value({"v2_event_type": "MINORITY_INVESTMENT", "value_type": "EQUITY_VALUE",
+         "value_amount": 600_000_000})
     _check(failures, "MINORITY_INVESTMENT keeps equity_value", value, 600_000_000.0)
     _check(failures, "MINORITY_INVESTMENT keeps equity basis", basis, "STATED")
 
     # --- Regression: M&A behaviour is untouched -----------------------------
     value, basis = aggregate._derive_transaction_value(
         {"v2_event_type": "ACQUISITION", "value_type": "TRANSACTION_VALUE", "value_amount": 80},
-        6, None, 100.0, equity_currency="USD", total_debt_currency="USD",
-    )
+        6, None,
+            is_control=True, equity_currency="USD", total_debt_currency="USD")
     _check(failures, "ACQUISITION stated transaction_value", value, 80.0)
     _check(failures, "ACQUISITION stated basis", basis, "STATED")
 
-    value, basis = aggregate._derive_equity_value(
-        {"v2_event_type": "ACQUISITION", "value_type": "EQUITY_VALUE", "value_amount": 600},
-        None, None, 27.0,
-    )
+    value, basis = aggregate._derive_equity_value({"v2_event_type": "ACQUISITION", "value_type": "EQUITY_VALUE", "value_amount": 600})
     _check(failures, "ACQUISITION equity_value", value, 600.0)
 
     # An unknown/absent event type must not be swept into the gate.
     value, basis = aggregate._derive_transaction_value(
-        {"value_type": "TRANSACTION_VALUE", "value_amount": 80}, 6, None, 100.0,
-        equity_currency="USD", total_debt_currency="USD",
-    )
+        {"value_type": "TRANSACTION_VALUE", "value_amount": 80}, 6, None,
+            is_control=True,
+        equity_currency="USD", total_debt_currency="USD")
     _check(failures, "no event type still derives", value, 80.0)
 
 

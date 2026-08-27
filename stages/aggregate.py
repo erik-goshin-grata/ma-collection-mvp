@@ -45,7 +45,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "aggregation"
-_VERSION = "0.10"
+_VERSION = "0.11"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -819,49 +819,67 @@ def _derive_deal_value_currency(
     return next(iter(distinct), None)
 
 
-def _resolve_pct_acquired(
-    fv: dict,
-    is_minority: int | bool | None = None,
-) -> tuple[float | None, str | None]:
-    """§2.6 — resolve pct_acquired for threshold and gross-up use.
+def _resolve_pct_acquired(fv: dict) -> tuple[float | None, str | None]:
+    """§2.6 — the percentage, only when a source stated one.
 
-    A stated value is used as-is (source 'stated'). A null on a control event type
-    defaults to 100 ('assumed') only when there is no independent minority signal.
-    A null on an inherently-partial type stays None (unknown), so the default never
-    converts a minority stake into a whole-company buy.
-    Returns (pct, source).
+    This used to default a silent control event to 100 ('assumed'). It no longer does.
+    The assumption reached implied_equity_value, implied_enterprise_value and the
+    calculated multiples indistinguishably from a stated fact, and it made a source
+    that said the whole company changed hands produce the same row as a source that
+    said nothing at all.
+
+    Unstated is None, and None means "the source did not say". Nothing downstream may
+    read it as 100: grossing a stake-level figure to a whole-company basis needs a real
+    percentage, and inventing the denominator manufactures the numerator.
+
+    No is_minority parameter any more. It existed only to stop the default from turning
+    a minority stake into a whole-company buy; with no default there is nothing to stop.
+    Returns (pct, source), where source is 'stated' or None -- never 'assumed', because
+    no assumption is made.
     """
     pct = fv.get("pct_acquired")
-    if pct is not None:
-        return float(pct), "stated"
-    minority_flag = _derive_is_minority(fv) if is_minority is None else int(bool(is_minority))
-    if minority_flag:
+    if pct is None:
         return None, None
-    if _event_type(fv) in _CONTROL_DEFAULT_TYPES:
-        return 100.0, "assumed"
-    return None, None
+    return float(pct), "stated"
 
 
 def _derive_transaction_value(
     fv: dict,
     equity_value: float | None,
     total_debt: float | None,
-    pct: float | None,
     *,
+    is_control: bool,
+    is_below_control: bool = False,
     equity_currency: str | None = None,
     total_debt_currency: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Tier-1 transaction value + basis (§2.1.1). As-reported wins; otherwise
-    equity_value below control, equity_value + gross debt (total_debt) at pct>=50
-    when debt is known, otherwise equity consideration only.
-    Cash is never netted. `pct` must already be §2.6-resolved by the caller.
+    equity_value below control, equity_value + gross debt (total_debt) at control when
+    debt is known, otherwise equity consideration only.
+    Cash is never netted.
 
-      STATED                 — source stated a TRANSACTION_VALUE.
-      EQUITY_BELOW_CONTROL   — pct < 50; equity_value, no debt.
-      EQUITY_PLUS_TOTAL_DEBT — pct >= 50 and total_debt known.
-      EQUITY_VALUE_ONLY      — pct >= 50 and debt unknown; equity consideration only.
+    TAKES CONTROL STATUS, NOT A PERCENTAGE. Keyword-only on purpose: these replaced a
+    float in this position, and a caller still passing a percentage positionally would
+    put a truthy number where a boolean belongs and take the control branch in silence.
 
-    Returns (None, None) when pct is unknown, or when there is no equity to base on.
+    TWO FLAGS, NOT ONE, because the percentage carried THREE answers: control,
+    below control, and unknown. Collapsing them into a single boolean would hand every
+    unknown row the below-control branch, quietly giving a transaction value to deals
+    that previously and correctly had none. `is_control` and `is_below_control` are both
+    false when the source establishes neither, and that case still returns None. The 50 threshold was only ever a proxy
+    for "is this a control deal", and reading it off a percentage meant a silent control
+    deal needed a percentage invented for it. The control question is answered directly
+    by the event type and the minority signal, which need no number, so the branch is
+    now selected by what it was always actually asking.
+
+      STATED                 — source stated a TRANSACTION_VALUE. Needs no percentage
+                               and no control question: the source stated the whole deal.
+      EQUITY_BELOW_CONTROL   — established below control; equity_value, no debt.
+      (none)                 — neither established; no transaction value is claimed.
+      EQUITY_PLUS_TOTAL_DEBT — control and total_debt known.
+      EQUITY_VALUE_ONLY      — control and debt unknown; equity consideration only.
+
+    Returns (None, None) when there is no equity to base on.
     EQUITY_VALUE_ONLY does not assume debt=0; it preserves the known purchase-price
     component for the stake actually acquired. The gross-debt branch
     is dormant until total_debt is populated (extraction is a later piece).
@@ -882,10 +900,12 @@ def _derive_transaction_value(
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "TRANSACTION_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if equity_value is None or pct is None:
+    if equity_value is None:
         return None, None
-    if pct < 50:
+    if is_below_control:
         return equity_value, "EQUITY_BELOW_CONTROL"
+    if not is_control:
+        return None, None
     # The debt-inclusive basis needs both currencies known and equal. When it is
     # refused, the known equity consideration is not discarded — it falls to
     # EQUITY_VALUE_ONLY, which has never implied debt is zero, only that debt could
@@ -1002,18 +1022,11 @@ def _derive_transaction_size(
     return None, None
 
 
-def _derive_equity_value(
-    fv: dict,
-    per_share_price: float | None,
-    sec_shares: float | None,
-    pct: float | None = None,
-) -> tuple[float | None, str | None]:
+def _derive_equity_value(fv: dict) -> tuple[float | None, str | None]:
     """Stake-level equity value + basis — the consideration for the stake actually
     acquired, never grossed up, uniform across control and non-control (§4.2).
 
       STATED             — source stated an equity figure (value_type=EQUITY_VALUE).
-      PER_SHARE_X_SHARES — per-share offer x authoritative (SEC) share count,
-                           permitted only at pct == 100 (see below).
 
     Post-money is NOT equity value: it belongs in post_money_valuation (and the
     implied tier via _derive_implied_equity), never here.
@@ -1033,32 +1046,28 @@ def _derive_equity_value(
     equity, and any multiple struck off that is manufactured. Decision "FINDING:
     equity_value Conflates Stake-Level and 100%-Basis Scope" (2026-08-17).
 
-    Two guards enforce that, one here and one upstream:
+    One guard enforces that: `MARKET_CAPITALIZATION` is its own value type as of HC
+    prompt 0.18, so a market cap no longer arrives typed `EQUITY_VALUE`. The
+    `== "EQUITY_VALUE"` test below is what excludes it; the fact itself is still
+    retained in the observation ledger.
 
-    - `MARKET_CAPITALIZATION` is its own value type as of HC prompt 0.18, so a market
-      cap no longer arrives typed `EQUITY_VALUE`. The `== "EQUITY_VALUE"` test below
-      is what excludes it; the fact itself is still retained in the observation ledger.
-    - `per_share_price x sec_shares` is 100%-basis unconditionally — `sec_shares` is
-      the target's *total* fully diluted count, so the product prices the whole company.
-      It is admitted only when `pct == 100`, the one case where whole-company and
-      stake-level coincide.
-
-    Below 100 the product is **not scaled** into a stake figure. We hold total shares,
-    never acquired shares, so `per_share x total_shares x pct` would manufacture an
-    amount no source stated. Unknown pct is refused for the same reason: unknown scope
-    is not a licence to claim the whole company. None is the correct answer.
+    A `PER_SHARE_X_SHARES` basis was defined here and never produced a value:
+    `sec_shares` was hardcoded None, since SEC enrichment does not run in this
+    implementation, so the branch could not fire. It is removed rather than left
+    standing, because what it computed was not what its name claimed. It multiplied the
+    per-share offer by TOTAL shares outstanding, which prices the whole company, and
+    then required pct == 100 to make that coincide with the stake -- so the gate was
+    compensating for the count rather than establishing a fact. The canonical model
+    separates total shares outstanding, shares acquired in the transaction, and the
+    percentage; this implementation holds only the first, and none of the three as a
+    canonical field. Restoring any per-share derivation is a separate question that
+    needs those distinctions settled first, and nothing here presumes its answer.
     """
     if _event_type(fv) in _FUNDING_EVENT_TYPES:
         return None, None
     value_amount = fv.get("value_amount")
     if fv.get("value_type") == "EQUITY_VALUE" and value_amount and value_amount > 0:
         return float(value_amount), "STATED"
-    if (
-        per_share_price and per_share_price > 0
-        and sec_shares and sec_shares > 0
-        and pct is not None and pct == 100
-    ):
-        return round(per_share_price * sec_shares, 2), "PER_SHARE_X_SHARES"
     return None, None
 
 
@@ -2195,11 +2204,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             agg_version = (existing["aggregation_version"] + 1) if existing else 1
 
             # Derive valuations (the deterministic job — LLM captured primitives only).
-            # sec_shares comes from SEC enrichment once it runs; None on PR-only data.
             # net_debt, total_debt, and cash_st are manual collection inputs in
             # the interim; keep any stored value. Their currency and as-of anchors
             # are manual alongside them and preserved the same way.
-            sec_shares = None
             net_debt_reported = existing["net_debt"] if existing else None
             net_debt_currency = existing["net_debt_currency"] if existing else None
             balance_sheet = _resolve_balance_sheet_inputs(
@@ -2221,8 +2228,14 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 cash_st_currency,
                 balance_sheet["cash_st_as_of"],
             )
-            pct_resolved, pct_acquired_source = _resolve_pct_acquired(
-                field_values, derived["is_minority"]
+            pct_resolved, pct_acquired_source = _resolve_pct_acquired(field_values)
+            # The control question, answered without a percentage. This is exactly the
+            # condition that used to produce the assumed 100 -- a control event type
+            # with no minority signal -- so the transaction-value branch selection is
+            # unchanged for every row; only the invented number is gone.
+            is_control_deal = (
+                _event_type(field_values) in _CONTROL_DEFAULT_TYPES
+                and not derived["is_minority"]
             )
             # Each canonical value field consumes the best observation of its own
             # semantic type; none of them may depend on which type happens to win
@@ -2236,12 +2249,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             if typed_equity_value_amount is not None:
                 equity_value_fields["value_amount"] = typed_equity_value_amount
                 equity_value_fields["value_type"] = "EQUITY_VALUE"
-            equity_value, equity_value_basis = _derive_equity_value(
-                equity_value_fields,
-                field_values.get("per_share_price"),
-                sec_shares,
-                pct_resolved,
-            )
+            equity_value, equity_value_basis = _derive_equity_value(equity_value_fields)
             implied_equity_value = _derive_implied_equity(equity_value, pct_resolved)
             investment_amount = _derive_investment_amount(field_values)
             typed_transaction_value_amount = _pick_value_amount_for_type(
@@ -2260,7 +2268,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # the deal currency against the balance-sheet currency.
             deal_value_currency = _derive_deal_value_currency(field_values, log, cluster_id)
             transaction_value, transaction_value_basis = _derive_transaction_value(
-                transaction_value_fields, equity_value, total_debt, pct_resolved,
+                transaction_value_fields, equity_value, total_debt,
+                is_control=is_control_deal,
+                is_below_control=bool(derived["is_minority"]),
                 equity_currency=deal_value_currency,
                 total_debt_currency=total_debt_currency,
             )
@@ -2367,7 +2377,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("value_currency"),
                     field_values.get("value_type"),
                     field_values.get("per_share_price"),
-                    pct_resolved,  # §2.6-resolved: 100 (assumed) for control types when silent
+                    pct_resolved,  # §2.6: stated only. Never assumed.
                     field_values.get("stake_transition_type"),
                     field_values.get("offer_mechanism"),
                     field_values.get("target_revenue"),

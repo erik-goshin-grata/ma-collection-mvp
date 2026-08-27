@@ -160,8 +160,7 @@ def main() -> None:
           in flat, True)
     check("still an accepted type", "EQUITY_VALUE" in hc._VALID_VALUE_TYPES, True)
     check("derivation still returns a stated stake price",
-          agg._derive_equity_value(
-              {"value_amount": 600_000_000, "value_type": "EQUITY_VALUE"}, None, None, 27.0),
+          agg._derive_equity_value({"value_amount": 600_000_000, "value_type": "EQUITY_VALUE"}),
           (600_000_000.0, "STATED"))
 
     print("\n3. Genuine TRANSACTION_VALUE remains capturable:")
@@ -171,7 +170,8 @@ def main() -> None:
     check("derivation still returns a stated total",
           agg._derive_transaction_value(
               {"value_amount": 220_500_000, "value_type": "TRANSACTION_VALUE"},
-              None, None, None),
+              None, None,
+            is_control=False),
           (220_500_000.0, "STATED"))
 
     print("\n4. Genuine ENTERPRISE_VALUE remains capturable:")
@@ -195,9 +195,9 @@ def main() -> None:
     # -------------------------------- 6. legacy market cap cannot contaminate economics
     print("\n6. A legacy MARKET_CAPITALIZATION reaches no canonical economic field:")
     mc = {"value_amount": 2_200_000_000, "value_type": "MARKET_CAPITALIZATION"}
-    check("equity_value", agg._derive_equity_value(mc, None, None, 27.0), (None, None))
+    check("equity_value", agg._derive_equity_value(mc), (None, None))
     check("transaction_value",
-          agg._derive_transaction_value(mc, None, None, None), (None, None))
+          agg._derive_transaction_value(mc, None, None, is_control=False), (None, None))
     check("enterprise_value",
           agg._derive_enterprise_value(2_200_000_000, "MARKET_CAPITALIZATION", None, None),
           (None, None))

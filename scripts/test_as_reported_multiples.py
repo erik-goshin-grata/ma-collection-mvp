@@ -548,7 +548,8 @@ def test_unchanged() -> None:
     check("no EV still means NOT_CALCULABLE", r["multiple_quality"], "NOT_CALCULABLE")
     check("and no slot is filled", r["ev_to_ebitda_ltm"], None)
 
-    check("aggregate version is 0.10", agg._VERSION, "0.10")
+    check("aggregate version >= 0.10 (currently %s)" % agg._VERSION,
+          tuple(int(x) for x in agg._VERSION.split(".")) >= (0, 10), True)
 
     print("\nThe canonical column set did not move:")
     owned = getattr(agg, "_STAGE9_OWNED_COLUMNS", None)

@@ -157,25 +157,25 @@ def _scenario_transaction_value_currency(failures: list[str]) -> None:
 
     _check(
         failures, f"{p} same currency adds debt",
-        d({}, 200.0, 50.0, 100.0, equity_currency="USD", total_debt_currency="USD"),
+        d({}, 200.0, 50.0, is_control=True, equity_currency="USD", total_debt_currency="USD"),
         (250.0, "EQUITY_PLUS_TOTAL_DEBT"),
     )
     # The debt basis is refused, but the known equity consideration is not thrown
     # away — it falls to EQUITY_VALUE_ONLY, which never implied debt was zero.
     _check(
         failures, f"{p} differing currency falls back",
-        d({}, 200.0, 50.0, 100.0, equity_currency="USD", total_debt_currency="EUR"),
+        d({}, 200.0, 50.0, is_control=True, equity_currency="USD", total_debt_currency="EUR"),
         (200.0, "EQUITY_VALUE_ONLY"),
     )
     _check(
         failures, f"{p} unknown debt currency falls back",
-        d({}, 200.0, 50.0, 100.0, equity_currency="USD", total_debt_currency=None),
+        d({}, 200.0, 50.0, is_control=True, equity_currency="USD", total_debt_currency=None),
         (200.0, "EQUITY_VALUE_ONLY"),
     )
     # Below control, debt never entered the calculation to begin with.
     _check(
         failures, f"{p} below control unchanged",
-        d({}, 200.0, 50.0, 25.0, equity_currency="USD", total_debt_currency="USD"),
+        d({}, 200.0, 50.0, is_control=False, is_below_control=True, equity_currency="USD", total_debt_currency="USD"),
         (200.0, "EQUITY_BELOW_CONTROL"),
     )
 

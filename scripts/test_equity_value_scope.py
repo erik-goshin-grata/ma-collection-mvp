@@ -59,36 +59,34 @@ def _check(failures: list[str], name: str, got, expected) -> None:
 # A. The PER_SHARE_X_SHARES gate
 # --------------------------------------------------------------------------
 def _check_per_share_gate(failures: list[str]) -> None:
-    per_share, shares = 40.0, 50_000_000          # -> 2,000,000,000 whole-company
-    no_stated = {"value_amount": None, "value_type": None}
+    # The PER_SHARE_X_SHARES basis is gone (aggregation 0.11), so the gate it needed is
+    # gone with it. The branch never produced a value in this implementation --
+    # `sec_shares` was hardcoded None because SEC enrichment does not run -- and what it
+    # computed was not what its name claimed: per-share x TOTAL shares outstanding
+    # prices the whole company, and the pct == 100 gate was compensating for the count
+    # rather than establishing anything. What this section still has to prove is that
+    # NOTHING reconstructs a stake-level equity value out of a per-share price.
+    no_stated = {"value_amount": None, "value_type": None,
+                 "per_share_price": 40.0}      # x 50,000,000 shares = 2,000,000,000
+    value, basis = aggregate._derive_equity_value(no_stated)
+    _check(failures, "a per-share price alone yields no equity value", value, None)
+    _check(failures, "and no basis", basis, None)
+    # The BODY, not the docstring: the docstring deliberately explains why the basis was
+    # removed, and that explanation should not be what makes this check pass or fail.
+    import inspect
+    body = inspect.getsource(aggregate._derive_equity_value).split('"""')[-1]
+    _check(failures, "PER_SHARE_X_SHARES is no longer returnable",
+           "PER_SHARE_X_SHARES" in body, False)
 
-    # pct == 100: whole-company and stake-level coincide. Allowed, unscaled.
-    value, basis = aggregate._derive_equity_value(no_stated, per_share, shares, 100.0)
-    _check(failures, "per-share at pct=100 value", value, 2_000_000_000.0)
-    _check(failures, "per-share at pct=100 basis", basis, "PER_SHARE_X_SHARES")
-
-    # pct < 100: the product is whole-company. Refuse — do NOT scale to 540,000,000.
-    for pct in (27.0, 50.0, 99.9):
-        value, basis = aggregate._derive_equity_value(no_stated, per_share, shares, pct)
-        _check(failures, f"per-share at pct={pct} value", value, None)
-        _check(failures, f"per-share at pct={pct} basis", basis, None)
-
-    # pct unknown: scope is unknown, so the product cannot be claimed as the stake.
-    value, basis = aggregate._derive_equity_value(no_stated, per_share, shares, None)
-    _check(failures, "per-share at pct=None value", value, None)
-    _check(failures, "per-share at pct=None basis", basis, None)
-
-    # A source-stated equity figure is stake-level by definition and is unaffected
-    # by the gate — it must still populate at any pct.
+    # A source-stated equity figure is stake-level by definition and still populates.
     stated = {"value_amount": 600_000_000, "value_type": "EQUITY_VALUE"}
-    for pct in (27.0, 100.0, None):
-        value, basis = aggregate._derive_equity_value(stated, None, None, pct)
-        _check(failures, f"stated equity at pct={pct} value", value, 600_000_000.0)
-        _check(failures, f"stated equity at pct={pct} basis", basis, "STATED")
+    value, basis = aggregate._derive_equity_value(stated)
+    _check(failures, "stated equity value", value, 600_000_000.0)
+    _check(failures, "stated equity basis", basis, "STATED")
 
     # A market cap in the legacy slot must never become equity_value.
     market_cap = {"value_amount": 2_200_000_000, "value_type": "MARKET_CAPITALIZATION"}
-    value, basis = aggregate._derive_equity_value(market_cap, None, None, 27.0)
+    value, basis = aggregate._derive_equity_value(market_cap)
     _check(failures, "market cap in legacy slot -> equity_value", value, None)
     _check(failures, "market cap in legacy slot -> basis", basis, None)
 

@@ -150,8 +150,7 @@ def main() -> None:
                 {"value_amount": mediaworks_transaction_amount, "value_type": "TRANSACTION_VALUE"},
                 None,
                 None,
-                100.0,
-            ),
+            is_control=True),
             _derive_implied_enterprise_value(
                 mediaworks_ev_amount,
                 "ENTERPRISE_VALUE",
@@ -179,14 +178,14 @@ def main() -> None:
         failures,
         "full_acquisition_transaction_value_stable",
         _derive_transaction_value(
-            {}, 900_000_000.0, 150_000_000.0, 100.0,
-            equity_currency="USD", total_debt_currency="USD",
-        ),
+            {}, 900_000_000.0, 150_000_000.0,
+            is_control=True,
+            equity_currency="USD", total_debt_currency="USD"),
         (1_050_000_000.0, "EQUITY_PLUS_TOTAL_DEBT"),
     )
     equity_only_tv, equity_only_basis = _derive_transaction_value(
-        {}, 178_500_000.0, None, 85.0
-    )
+        {}, 178_500_000.0, None,
+            is_control=True)
     _assert_equal(
         failures,
         "control_debt_unknown_transaction_value_equity_only",
@@ -229,11 +228,7 @@ def main() -> None:
 
     # Funding/primary-capital rows still vacate equity_value, so no implied EV is
     # manufactured from a funding amount.
-    funding_equity, _basis = _derive_equity_value(
-        {"v2_event_type": "GROWTH_EQUITY", "round_size": 100_000_000.0},
-        None,
-        None,
-    )
+    funding_equity, _basis = _derive_equity_value({"v2_event_type": "GROWTH_EQUITY", "round_size": 100_000_000.0})
     _assert_equal(failures, "funding_equity_value_null", funding_equity, None)
 
     if failures:

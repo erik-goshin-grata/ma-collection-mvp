@@ -19,8 +19,10 @@ from stages.aggregate import _derive_transaction_value, _resolve_pct_acquired
 # (name, fv, expected_pct, expected_source)
 PCT_CASES = [
     ("stated_pct", {"v2_event_type": "ACQUISITION", "pct_acquired": 55}, 55.0, "stated"),
-    ("null_pct_control_defaults_100", {"v2_event_type": "ACQUISITION", "pct_acquired": None}, 100.0, "assumed"),
-    ("null_pct_merger_defaults_100", {"v2_event_type": "MERGER"}, 100.0, "assumed"),
+    # Both were (100.0, "assumed") until aggregation 0.11. Nothing is assumed now:
+    # a control event type that states no percentage has stated no percentage.
+    ("null_pct_control_stays_unknown", {"v2_event_type": "ACQUISITION", "pct_acquired": None}, None, None),
+    ("null_pct_merger_stays_unknown", {"v2_event_type": "MERGER"}, None, None),
     ("null_pct_minority_stays_unknown", {"v2_event_type": "MINORITY_INVESTMENT", "pct_acquired": None}, None, None),
     ("null_pct_growth_stays_unknown", {"v2_event_type": "GROWTH_EQUITY"}, None, None),
 ]
@@ -50,8 +52,15 @@ def main() -> None:
             failed.append(f"{name}: expected ({exp_pct}, {exp_src}), got ({pct}, {src})")
 
     for name, fv, eq, td, pct, eq_ccy, td_ccy, exp_val, exp_basis in TV_CASES:
+        # The percentage in each case is the fixture's way of saying which control
+        # status the source established. The derivation no longer reads a number:
+        # >= 50 is control, < 50 is established below control, and None is neither --
+        # the third outcome a single boolean would have swallowed.
         val, basis = _derive_transaction_value(
-            fv, eq, td, pct, equity_currency=eq_ccy, total_debt_currency=td_ccy
+            fv, eq, td,
+            is_control=bool(pct is not None and pct >= 50),
+            is_below_control=bool(pct is not None and pct < 50),
+            equity_currency=eq_ccy, total_debt_currency=td_ccy,
         )
         if (val, basis) != (exp_val, exp_basis):
             failed.append(f"{name}: expected ({exp_val}, {exp_basis}), got ({val}, {basis})")

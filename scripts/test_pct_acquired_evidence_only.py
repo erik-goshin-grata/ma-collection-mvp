@@ -118,13 +118,16 @@ def main() -> int:
     print("\nThe response slot is unchanged and still present:")
     check("deal.pct_acquired has a slot", '"pct_acquired": null' in flat, True)
 
-    print("\nThe assumption is NOT removed in this slice:")
-    # Stated plainly so a reader of this file is not misled about what landed. The
-    # guard is deliberate: removing the assumption before capture exists would regress
-    # every genuine 100% deal.
+    print("\nCapture came first, and the assumption is now gone:")
+    # While this slice stood alone it asserted the OPPOSITE -- that the assumption was
+    # still present -- so the file could not be misread as having landed the fix. The
+    # ordering it protected has now happened: capture (HC 0.32) then removal
+    # (aggregation 0.11). Asserting the end state is the stronger claim.
     agg_src = (ROOT / "stages" / "aggregate.py").read_text(encoding="utf-8")
-    check("_resolve_pct_acquired still assumes 100 (removed in the next commit)",
-          "100.0, \"assumed\"" in agg_src, True)
+    check("no 100 is assumed anywhere in aggregation",
+          '100.0, "assumed"' in agg_src, False)
+    check("and the capture rule this depended on is in place",
+          "EVIDENCE ONLY, AND THAT INCLUDES 100" in flat, True)
 
     print("\nVersion and contract integrity:")
     md = (ROOT / "prompts" / "high_confidence_extraction.md").read_text(encoding="utf-8")

@@ -368,8 +368,8 @@ class _Silent:
 def _run_chain(fv: dict) -> dict:
     """The production derivation chain, in the order Stage 9 calls it."""
     is_minority = aggregate._derive_is_minority(fv)
-    pct, pct_source = aggregate._resolve_pct_acquired(fv, is_minority)
-    equity, _ = aggregate._derive_equity_value(fv, fv.get("per_share_price"), None, pct)
+    pct, pct_source = aggregate._resolve_pct_acquired(fv)
+    equity, _ = aggregate._derive_equity_value(fv)
     implied_equity = aggregate._derive_implied_equity(equity, pct)
     net_debt, nd_cur, _, nd_basis = aggregate._derive_net_debt(
         None, None, fv.get("total_debt"), fv.get("total_debt_currency"),
@@ -379,8 +379,13 @@ def _run_chain(fv: dict) -> dict:
     iev, iev_basis = aggregate._derive_implied_enterprise_value(
         fv.get("value_amount"), fv.get("value_type"), implied_equity, net_debt,
         implied_equity_currency=currency, net_debt_currency=nd_cur, net_debt_basis=nd_basis)
+    # Control is now a boolean answered by event type + minority signal, not a
+    # percentage -- the same condition that used to produce the assumed 100.
+    is_control = (aggregate._event_type(fv) in aggregate._CONTROL_DEFAULT_TYPES
+                  and not is_minority)
     tv, tv_basis = aggregate._derive_transaction_value(
-        fv, equity, fv.get("total_debt"), pct,
+        fv, equity, fv.get("total_debt"), is_control=is_control,
+        is_below_control=bool(is_minority),
         equity_currency=currency, total_debt_currency=fv.get("total_debt_currency"))
     multiples = aggregate._compute_multiples(
         iev, currency, 400_000_000.0, "ANNUAL", None, None, fv.get("financials_currency"),
@@ -423,36 +428,41 @@ def test_controls() -> None:
 
         ("C · price $1B, percentage UNSTATED, debt 300 / cash 50",
          dict(_BASE, value_amount=1e9, pct_acquired=None, **_BS),
-         {"pct": 100.0, "pct_source": "assumed",
-          "equity_value": 1e9, "implied_equity_value": 1e9, "net_debt": 2.5e8,
-          "implied_enterprise_value": 1.25e9,
-          "implied_enterprise_value_basis": "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT",
+         {"pct": None, "pct_source": None,
+          "equity_value": 1e9, "implied_equity_value": None, "net_debt": 2.5e8,
+          "implied_enterprise_value": None,
+          "implied_enterprise_value_basis": None,
           "transaction_value": 1.3e9, "transaction_value_basis": "EQUITY_PLUS_TOTAL_DEBT",
-          "ev_to_revenue_ltm": 3.12, "multiple_quality": "CALCULATED"}),
+          "ev_to_revenue_ltm": None, "multiple_quality": "NOT_CALCULABLE"}),
 
         ("D · price $1B, majority stated / exact % UNSTATED, debt 300 / cash 50",
          dict(_BASE, value_amount=1e9, pct_acquired=None,
               stake_transition_type="NEW_MAJORITY_STAKE", **_BS),
-         {"pct": 100.0, "pct_source": "assumed",
-          "equity_value": 1e9, "implied_equity_value": 1e9, "net_debt": 2.5e8,
-          "implied_enterprise_value": 1.25e9,
-          "implied_enterprise_value_basis": "IMPLIED_EQUITY_PLUS_CALCULATED_NET_DEBT",
+         {"pct": None, "pct_source": None,
+          "equity_value": 1e9, "implied_equity_value": None, "net_debt": 2.5e8,
+          "implied_enterprise_value": None,
+          "implied_enterprise_value_basis": None,
           "transaction_value": 1.3e9, "transaction_value_basis": "EQUITY_PLUS_TOTAL_DEBT",
-          "ev_to_revenue_ltm": 3.12, "multiple_quality": "CALCULATED"}),
+          "ev_to_revenue_ltm": None, "multiple_quality": "NOT_CALCULABLE"}),
 
         ("E · investment $200M, % UNSTATED, MINORITY_INVESTMENT, debt 300 / cash 50",
          dict(_BASE, v2_event_type="MINORITY_INVESTMENT", value_amount=2e8,
               pct_acquired=None, **_BS),
+         # transaction_value was None here while the branch keyed on a percentage: the
+         # percentage was unstated, so it refused. Below-control is established by the
+         # event type without any percentage, so the stated investment now lands as the
+         # transaction value. Nothing is invented -- the amount is source-stated and the
+         # control status is source-established.
          {"pct": None, "pct_source": None,
           "equity_value": 2e8, "implied_equity_value": None, "net_debt": 2.5e8,
           "implied_enterprise_value": None, "implied_enterprise_value_basis": None,
-          "transaction_value": None, "transaction_value_basis": None,
+          "transaction_value": 2e8, "transaction_value_basis": "EQUITY_BELOW_CONTROL",
           "ev_to_revenue_ltm": None, "multiple_quality": "NOT_CALCULABLE"}),
 
         ("F · price $1B, % UNSTATED, NO balance sheet disclosed",
          dict(_BASE, value_amount=1e9, pct_acquired=None),
-         {"pct": 100.0, "pct_source": "assumed",
-          "equity_value": 1e9, "implied_equity_value": 1e9, "net_debt": None,
+         {"pct": None, "pct_source": None,
+          "equity_value": 1e9, "implied_equity_value": None, "net_debt": None,
           "implied_enterprise_value": None, "implied_enterprise_value_basis": None,
           "transaction_value": 1e9, "transaction_value_basis": "EQUITY_VALUE_ONLY",
           "ev_to_revenue_ltm": None, "multiple_quality": "NOT_CALCULABLE"}),
@@ -551,8 +561,11 @@ def test_no_drift() -> None:
     print("\nR1.2 changed no derivation — the reference layer only became observable:")
     check("Stage 9 still owns 120 canonical columns",
           len(aggregate._STAGE9_OWNED_COLUMNS), 120)
-    check("_derive_transaction_value still documents the dormant branch as it was",
-          "EQUITY_PLUS_TOTAL_DEBT — pct >= 50 and total_debt known"
+    # This pinned the branch's docstring verbatim to prove R1.2 had not touched the
+    # derivation, which is still true and is what the line asserts. The wording itself
+    # moved in aggregation 0.11: the branch no longer keys on a percentage at all.
+    check("the debt-inclusive branch keys on control, not a percentage",
+          "EQUITY_PLUS_TOTAL_DEBT — control and total_debt known"
           in (aggregate._derive_transaction_value.__doc__ or ""), True)
     check("_derive_net_debt still refuses a lone component",
           aggregate._derive_net_debt(None, None, 3e8, "USD", "2026-06-30", None, None, None),

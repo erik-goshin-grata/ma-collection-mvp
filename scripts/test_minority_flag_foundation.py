@@ -63,10 +63,12 @@ def _test_flag_and_pct_resolution(failures: list[str]) -> None:
             (12.5, "stated"),
         ),
         (
-            "control_acquisition_silent_pct_defaults",
+            # Was (100.0, "assumed") until aggregation 0.11. A silent control deal now
+            # states no percentage, because the source did not.
+            "control_acquisition_silent_pct_is_null",
             {"v2_event_type": "ACQUISITION", "pct_acquired": None},
             0,
-            (100.0, "assumed"),
+            (None, None),
         ),
     ]
 
@@ -76,7 +78,7 @@ def _test_flag_and_pct_resolution(failures: list[str]) -> None:
         _assert_equal(
             failures,
             f"{name} pct",
-            _resolve_pct_acquired(fields, flag),
+            _resolve_pct_acquired(fields),
             expected_pct,
         )
 
@@ -85,7 +87,7 @@ def _test_valuation_guards(failures: list[str]) -> None:
     # Minority status alone is not a percentage and must not authorize gross-up.
     minority_fields = {"v2_event_type": "MINORITY_INVESTMENT", "pct_acquired": None}
     minority_flag = _derive_flags(minority_fields)["is_minority"]
-    pct, _source = _resolve_pct_acquired(minority_fields, minority_flag)
+    pct, _source = _resolve_pct_acquired(minority_fields)
     _assert_equal(
         failures,
         "minority_without_pct_no_implied_equity",
@@ -98,7 +100,8 @@ def _test_valuation_guards(failures: list[str]) -> None:
     _assert_equal(
         failures,
         "below_control_transaction_value_preserved",
-        _derive_transaction_value({}, 600.0, None, 27.0),
+        _derive_transaction_value({}, 600.0, None, is_control=False,
+                                  is_below_control=True),
         (600.0, "EQUITY_BELOW_CONTROL"),
     )
 
@@ -129,7 +132,7 @@ def _test_lumina_remaining_stake_regression(failures: list[str]) -> None:
     _assert_equal(
         failures,
         "lumina_remaining_20_pct_resolves_as_stated",
-        _resolve_pct_acquired(fields, flag),
+        _resolve_pct_acquired(fields),
         (20.0, "stated"),
     )
 
@@ -174,7 +177,7 @@ def _test_stake_transition_regressions(failures: list[str]) -> None:
         _assert_equal(
             failures,
             f"{name} pct resolution",
-            _resolve_pct_acquired(fields, flag),
+            _resolve_pct_acquired(fields),
             (float(pct), "stated"),
         )
 

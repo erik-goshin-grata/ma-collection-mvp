@@ -219,14 +219,25 @@ def test_clean_pct() -> None:
 # pass cannot come from the fixture happening to be unusual.
 
 def test_assumed_100_boundary() -> None:
-    print("\nAssumed-100 boundary (funding never defaults, M&A still does):")
+    # This section pinned a boundary -- funding never defaulted to 100, M&A did. Product
+    # has since ruled pct_acquired evidence-only and aggregation 0.11 removed the M&A
+    # default, so there is no boundary left: NOTHING defaults. The section is kept
+    # because the funding half still matters and because the M&A half is now the
+    # stronger assertion, not a weaker one.
+    print("\nNo event type defaults to 100 — a silent source is silent:")
     for etype in ("VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"):
         pct, source = _resolve_pct_acquired({"v2_event_type": etype, "pct_acquired": None})
         check(f"{etype} silent -> null", (pct, source), (None, None))
 
     for etype in ("ACQUISITION", "MERGER"):
         pct, source = _resolve_pct_acquired({"v2_event_type": etype, "pct_acquired": None})
-        check(f"{etype} silent -> 100 assumed", (pct, source), (100.0, "assumed"))
+        check(f"{etype} silent -> null, no longer 100 assumed", (pct, source), (None, None))
+
+    # The BODY, not the docstring -- which explains at length why nothing is assumed,
+    # and should not be what makes this pass.
+    import inspect
+    body = inspect.getsource(_resolve_pct_acquired).split('"""')[-1]
+    check("'assumed' is not a source the resolver can emit", "assumed" in body, False)
 
     # A stated value wins on every event type, and is never restamped as assumed.
     for etype in ("GROWTH_EQUITY", "ACQUISITION"):
