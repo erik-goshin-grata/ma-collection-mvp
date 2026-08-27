@@ -1,0 +1,45 @@
+-- 015 — one party, one collected fact.
+--
+-- Three roles are captured today and then collapsed into a scalar before anything can
+-- see how many parties there were:
+--
+--   BUYER          acquirer_name, with multiple firms joined by " and " on the
+--                  prompt's own instruction. The contract even documents the loss:
+--                  acquirer.type is told to return `unknown` for multiple buyers
+--                  because one value cannot classify two firms -- "a compatibility
+--                  answer for this single scalar field". Each firm's own type is
+--                  determinable and discarded.
+--   SPONSOR_BUYER  acquirer_sponsor_name, "comma-delimit" when there are co-sponsors.
+--   PARENT_SELLER  parent_seller_name, which collapses SILENTLY -- no instruction
+--                  covers a joint divestiture at all.
+--
+-- A scalar "Firm A and Firm B" is not two party relationships. No downstream resolver
+-- can recover a count that was never collected, so this is a collection defect rather
+-- than an identity one, and it is fixed where it happens.
+--
+-- Three JSON columns hold the arrays the extraction now returns: one item per party.
+-- The scalars are UNCHANGED and remain the display projection for every current reader.
+--
+-- ROLE IS CARRIED BY WHICH ARRAY A PARTY IS IN. BUYER, SPONSOR_BUYER and PARENT_SELLER
+-- are existing V3 §T5 roles; no role is invented here, and no sub-role among co-buyers
+-- is introduced because Product has specified none.
+--
+-- NOT IN SCOPE, DELIBERATELY. No entity resolution, deduplication, alias matching,
+-- canonical entity id, `entity` row or `transaction_participant` row -- matching a name
+-- to an identity is separate work and stays separate. Roles this implementation does
+-- not author at all (SELLER, SPONSOR_SELLER, PARENT_ACQUIRER, LENDER, JV_PARTNER,
+-- UNDERWRITER) are coverage gaps, not collapses, and adding them would be new
+-- extraction rather than cardinality preservation.
+--
+-- TARGET is excluded. `target_name` does hold multi-name values -- 'Priority Dispatch,
+-- Inc. and Diamond Expedited' in the current corpus -- but two target names may mean
+-- decomposition into two transactions failed rather than that one transaction has two
+-- targets. That question belongs to the multi-transaction envelope and is recorded
+-- rather than answered here.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction ADD COLUMN acquirers TEXT;
+ALTER TABLE staging_extraction ADD COLUMN buy_side_sponsors TEXT;
+ALTER TABLE staging_extraction ADD COLUMN parent_sellers TEXT;

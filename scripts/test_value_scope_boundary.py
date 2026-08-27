@@ -226,6 +226,9 @@ def main() -> None:
             "deal": {}, "features": {}, "target_financials": {},
             "financials_disclosure_status": "UNKNOWN", "model_confidence": "HIGH",
             "reported_multiples": [],
+            "acquirers": [],
+            "buy_side_sponsors": [],
+            "parent_sellers": [],
             "value_observations": []}
     check("a clean response validates", hc._validate(dict(base)) is None, True)
     check("a response carrying a retired observation still validates",
@@ -258,6 +261,9 @@ def main() -> None:
     ursa = hc._primary_value({"value": {"amount": 1_600_000_000, "currency": "USD",
                                         "type": "MARKET_CAPITALIZATION"},
                               "reported_multiples": [],
+                              "acquirers": [],
+                              "buy_side_sponsors": [],
+                              "parent_sellers": [],
                               "value_observations": []})
     check("Ursa Major: amount null", ursa.get("amount"), None)
     check("Ursa Major: currency null", ursa.get("currency"), None)

@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.32"
+_VERSION = "0.33"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -46,6 +46,9 @@ _REQUIRED_KEYS = frozenset({
     "value_observations",
     "features",
     "target_financials",
+    "acquirers",
+    "buy_side_sponsors",
+    "parent_sellers",
     "reported_multiples",
     "model_confidence",
     "deal",
@@ -195,6 +198,12 @@ def _validate(result: dict) -> str | None:
         otype = obs.get("type")
         if otype is not None and otype not in _VALID_VALUE_TYPES:
             return f"invalid value_observations[{i}].type: {otype!r}"
+    # Shape only, same posture as reported_multiples: a bad ITEM is dropped by the
+    # serializer rather than failing an extraction that also carries the value, dates
+    # and advisors.
+    for _party_key in _PARTY_ARRAY_KEYS:
+        if not isinstance(result.get(_party_key), list):
+            return f"invalid {_party_key}: expected list"
     # Shape only. Per-item vocabulary is enforced in _reported_multiples_json, which
     # DROPS an unusable item -- rejecting here would cost the whole extraction over one
     # bad multiple.
@@ -273,6 +282,58 @@ _REPORTED_MULTIPLE_KEYS = frozenset({
     "multiple_type", "multiple_value", "period_basis", "period_end_date",
     "numerator_value_type", "as_reported_text",
 })
+
+
+_PARTY_ARRAY_KEYS = ("acquirers", "buy_side_sponsors", "parent_sellers")
+
+
+def _parties_json(txn: dict, key: str, log=None, eid=None) -> str:
+    """Serialize one party array: one item per party, names cleaned, types validated.
+
+    A VOCABULARY FILTER, NOT A CLASSIFIER. A party is kept when it has a usable name.
+    `type` is validated against the acquirer vocabulary the prompt already publishes and
+    dropped to null when it is outside it -- never translated into a nearby value, which
+    would make this a second, invisible classifier. Nothing here splits a name on " and "
+    either: recovering two parties from one string is guesswork about punctuation, and
+    the model is the one reading the source.
+
+    ALWAYS RETURNS AN ARRAY, INCLUDING "[]". An absent array and an empty one are
+    different statements, and "this deal has no parent seller" is worth recording
+    plainly rather than as a missing key.
+    """
+    items = txn.get(key)
+    if not isinstance(items, list):
+        if items is not None and log is not None:
+            log.warning("extraction_id=%s %s is not a list: %r -- recorded empty",
+                        eid, key, type(items).__name__)
+        return "[]"
+    clean: list[dict] = []
+    for item in items:
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        name = str(name).strip() if name is not None else ""
+        if not name:
+            if log is not None:
+                log.warning("extraction_id=%s dropping %s item with no name", eid, key)
+            continue
+        party: dict = {"name": name}
+        if key == "acquirers":
+            # Only buyers carry a type. The prompt defines no per-party attribute for
+            # sponsors or parent sellers, and inventing one here would author a fact
+            # nothing asked the model for.
+            raw = item.get("type")
+            normalized = _normalize_acquirer_type(raw) if raw is not None else None
+            if normalized is not None and normalized not in _VALID_ACQUIRER_TYPES_V2:
+                if log is not None:
+                    log.warning("extraction_id=%s acquirers item %r has unsupported "
+                                "type %r -- recorded without one", eid, name, raw)
+                normalized = None
+            party["type"] = normalized
+        clean.append(party)
+    return json.dumps(clean, ensure_ascii=False)
 
 
 def _reported_multiples_json(txn: dict, log=None, eid=None) -> str | None:
@@ -547,6 +608,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             value_observations_json = _value_observations_json(
                 txn, log, row["source_raw_id"])
             reported_multiples_json = _reported_multiples_json(txn, log, eid)
+            acquirers_json = _parties_json(txn, "acquirers", log, eid)
+            buy_side_sponsors_json = _parties_json(txn, "buy_side_sponsors", log, eid)
+            parent_sellers_json = _parties_json(txn, "parent_sellers", log, eid)
 
             nd = dict(base_nd)
             hc_notes = txn.get("notes")
@@ -616,6 +680,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 v.get("type_confidence"), v.get("qualifier"), v.get("per_share_price"),
                 value_observations_json,
                 reported_multiples_json,
+                acquirers_json,
+                buy_side_sponsors_json,
+                parent_sellers_json,
                 txn.get("round_size"),   # primary-capital capture (value fields null when set)
                 tf.get("revenue_amount"),
                 tf.get("revenue_period_type"),       # legacy column
@@ -662,6 +729,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         value_type_confidence = ?,  value_qualifier = ?,  per_share_price = ?,
                         value_observations = ?,
                         reported_multiples = ?,
+                        acquirers = ?,  buy_side_sponsors = ?,  parent_sellers = ?,
                         round_size = ?,
                         target_revenue = ?,
                         target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
@@ -719,6 +787,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         value_type_confidence, value_qualifier, per_share_price,
                         value_observations,
                         reported_multiples,
+                        acquirers, buy_side_sponsors, parent_sellers,
                         round_size,
                         target_revenue,
                         target_revenue_period_type, target_revenue_period_type_v2,
@@ -737,7 +806,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

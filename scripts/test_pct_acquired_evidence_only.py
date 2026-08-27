@@ -136,7 +136,10 @@ def main() -> int:
           bool(re.search(r"^\| 0\.32 \|", md, re.M)), True)
     check("prompt declares a version", bool(declared), True)
     if declared:
-        check("prompt is at 0.32", declared.group(1), "0.32")
+        # Floor, not a pin: later slices legitimately bump this prompt, and the
+        # 0.32 row asserted above is what fixes this rule's provenance.
+        check("prompt is at or past 0.32",
+              tuple(int(x) for x in declared.group(1).split(".")) >= (0, 32), True)
         check("stage _VERSION agrees", hc._VERSION, declared.group(1))
 
     print()

@@ -443,6 +443,70 @@ def reported_multiple_field_name(item: dict) -> str | None:
     return f"{MULTIPLE_FIELD_PREFIX}{mtype}.{basis}.{period_end}"
 
 
+# Which staging array becomes which observation field name. The field name IS the role:
+# BUYER, SPONSOR_BUYER and PARENT_SELLER are existing V3 §T5 roles, and a party's role is
+# recorded by which array it arrived in rather than by a value inside the item.
+PARTY_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("acquirers", "acquirer_party"),
+    ("buy_side_sponsors", "buy_side_sponsor_party"),
+    ("parent_sellers", "parent_seller_party"),
+)
+
+
+def _write_party_observations(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    prompt_version: str | None,
+    observation_source_stage: str,
+    columns: set[str],
+) -> int:
+    """One observation per source-stated party, so cardinality survives collection.
+
+    PRESERVATION ONLY. These field names are deliberately absent from aggregate's
+    _FIELDS, so _load_observation_input drops them at its field-type gate: a party is a
+    record of what a source said, not a candidate to reconcile between. Choosing which
+    of two sources' buyer lists is right is an identity question, and identity is not
+    this slice.
+
+    Per-fact provenance comes from `observation_fact_key` (E4 rule 6), so two buyers
+    named in one release stay distinguishable from one buyer named by two releases --
+    INSERT OR IGNORE would otherwise collapse them into a single row.
+
+    The whole item is stored as JSON rather than split across fields, matching how
+    `value_observation` and `reported_multiple` preserve their facts: one row is one
+    party, and it carries everything the source said about that party.
+    """
+    inserted = 0
+    source_type = _row_value(row, "source_type")
+    for column, field_name in PARTY_ARRAY_FIELDS:
+        for index, item in enumerate(_value_observation_items(_row_value(row, column))):
+            name = item.get("name")
+            if not name:
+                continue
+            payload = {"name": name}
+            if "type" in item:
+                payload["type"] = item.get("type")
+            inserted += insert_observation(
+                conn,
+                transaction_id=_row_value(row, "transaction_cluster_id"),
+                field_name=field_name,
+                field_value=json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                staging_extraction_id=_row_value(row, "extraction_id"),
+                source_raw_id=_row_value(row, "source_raw_id"),
+                source_type=source_type,
+                source_tier=_row_value(row, "source_tier"),
+                model_confidence=_row_value(row, "model_confidence"),
+                source_published_date=_row_value(row, "published_date"),
+                filing_type=_source_filing_type(source_type),
+                extraction_prompt_version=prompt_version,
+                observation_source_stage=observation_source_stage,
+                observation_fact_key=f"{column}[{index}]",
+                columns=columns,
+            )
+    return inserted
+
+
 def _write_reported_multiples(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -695,6 +759,13 @@ def write_staging_observations_for_extraction(
             columns=columns,
         )
         inserted += _write_reported_multiples(
+            conn,
+            row,
+            prompt_version=_row_value(row, "hc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "HC_EXTRACT"),
+            columns=columns,
+        )
+        inserted += _write_party_observations(
             conn,
             row,
             prompt_version=_row_value(row, "hc_prompt_version"),

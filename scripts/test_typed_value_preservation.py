@@ -81,6 +81,9 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
             "per_share_price": None,
         },
         "reported_multiples": [],
+        "acquirers": [],
+        "buy_side_sponsors": [],
+        "parent_sellers": [],
         "value_observations": [
             {
                 "amount": 178_500_000,
@@ -233,6 +236,9 @@ def _insert_second_source_fixture(conn: sqlite3.Connection) -> int:
             "per_share_price": None,
         },
         "reported_multiples": [],
+        "acquirers": [],
+        "buy_side_sponsors": [],
+        "parent_sellers": [],
         "value_observations": [
             {
                 "amount": 210_000_000,
