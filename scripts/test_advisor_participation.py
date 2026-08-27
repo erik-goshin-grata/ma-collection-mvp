@@ -327,8 +327,10 @@ def _test_delivered_contract(failures: list[str]) -> None:
     if '"advised_party"' in system:
         failures.append("delivered contract: the legacy advised_party role is being asked "
                         "for again — 0.11 replaced it with advised_party_name + advised_side")
-    if "LENDER is NOT" not in system:
-        failures.append("delivered contract: the lender-is-not-a-specialty rule is missing")
+    # The role was renamed LENDER -> FINANCING_PROVIDER; the rule this asserts is
+    # unchanged, so it follows the wording rather than pinning the old name.
+    if "FINANCING PROVIDER is NOT an advisor specialty" not in system:
+        failures.append("delivered contract: the provider-is-not-a-specialty rule is missing")
 
 
 def main() -> None:

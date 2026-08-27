@@ -363,9 +363,15 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "reported_multiples" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "013_v3_reported_multiples.sql").read_text(encoding="utf-8"))
 
-    # 017 (lender participation). Column sentinel.
-    if "lenders" not in _existing("staging_extraction"):
+    # 017 (financing participation). Column sentinel. The column it adds is renamed by
+    # 018 below, so this guard asks for EITHER name: on an already-renamed database
+    # `lenders` is absent and re-running 017 would re-add it as a second, empty column.
+    if not ({"lenders", "financing_providers"} & _existing("staging_extraction")):
         conn.executescript((_mig_dir / "017_v3_lender_participation.sql").read_text(encoding="utf-8"))
+
+    # 018 (LENDER -> FINANCING_PROVIDER). Renames 017's column; 017 itself is unchanged.
+    if "lenders" in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "018_v3_financing_provider_rename.sql").read_text(encoding="utf-8"))
 
     # 016 (parent acquirer / sell-side sponsor parties). Column sentinel.
     if "parent_acquirers" not in _existing("staging_extraction"):

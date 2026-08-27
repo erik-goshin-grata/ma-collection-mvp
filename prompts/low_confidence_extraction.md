@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.12 (financing: who provided it, who advised on it)
+**Version:** 0.13 (a financing provider, not a lender)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -91,11 +91,12 @@ Extract any financial and legal advisors mentioned in the text. For each advisor
     null — the source does not establish which service was provided
   Do NOT record a generic catch-all when the source establishes one of the values
   above. If the source names the service, name it.
-  A LENDER is NOT an advisor specialty. Providing capital and advising on a
-  transaction are different participations; a firm doing both appears twice.
-  A firm that ARRANGES financing is a financing advisor, not a lender: arranging,
-  structuring or placing capital is advice about capital, not capital. A firm that
-  PROVIDES financing is a lender, and providing it is not advice.
+  A FINANCING PROVIDER is NOT an advisor specialty. Providing capital and advising
+  on a transaction are different participations; a firm doing both appears twice.
+  A firm that ARRANGES financing is a financing advisor, not a financing provider:
+  arranging, structuring or placing capital is advice about capital, not capital. A
+  firm that PROVIDES, COMMITS or LEADS the financing is a financing provider, and
+  doing so is not advice.
 - advised_party_name — the SPECIFIC party advised, exactly as stated (e.g.
   "Acme Corp", "Beta Industries"). Null when the source does not identify which
   party the advisor acted for.
@@ -115,37 +116,46 @@ Rules:
 - If neither the party nor the side is established, leave both null and still record
   the advisor and its specialty.
 
-LENDERS:
+FINANCING PROVIDERS:
 
-Extract each party the source states is PROVIDING financing or capital for the
-transaction. One lender is one entry.
+Extract each party the source states PROVIDES, COMMITS or LEADS the financing for the
+transaction. One financing provider is one entry.
 
 - name — the firm as stated ("Blackstone Credit", "Bank of America")
 
-WHAT MAKES A LENDER. The source must establish that the party SUPPLIES the money:
-"provided committed debt financing", "is providing a $400 million term loan",
-"financing is being provided by X", "X committed the debt". A lender hands over
-capital or commits to.
+WHAT MAKES A FINANCING PROVIDER. The source must establish that the party SUPPLIES the
+money, commits to supplying it, or leads its provision: "provided committed debt
+financing", "is providing a $400 million term loan", "financing is being provided by
+X", "X committed the debt", "led the financing".
+
+Do not classify the instrument or the capacity. Term loan or notes, lender or
+commitment party -- the participation is the same fact and this array records it
+without deciding which label the firm technically holds.
 
 ARRANGING IS NOT PROVIDING, AND THIS IS THE WHOLE DISTINCTION. "Arranged the
 financing", "structured the facility", "placed the notes", "acted as financing
-advisor", "served as lead arranger on the financing" describe advice about capital,
-not capital. Those firms are ADVISORS with specialty financing_advisory and belong in
-the advisors array. Do NOT put them here, and do not reason that a firm arranging
-financing must also be lending some of it -- the source has to say so.
+advisor" describe advice about capital, not capital. Those firms are ADVISORS with
+specialty financing_advisory and belong in the advisors array. Do NOT put them here,
+and do not reason that a firm arranging financing must also be providing some of it --
+the source has to say so.
 
 Equally, providing financing does not make a firm an advisor. Do not add an advisor
-entry for a lender because lending is a financial service.
+entry for a financing provider because supplying capital is a financial service.
+
+LEADING IS NOT ARRANGING. "Led the financing" states a role in providing it; "lead
+arranger" states a role in arranging it. The first belongs here, the second in the
+advisors array. Where the source says only that a firm was an arranger, it is an
+advisor however senior the arranging role sounds.
 
 A FIRM MAY BE BOTH, WHEN THE SOURCE ESTABLISHES BOTH. "X provided the financing and
-acted as financing advisor" is two participations: one lender entry for X and one
-advisor entry for X with specialty financing_advisory. That is the same rule the
-advisor section already applies to one firm advising two parties.
+acted as financing advisor" is two participations: one financing-provider entry for X
+and one advisor entry for X with specialty financing_advisory. That is the same rule
+the advisor section already applies to one firm advising two parties.
 
-- Only external parties. An acquirer funding a deal from its own balance sheet is
-  not lending to itself; record no lender.
-- Return an empty array when the source names no financing provider. Most releases
-  do not name one, and an empty array is the ordinary answer.
+- Only external parties. An acquirer funding a deal from its own balance sheet is not
+  financing itself from outside; record no financing provider.
+- Return an empty array when the source names no financing provider. Most releases do
+  not name one, and an empty array is the ordinary answer.
 
 CONSIDERATION COMPONENTS:
 
@@ -303,7 +313,7 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     {"name": "Wachtell, Lipton, Rosen & Katz", "advisor_specialty": "legal",
      "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"}
   ],
-  "lenders": [],
+  "financing_providers": [],
   "consideration_components": [
     {
       "form": "CASH",
@@ -372,7 +382,7 @@ Extract advisors, consideration components, and deal characteristic flags.
     {"name": "Wachtell, Lipton, Rosen & Katz", "advisor_specialty": "legal",
      "advised_party_name": "Acme Corp", "advised_side": "BUY_SIDE"}
   ],
-  "lenders": [
+  "financing_providers": [
     {"name": "string"}
   ],
   "consideration_components": [
@@ -866,3 +876,4 @@ initiated a process to find one.
 | 0.10 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.11 | 2026-08-24 | **Advisor participation: specialty and the advised participant become source facts.** The old shape asked for `advisor_type` (`FINANCIAL`/`LEGAL`/`OTHER`) and `advised_party` (`TARGET`/`ACQUIRER`/`PARENT_SELLER`/`BOTH`/`UNKNOWN`), and compressed both. `OTHER` was lossy **by written instruction** — this prompt's own definition read "OTHER covers fairness opinion providers, proxy solicitors, info agents, and accounting/tax advisors", so four named specialties were collapsed into one bucket with the evidence sitting in the source text. `BOTH` was worse: one advisor serving two participants is two participations, and a single row cannot say which two. **Replaced by** `advisor_specialty` (`financial_advisory` · `legal` · `accounting` · `tax` · `fairness_opinion` · `proxy_solicitation` · `information_agent` · `regulatory` · `communications` · null), `advised_party_name` (the specific party, as stated) and `advised_side` (`BUY_SIDE`/`SELL_SIDE`/null). Five of those specialties already exist in Grata; `tax`, `proxy_solicitation` and `information_agent` were accepted on the strength of being named in the old `OTHER` definition; `communications` is a Product addition. `restructuring` and `capital_markets` remain deferred pending extraction evidence. **A LENDER is not an advisor specialty** — providing capital and advising are different participations, and a firm doing both appears twice. **Name and side are independent**: neither is ever inferred from the other, and each stays null unless established. `BOTH` is removed from the contract; two parties means two entries. **Nothing is lost on read** — `type` and `advised_party` are retained and still written, historical `OTHER` keeps its meaning as evidence that a non-financial, non-legal specialty was observed, and the legacy pair now carries a compatibility projection rather than the Product model. Participant *resolution* is not here; capture is, so the stated identity stops being discarded while resolution is pending. |
 | 0.12 | 2026-08-27 | **Financing gets two participations instead of none.** This contract already said "A LENDER is NOT an advisor specialty. Providing capital and advising on a transaction are different participations; a firm doing both appears twice" -- and had nowhere to put the lender, so a financing provider was correctly kept out of the advisor list and then dropped. `lenders` is a new array: one item per party the source states is PROVIDING financing, `{name}` only. `lender_role` exists in the target model with no published vocabulary, so none is invented. `financing_advisory` joins the advisor specialties for the firm that advises on, structures, arranges or places the financing -- advice ABOUT capital. Its deferred candidate name was `capital_markets`, deferred for want of extraction evidence rather than on the semantics. **Arranging is not providing, and that is the whole distinction**: "arranged the financing", "placed the notes", "lead arranger" are financing_advisory, never a lender, and the prompt forbids reasoning that an arranger must also be lending. Equally, providing financing does not make a firm an advisor. A firm the source establishes in both is recorded once in each -- the advisor table carries no uniqueness constraint on the name and this contract already emits one row per advisor-and-party pair. An acquirer funding a deal from its own balance sheet is not lending to itself. Empty array is the ordinary answer. |
+| 0.13 | 2026-08-27 | **`LENDER` becomes `FINANCING_PROVIDER`.** `lender` names an instrument and a technical capacity; the participation actually collected is a party that **provides, commits, or leads** the provision of transaction financing. A release naming a firm as a commitment party, or as leading a financing, describes that participation exactly, and the old name either under-described it or invited a judgement about capacity this collection deliberately does not make -- the prompt now says so: do not classify the instrument or the capacity. **A rename, not a redefinition**: the same parties qualify, no boundary moves, and every test outcome is unchanged. The distinction from `financing_advisory` is untouched and remains the point -- arranging, structuring or placing financing is advice about capital and does not alone establish a provider, while a firm the source establishes in both is recorded once in each. One rule is added because the wider name makes it reachable: **leading is not arranging**. "Led the financing" states a role in providing it; "lead arranger" states a role in arranging it, and stays an advisor however senior it sounds. The staging column is renamed by a forward migration; migration 017 is left as it shipped. Funding's `investor_type = lender` is untouched -- that classifies what kind of investor joined a round, a different dimension. |

@@ -44,7 +44,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "low_confidence_extraction"
-_VERSION = "0.12"
+_VERSION = "0.13"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -67,8 +67,8 @@ _VALID_ADVISED_PARTIES = frozenset({"TARGET", "ACQUIRER", "PARENT_SELLER", "BOTH
 # participation from supplying it. Its deferred candidate name was `capital_markets`,
 # deferred for want of extraction evidence rather than on the semantics; `financing_advisory`
 # is the approved name and does not read as a desk. `restructuring` remains deferred.
-# A financing PROVIDER is a LENDER, not an advisor specialty, and a firm the source
-# establishes in both participations is recorded once in each.
+# A FINANCING_PROVIDER is not an advisor specialty, and a firm the source establishes in
+# both participations is recorded once in each.
 _VALID_ADVISOR_SPECIALTIES = frozenset({
     "financial_advisory", "legal", "accounting", "fairness_opinion", "regulatory",
     "tax", "proxy_solicitation", "information_agent", "communications",
@@ -96,27 +96,29 @@ _VALID_APPROACH_TYPE = frozenset({"SOLICITED", "UNSOLICITED"})
 _SLEEP = 1.0  # conservative Opus throttle
 
 
-def _lenders_json(result: dict, log=None, eid=None) -> str:
-    """Serialize the lenders array: one item per party stated to PROVIDE financing.
+def _financing_providers_json(result: dict, log=None, eid=None) -> str:
+    """Serialize the financing providers: one item per party stated to provide the money.
 
-    A name filter, nothing more. There is no lender subtype to validate against -- the
-    target model has a `lender_role` with no published vocabulary, and inventing one to
-    fill the column would be worse than leaving the distinction uncollected.
+    A name filter, nothing more. The role is deliberately uncommitted about instrument
+    and capacity -- provides, commits or leads is one participation, and deciding
+    whether a firm is technically a lender, an underwriter or a commitment party is a
+    judgement this collection does not make. There is no subtype to validate against and
+    none is invented.
 
     NOTHING IS INFERRED FROM THE ADVISOR LIST, IN EITHER DIRECTION. This reads only what
-    the model returned under `lenders`. A firm that arranged financing does not become a
-    lender here because arranging appears alongside lending in a sentence, and a lender
-    does not become an advisor because lending is a financial service. Both directions
+    the model returned. A firm that arranged financing does not become a provider here
+    because arranging appears alongside providing in a sentence, and a provider does not
+    become an advisor because supplying capital is a financial service. Both directions
     are the model's judgement under the prompt contract, not this parser's.
 
     Always returns an array, including "[]" -- most releases name no financing provider,
     and that is a statement worth recording rather than a missing key.
     """
-    items = result.get("lenders")
+    items = result.get("financing_providers")
     if not isinstance(items, list):
         if items is not None and log is not None:
-            log.warning("extraction_id=%s lenders is not a list: %r -- recorded empty",
-                        eid, type(items).__name__)
+            log.warning("extraction_id=%s financing_providers is not a list: %r -- "
+                        "recorded empty", eid, type(items).__name__)
         return "[]"
     clean: list[dict] = []
     for item in items:
@@ -128,10 +130,11 @@ def _lenders_json(result: dict, log=None, eid=None) -> str:
         name = str(name).strip() if name is not None else ""
         if not name:
             if log is not None:
-                log.warning("extraction_id=%s dropping lender with no name", eid)
+                log.warning("extraction_id=%s dropping financing provider with no name", eid)
             continue
         clean.append({"name": name})
     return json.dumps(clean, ensure_ascii=False)
+
 
 def _fmt(v) -> str:
     return str(v) if v is not None else "null"
@@ -354,7 +357,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 target_fee_percentage = ?,
                 acquirer_fee_amount = ?,
                 acquirer_fee_percentage = ?,
-                lenders = ?,
+                financing_providers = ?,
                 model_confidence = ?,
                 lc_prompt_version = ?,
                 notes = ?,
@@ -377,7 +380,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 fees.get("target_fee_percentage"),
                 fees.get("acquirer_fee_amount"),
                 fees.get("acquirer_fee_percentage"),
-                _lenders_json(result, log, eid),
+                _financing_providers_json(result, log, eid),
                 result.get("model_confidence"),
                 _VERSION,
                 json.dumps(nd),

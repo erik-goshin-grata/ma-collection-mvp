@@ -455,15 +455,16 @@ PARTY_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
-# Lenders arrive from the low-confidence stage, not the HC party arrays, because the
-# paragraph naming financing parties is what that stage already reads. The shape is the
-# same: one party, one preservation observation, role carried by the field name.
-LENDER_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
-    ("lenders", "lender_party"),
+# Financing providers arrive from the low-confidence stage, not the HC party arrays,
+# because the paragraph naming financing parties is what that stage already reads. The
+# shape is the same: one party, one preservation observation, role carried by the field
+# name.
+FINANCING_PROVIDER_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("financing_providers", "financing_provider_party"),
 )
 
 
-def _write_lender_observations(
+def _write_financing_provider_observations(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
     *,
@@ -473,17 +474,19 @@ def _write_lender_observations(
 ) -> int:
     """One observation per source-stated provider of financing.
 
-    PRESERVATION ONLY, like every other party field: `lender_party` is absent from
-    aggregate's _FIELDS, so the aggregation loader drops it at the field-type gate. A
-    lender is a record of what a source said, not a scalar to reconcile between sources.
+    PRESERVATION ONLY, like every other party field: `financing_provider_party` is
+    absent from aggregate's _FIELDS, so the aggregation loader drops it at the
+    field-type gate. A financing provider is a record of what a source said, not a
+    scalar to reconcile between sources.
 
-    A lender is NOT derived from the advisor rows and no advisor is derived from these.
-    Providing capital and advising on a transaction are different participations, and a
-    firm the source establishes in both is written once here and once as an advisor.
+    A provider is NOT derived from the advisor rows and no advisor is derived from
+    these. Providing capital and advising on a transaction are different
+    participations, and a firm the source establishes in both is written once here and
+    once as an advisor.
     """
     inserted = 0
     source_type = _row_value(row, "source_type")
-    for column, field_name in LENDER_ARRAY_FIELDS:
+    for column, field_name in FINANCING_PROVIDER_ARRAY_FIELDS:
         for index, item in enumerate(_value_observation_items(_row_value(row, column))):
             name = item.get("name")
             if not name:
@@ -836,7 +839,7 @@ def write_staging_observations_for_extraction(
             observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
             columns=columns,
         )
-        inserted += _write_lender_observations(
+        inserted += _write_financing_provider_observations(
             conn,
             row,
             prompt_version=_row_value(row, "lc_prompt_version"),

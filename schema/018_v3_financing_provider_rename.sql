@@ -1,0 +1,41 @@
+-- 018 — LENDER becomes FINANCING_PROVIDER.
+--
+-- `lender` names an instrument and a technical capacity. The participation Product
+-- actually collects is broader and simpler: a party that PROVIDES, COMMITS, or LEADS the
+-- provision of transaction financing. A release naming a firm as a commitment party or
+-- as leading a financing describes that participation exactly, and calling it a lender
+-- would either under-describe it or invite a judgement about capacity that this
+-- collection deliberately does not make. Nothing about the instrument -- term loan,
+-- notes, revolver, preferred -- is classified here, and nothing needs to be.
+--
+-- The distinction from ADVISOR / financing_advisory is UNCHANGED and remains the point:
+-- arranging, structuring, placing or advising on financing does not alone establish a
+-- FINANCING_PROVIDER. A party may hold both participations when the source establishes
+-- both, and each is recorded once. Widening the name does not widen the evidence bar.
+--
+-- A RENAME, NOT A REDEFINITION. The same parties qualify today as qualified yesterday.
+-- No parser rule, no boundary and no test outcome changes; this corrects what the role
+-- is called before the name spreads any further.
+--
+-- Migration 017 is NOT rewritten. It is on main and it describes what shipped. This is a
+-- forward rename of the column it added:
+--
+--   ALTER TABLE ... RENAME COLUMN preserves any rows already written, which the
+--   alternative -- add a new column and leave the old one behind -- does not. A dead
+--   `lenders` column outliving its meaning is the churn worth avoiding, not this.
+--
+-- The Funding path's `investor_type = 'lender'` is deliberately untouched. That value
+-- classifies what KIND of investor participated in a round -- a debt provider in a
+-- venture-debt round -- which is a different dimension from the M&A participant role. It
+-- predates this work and renaming it would change the funding contract for no reason.
+--
+-- UNDERWRITER stays unauthored and unresolved. If FINANCING_PROVIDER covers "provides,
+-- commits or leads" without classifying capacity, a party underwriting a financing
+-- commitment may fall inside it -- which would make the target model's separate
+-- UNDERWRITER role narrower than it appears. That is recorded, not answered, and no
+-- underwriting or securities semantics are introduced here.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction RENAME COLUMN lenders TO financing_providers;
