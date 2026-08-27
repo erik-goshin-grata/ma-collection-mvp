@@ -122,7 +122,10 @@ def test_prompt() -> None:
           "10.5x after adjusting for the tax benefits" in system, True)
     check("and the example pins that EBITDA stays null",
           "ebitda_amount stays null" in system, True)
-    check("prompt version is 0.31", hc._VERSION, "0.31")
+    # A floor, not a pin: this slice was introduced at 0.31 and must not silently
+    # regress below it, but later prompt versions are expected and must not fail here.
+    check("prompt version >= 0.31 (currently %s)" % hc._VERSION,
+          tuple(int(x) for x in hc._VERSION.split(".")) >= (0, 31), True)
 
 
 # ---------------------------------------------------------------------------

@@ -538,8 +538,14 @@ def test_no_drift() -> None:
         ("BUY-SIDE COHERENCE", "0.25 buy-side coherence"),
     ):
         check(f"{label} still delivered", marker in system, True)
-    check("the pct_acquired rule text is untouched — semantics stay parked",
-          "Do not\n  extract 100 — leave null for full acquisitions." in system, True)
+    # This guard read "the pct_acquired rule text is untouched -- semantics stay parked"
+    # and pinned the old prohibition verbatim. R1.2 did not touch that rule, which is
+    # what it was there to prove. Product has since ruled the field evidence-only and
+    # HC 0.32 rewrote it deliberately, so pinning the retired wording would now assert a
+    # contract that no longer exists. What still matters here is the same thing it
+    # always did: this slice is not the one that changed it.
+    check("pct_acquired is instructed evidence-only, not by the retired prohibition",
+          "Do not extract 100" in system.replace("\n  ", " "), False)
     check("user template unchanged in shape", "{title}" in prompt["user_template"], True)
 
     print("\nR1.2 changed no derivation — the reference layer only became observable:")

@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.31 (a stated multiple is captured as stated)
+**Version:** 0.32 (a stated percentage is captured, 100 included)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -254,9 +254,21 @@ parent_seller:
 - description: 1-2 sentence description of the parent seller. Null if sparse.
 
 deal:
-- pct_acquired: Percentage of target being acquired. Null if 100% or unstated.
-  Extract for minority investments and partial acquisitions only. Do not
-  extract 100 — leave null for full acquisitions.
+- pct_acquired: Percentage of the target acquired in THIS transaction, when the
+  source establishes one. Null when the source does not.
+
+  EVIDENCE ONLY, AND THAT INCLUDES 100. Extract 100 when the source states the
+  whole of the target changed hands -- "100% of", "all of the outstanding shares",
+  "the entire issued share capital", "acquires the company" where no prior stake
+  is in play. A full acquisition the source describes is a stated percentage like
+  any other, and it is recorded.
+
+  A SILENT SOURCE IS NULL, NOT 100. A source that says a company was acquired and
+  never says how much of it was acquired has stated no percentage. Leave the field
+  null. Null means "the source did not say", and downstream reads it that way; it
+  is not a slot for the likeliest answer, and "it is probably a full acquisition"
+  is a guess, not a reading of the text.
+
   Current transaction only: distinguish prior ownership, the stake acquired in
   this transaction, and post-transaction ownership. When a source says the
   buyer acquires the "remaining X%," extract pct_acquired = X. Do not substitute
@@ -264,6 +276,12 @@ deal:
   Example: if the buyer previously acquired/owned an 80% controlling stake and
   this announcement says it acquired the remaining 20%, pct_acquired = 20, even
   if the target becomes a 100% wholly owned subsidiary after the transaction.
+
+  THAT EXAMPLE IS ALSO THE TRAP FOR 100. "Wholly owned subsidiary" describes
+  ownership AFTER the deal, not the size of the stake bought in it. Where any
+  prior stake is stated or implied, a post-transaction whole-ownership phrase is
+  NOT evidence of 100 -- it is consistent with acquiring the remainder. Read 100
+  only from wording about what this transaction acquires.
 - stake_transition_type: Nullable explicit ownership-transition classification.
   Populate ONLY when the source explicitly states enough ownership evidence to
   distinguish prior ownership, current stake acquired, and/or resulting
@@ -1772,3 +1790,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.29 | 2026-08-26 | **`stake_transition_type` and `round_size` restored to the `RESPONSE FORMAT` block.** Both are instructed in this system prompt and both are already declared in section 6's output schema; neither had a key in the response structure the model is actually shown. Section 6 is documentation and reaches no model, so the delivered contract asked for two facts and offered nowhere to put them. `stake_transition_type` survived on prose alone -- the model emitted it anyway, which is precisely what hid the defect. `round_size` did not: the PRIMARY CAPITAL rule tells the model to null `value.amount` and record the figure "in `round_size` (below)", and there was no `round_size` below, so a primary-capital amount on the M&A path was nulled out of `value` and had nowhere to land. Every downstream link already existed for both -- Stage 4 reads `deal.stake_transition_type` and `txn.round_size`, both sit in the production HC observation group, and Stage 9 owns both canonical columns. **No rule text changes and no new field.** Key order follows section 6: `stake_transition_type` after `pct_acquired` in `deal`, `round_size` after `features` at transaction level. Section 7's examples are outside the fence, reach no model, and are left as they are. |
 | 0.30 | 2026-08-26 | **The five balance-sheet fields restored to the response structure.** `total_debt`, `total_debt_currency`, `cash_st`, `cash_st_currency` and `balance_sheet_as_of_date` are instructed at length in this system prompt -- with the net-figure trap, the combined-cash rule, the per-figure currency rule and a full POINT_IN_TIME paragraph -- and had no key in the `RESPONSE FORMAT` object the prose names, `target_financials`. Unlike 0.29's two fields, section 6 did not declare these either, so they existed only as prose: instructed, read by Stage 4 at `:539-543`, carried by the production HC observation group, owned as canonical columns by Stage 9, and unanswerable. Null across all 47 M&A extractions in both live corpora. **No substantive rule changed** -- the extraction rules were already complete and correct, and are deliberately untouched. `net_debt`, `net_debt_currency` and `balance_sheet_period_type` are NOT added: this prompt forbids computing net debt, and the other two are reference-derived (`balance_sheet_period_type` is the constant `POINT_IN_TIME`, written where the model cannot mislabel it). What the capture makes reachable in the reference aggregation -- calculated net debt, `implied_enterprise_value`, the `EQUITY_PLUS_TOTAL_DEBT` transaction-value branch and the first non-null multiples -- is existing behaviour becoming observable, recorded for Product inspection rather than changed here. |
 | 0.31 | 2026-08-27 | **A multiple the source states is captured, as stated.** `reported_multiples` is a new required array: one item per distinct stated multiple, carrying its type, value in turns, denominator period basis and end, numerator family and the source's verbatim wording. Until now a multiple had no home anywhere -- `value_observations` is scoped to monetary deal-value facts and "11.5x" is not a monetary figure -- so nVent's "approximately 11.5x anticipated 2026 adjusted EBITDA" about Maverick Power was captured nowhere, and the reference calculator refuses that transaction anyway for want of an `implied_enterprise_value`. **Nothing is computed here, in either direction.** A price and an EBITDA never yield a multiple, and a price and a multiple never yield an EBITDA -- the worked example pins that `ebitda_amount` stays null. **A named year is ANNUAL, not NTM**: "anticipated 2026" names a year, while NTM is the twelve months after announcement, and for a mid-year deal those are different windows. A source stating a headline multiple and an adjusted variant states TWO multiples; both are emitted and neither is chosen. The Stage 4 parser is a vocabulary filter, not a classifier: it drops an item whose type is outside the seven canonical values rather than translating a near-miss, and drops one bad item rather than failing the whole extraction. |
+| 0.32 | 2026-08-27 | **`pct_acquired` becomes evidence-only, and that includes 100.** The field previously instructed the opposite -- "Null if 100% or unstated ... Do not extract 100 -- leave null for full acquisitions" -- which collapsed two different facts into one null: a source that stated the whole company changed hands and a source that never said how much did. Aggregation compensated by assuming 100 for control event types, so an assumption reached `implied_equity_value`, `implied_enterprise_value` and the calculated multiples wearing the same clothes as a stated fact. Extracting a stated 100 is what lets the assumption be removed without losing the deals that really did say it. **A silent source stays null** -- null is "the source did not say", never a slot for the likeliest answer. The prior-ownership rule is unchanged and is now also stated as the trap it is for 100: "wholly owned subsidiary" describes ownership after the deal, so where any prior stake is in play it is consistent with acquiring the remainder and is not evidence of 100. No other field changes. |
