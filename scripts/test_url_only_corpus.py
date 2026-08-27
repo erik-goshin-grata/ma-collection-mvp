@@ -236,13 +236,12 @@ def test_untouched(fv) -> None:
     check("never writes to transaction_record",
           bool(re.search(r"(UPDATE|DELETE\s+FROM)\s+transaction_record", src)), False)
 
-    print("\nNo Product surface was touched by this change:")
-    import subprocess
-    changed = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=ROOT,
-                             capture_output=True, text=True).stdout.split()
-    offending = [f for f in changed
-                 if f.startswith(("stages/", "prompts/", "schema/", "lib/"))]
-    check("no stages/prompts/schema/lib file is modified", offending, [])
+    # A `git diff --name-only HEAD` check lived here and has been removed: it asserted a
+    # property of the whole working tree, so any LATER slice that legitimately touched
+    # stages/ or prompts/ failed this file. The checks above already pin what actually
+    # matters about this slice -- one INSERT into source_raw, no write to
+    # transaction_record, eight stages, the 1.1 sheets -- and they hold whatever else
+    # the tree contains.
 
 
 def main() -> int:

@@ -1,6 +1,6 @@
 # Aggregation Prompt (Conflict Resolution)
 
-**Version:** 0.8 (market capitalization retired from the value_type vocabulary)
+**Version:** 0.9 (consideration_type follows what was offered)
 **Repo path:** `prompts/aggregation.md`
 
 ---
@@ -171,6 +171,12 @@ financials_disclosure_status values: DISCLOSED, UNDISCLOSED, UNKNOWN
 
 consideration_type values (lowercase): cash, stock, cash_and_stock,
 election, other
+
+consideration_type describes what was OFFERED as consideration. It is derived
+deterministically in Python from consideration_components, never resolved here.
+EARNOUT, CVR, CONTINGENT_CONSIDERATION, DEBT_ASSUMED and RETAINED_EQUITY are
+transaction terms rather than offered consideration, so their presence alone does
+not change cash / stock / cash_and_stock.
 
 CORE PRINCIPLES
 
@@ -431,3 +437,4 @@ Output:
 | 0.6 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.7 | 2026-08-25 | **`consortium` retired from the current `acquirer_type` vocabulary, read-tolerated on the legacy line.** Buyer classification describes an individual firm, and two firms buying together may be different kinds of buyer, so a single joint value asserts a classification true of neither. It moves to `legacy_read_only` under the mechanism 0.5 established for retired event types: observable on stored rows, never valid new output. Historical rows keep their value and downstream derivations are unchanged — the take-private derivation still treats a stored `CONSORTIUM` as safely non-qualifying. Authoring is closed at the source: `high_confidence_extraction` 0.27 drops the value and its owning stage maps a newly-emitted `consortium` to `unknown`. No other vocabulary, resolution rule or typed-dimension guidance changes. |
 | 0.8 | 2026-08-26 | **`MARKET_CAPITALIZATION` retired from the current `value_type` vocabulary, read-tolerated on the legacy line.** It is not a deal-value fact — a market cap describes the company, not the transaction — and it was never a Product-approved transaction field. It moves to `legacy_read_only` under the mechanism 0.5 established: observable on stored rows, never valid new output. Every derivation guard is unchanged: `_derive_equity_value`, `_derive_transaction_value` and `_derive_enterprise_value` each gate on an exact type, so a stored market cap still reaches neither them nor the implied values nor the multiples. Authoring is closed at the source in `high_confidence_extraction` 0.28, whose owning stage drops a retired observation rather than failing the extraction. |
+| 0.9 | 2026-08-27 | **`consideration_type` follows what was offered, not every component present.** `_derive_consideration_type` tested the full form set against `{CASH}`, the stock forms and their union, so any component outside those three fell through to `OTHER`. An all-stock combination that assumed the target's indebtedness was typed `OTHER`, and so was every cash deal carrying an earnout -- the latter in direct contradiction of `low_confidence_extraction`, which states that "a cash + earnout deal stays consideration_type=CASH". The set test had no notion of which forms are structural. Transaction terms -- `EARNOUT`, `CVR`, `CONTINGENT_CONSIDERATION`, `DEBT_ASSUMED`, `RETAINED_EQUITY` -- are now set aside before the ladder runs, so the type reflects the offered forms alone. `OTHER` stays a deciding form: the LC vocabulary defines it as preferred stock, exchangeable shares or notes, which is genuinely other consideration. Components that are terms only, with no offered form, resolve to null rather than `OTHER` -- a source that described the structure and never said what was paid has not established a consideration type. **No value economics change**: assumed debt still never enters `equity_value`, `transaction_value` still handles debt through its own basis, and LC authoring is untouched. |\n

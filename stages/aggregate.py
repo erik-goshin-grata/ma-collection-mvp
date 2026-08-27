@@ -41,7 +41,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "aggregation"
-_VERSION = "0.8"
+_VERSION = "0.9"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -204,6 +204,23 @@ _TAKE_PRIVATE_QUALIFYING_ACQUIRER_TYPES = frozenset({
 # Derived-field helpers
 # ---------------------------------------------------------------------------
 
+# Transaction TERMS, not offered consideration. Each describes how the deal is
+# structured -- debt the buyer takes on, a contingent payment, equity a seller keeps --
+# and none of them is what the buyer offered, so none of them decides the type. The
+# `low_confidence_extraction` contract already says this in its own words: "a cash +
+# earnout deal stays consideration_type=CASH". The subset ladder below used to
+# contradict it, because a set test has no notion of which forms are structural: an
+# all-stock combination that assumed the target's debt came out `OTHER`, and so did
+# every cash deal carrying an earnout.
+#
+# `OTHER` is deliberately NOT in this set. It is a genuine offered form -- the LC
+# vocabulary defines it as "preferred stock, exchangeable shares, notes" -- so it still
+# decides the type, which is exactly what `OTHER` is for.
+_NON_DETERMINING_CONSIDERATION_FORMS = frozenset({
+    "EARNOUT", "CVR", "CONTINGENT_CONSIDERATION", "DEBT_ASSUMED", "RETAINED_EQUITY",
+})
+
+
 def _derive_consideration_type(components_json: str | None) -> str | None:
     if not components_json:
         return None
@@ -214,12 +231,19 @@ def _derive_consideration_type(components_json: str | None) -> str | None:
     if not comps:
         return None
     forms = {c.get("form") for c in comps if isinstance(c, dict) and c.get("form")}
+    # Decide on what was offered. Components that are only terms are set aside first.
+    offered = forms - _NON_DETERMINING_CONSIDERATION_FORMS
+    if not offered:
+        # Terms with no offered form is not "the consideration was something else" --
+        # it is a source that described the structure and never said what was paid.
+        # Null is the honest answer; OTHER would assert a form nobody stated.
+        return None
     stock_forms = {"ACQUIRER_STOCK", "TARGET_STOCK"}
-    if forms <= {"CASH"}:
+    if offered <= {"CASH"}:
         return "CASH"
-    if forms <= stock_forms:
+    if offered <= stock_forms:
         return "STOCK"
-    if forms <= ({"CASH"} | stock_forms):
+    if offered <= ({"CASH"} | stock_forms):
         return "CASH_AND_STOCK"
     return "OTHER"
 
