@@ -44,7 +44,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "low_confidence_extraction"
-_VERSION = "0.11"
+_VERSION = "0.12"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -62,11 +62,17 @@ _VALID_ADVISED_PARTIES = frozenset({"TARGET", "ACQUIRER", "PARENT_SELLER", "BOTH
 # specific supported level. `financial_advisory`, `legal`, `accounting`, `fairness_opinion`
 # and `regulatory` already exist in Grata; `tax`, `proxy_solicitation` and `information_agent`
 # were accepted on the strength of being named in the old `OTHER` definition; `communications`
-# is a Product addition. `restructuring` and `capital_markets` remain deferred pending
-# extraction evidence. A financing provider is a LENDER, not an advisor specialty.
+# is a Product addition. `financing_advisory` covers advising on, structuring, arranging or
+# placing the transaction's financing -- advice ABOUT capital, which is a different
+# participation from supplying it. Its deferred candidate name was `capital_markets`,
+# deferred for want of extraction evidence rather than on the semantics; `financing_advisory`
+# is the approved name and does not read as a desk. `restructuring` remains deferred.
+# A financing PROVIDER is a LENDER, not an advisor specialty, and a firm the source
+# establishes in both participations is recorded once in each.
 _VALID_ADVISOR_SPECIALTIES = frozenset({
     "financial_advisory", "legal", "accounting", "fairness_opinion", "regulatory",
     "tax", "proxy_solicitation", "information_agent", "communications",
+    "financing_advisory",
 })
 _VALID_ADVISED_SIDES = frozenset({"BUY_SIDE", "SELL_SIDE"})
 
@@ -89,6 +95,43 @@ _VALID_DEAL_ATTITUDE = frozenset({"FRIENDLY", "HOSTILE"})
 _VALID_APPROACH_TYPE = frozenset({"SOLICITED", "UNSOLICITED"})
 _SLEEP = 1.0  # conservative Opus throttle
 
+
+def _lenders_json(result: dict, log=None, eid=None) -> str:
+    """Serialize the lenders array: one item per party stated to PROVIDE financing.
+
+    A name filter, nothing more. There is no lender subtype to validate against -- the
+    target model has a `lender_role` with no published vocabulary, and inventing one to
+    fill the column would be worse than leaving the distinction uncollected.
+
+    NOTHING IS INFERRED FROM THE ADVISOR LIST, IN EITHER DIRECTION. This reads only what
+    the model returned under `lenders`. A firm that arranged financing does not become a
+    lender here because arranging appears alongside lending in a sentence, and a lender
+    does not become an advisor because lending is a financial service. Both directions
+    are the model's judgement under the prompt contract, not this parser's.
+
+    Always returns an array, including "[]" -- most releases name no financing provider,
+    and that is a statement worth recording rather than a missing key.
+    """
+    items = result.get("lenders")
+    if not isinstance(items, list):
+        if items is not None and log is not None:
+            log.warning("extraction_id=%s lenders is not a list: %r -- recorded empty",
+                        eid, type(items).__name__)
+        return "[]"
+    clean: list[dict] = []
+    for item in items:
+        if isinstance(item, str):
+            item = {"name": item}
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        name = str(name).strip() if name is not None else ""
+        if not name:
+            if log is not None:
+                log.warning("extraction_id=%s dropping lender with no name", eid)
+            continue
+        clean.append({"name": name})
+    return json.dumps(clean, ensure_ascii=False)
 
 def _fmt(v) -> str:
     return str(v) if v is not None else "null"
@@ -311,6 +354,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 target_fee_percentage = ?,
                 acquirer_fee_amount = ?,
                 acquirer_fee_percentage = ?,
+                lenders = ?,
                 model_confidence = ?,
                 lc_prompt_version = ?,
                 notes = ?,
@@ -333,6 +377,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 fees.get("target_fee_percentage"),
                 fees.get("acquirer_fee_amount"),
                 fees.get("acquirer_fee_percentage"),
+                _lenders_json(result, log, eid),
                 result.get("model_confidence"),
                 _VERSION,
                 json.dumps(nd),

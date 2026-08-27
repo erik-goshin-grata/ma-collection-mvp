@@ -455,6 +455,59 @@ PARTY_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Lenders arrive from the low-confidence stage, not the HC party arrays, because the
+# paragraph naming financing parties is what that stage already reads. The shape is the
+# same: one party, one preservation observation, role carried by the field name.
+LENDER_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("lenders", "lender_party"),
+)
+
+
+def _write_lender_observations(
+    conn: sqlite3.Connection,
+    row: sqlite3.Row,
+    *,
+    prompt_version: str | None,
+    observation_source_stage: str,
+    columns: set[str],
+) -> int:
+    """One observation per source-stated provider of financing.
+
+    PRESERVATION ONLY, like every other party field: `lender_party` is absent from
+    aggregate's _FIELDS, so the aggregation loader drops it at the field-type gate. A
+    lender is a record of what a source said, not a scalar to reconcile between sources.
+
+    A lender is NOT derived from the advisor rows and no advisor is derived from these.
+    Providing capital and advising on a transaction are different participations, and a
+    firm the source establishes in both is written once here and once as an advisor.
+    """
+    inserted = 0
+    source_type = _row_value(row, "source_type")
+    for column, field_name in LENDER_ARRAY_FIELDS:
+        for index, item in enumerate(_value_observation_items(_row_value(row, column))):
+            name = item.get("name")
+            if not name:
+                continue
+            inserted += insert_observation(
+                conn,
+                transaction_id=_row_value(row, "transaction_cluster_id"),
+                field_name=field_name,
+                field_value=json.dumps({"name": name}, ensure_ascii=False, sort_keys=True),
+                staging_extraction_id=_row_value(row, "extraction_id"),
+                source_raw_id=_row_value(row, "source_raw_id"),
+                source_type=source_type,
+                source_tier=_row_value(row, "source_tier"),
+                model_confidence=_row_value(row, "model_confidence"),
+                source_published_date=_row_value(row, "published_date"),
+                filing_type=_source_filing_type(source_type),
+                extraction_prompt_version=prompt_version,
+                observation_source_stage=observation_source_stage,
+                observation_fact_key=f"{column}[{index}]",
+                columns=columns,
+            )
+    return inserted
+
+
 def _write_party_observations(
     conn: sqlite3.Connection,
     row: sqlite3.Row,
@@ -779,6 +832,13 @@ def write_staging_observations_for_extraction(
             conn,
             row,
             fields=LC_SCALAR_FIELDS,
+            prompt_version=_row_value(row, "lc_prompt_version"),
+            observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
+            columns=columns,
+        )
+        inserted += _write_lender_observations(
+            conn,
+            row,
             prompt_version=_row_value(row, "lc_prompt_version"),
             observation_source_stage=_stage_name(observation_source_stage, "LC_EXTRACT"),
             columns=columns,

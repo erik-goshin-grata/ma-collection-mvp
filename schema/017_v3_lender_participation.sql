@@ -1,0 +1,37 @@
+-- 017 — LENDER as its own participation.
+--
+-- The low-confidence contract has always drawn the boundary: "A LENDER is NOT an advisor
+-- specialty. Providing capital and advising on a transaction are different
+-- participations; a firm doing both appears twice." It had nowhere to put the lender.
+-- A financing provider was correctly kept out of the advisor list and then dropped.
+--
+-- One JSON column on staging_extraction, holding the array the extraction now returns:
+-- one item per party the source states is PROVIDING financing. Written by the
+-- low-confidence stage, which already reads the paragraph naming financing parties and
+-- already carries the boundary rule.
+--
+-- `{name}` ONLY. `lender_role` exists in the target model with no vocabulary published,
+-- so none is invented here. A subtype nobody has defined is not preserved by guessing at
+-- one.
+--
+-- ARRANGING IS NOT PROVIDING, and that is the whole distinction. A firm that arranges,
+-- structures or places financing is advising about capital, not supplying it: it is an
+-- ADVISOR with specialty `financing_advisory`, added to the advisor vocabulary in the
+-- same change. A firm that supplies capital is a lender. Neither participation implies
+-- the other, and a firm the source establishes in both is recorded twice -- which the
+-- advisor table already supports, since it carries no uniqueness constraint on the
+-- advisor name and the contract already emits one row per advisor-and-party pair.
+--
+-- The specialty value is `financing_advisory`. The target model's deferred candidate was
+-- `capital_markets`, deferred for want of extraction evidence rather than on the
+-- semantics; `financing_advisory` is the approved name and says what the participation
+-- is without reading as a desk.
+--
+-- NOT IN SCOPE. No entity resolution, deduplication, alias matching, canonical entity id,
+-- `entity` row or `transaction_participant` row. SELLER, JV_PARTNER and UNDERWRITER stay
+-- unauthored: the target model lists them and defines none of them.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction ADD COLUMN lenders TEXT;
