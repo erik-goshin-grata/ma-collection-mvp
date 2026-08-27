@@ -363,6 +363,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "reported_multiples" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "013_v3_reported_multiples.sql").read_text(encoding="utf-8"))
 
+    # 016 (parent acquirer / sell-side sponsor parties). Column sentinel.
+    if "parent_acquirers" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "016_v3_parent_acquirer_sell_side_sponsor.sql").read_text(encoding="utf-8"))
+
     # 015 (party cardinality: one party, one collected fact). Column sentinel.
     if "acquirers" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "015_v3_party_cardinality.sql").read_text(encoding="utf-8"))

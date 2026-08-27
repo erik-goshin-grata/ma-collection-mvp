@@ -450,6 +450,8 @@ PARTY_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
     ("acquirers", "acquirer_party"),
     ("buy_side_sponsors", "buy_side_sponsor_party"),
     ("parent_sellers", "parent_seller_party"),
+    ("parent_acquirers", "parent_acquirer_party"),
+    ("sell_side_sponsors", "sell_side_sponsor_party"),
 )
 
 

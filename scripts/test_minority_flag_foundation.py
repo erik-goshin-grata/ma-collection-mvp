@@ -229,6 +229,8 @@ def _hc_result(stake_transition_type):
         "acquirers": [],
         "buy_side_sponsors": [],
         "parent_sellers": [],
+        "parent_acquirers": [],
+        "sell_side_sponsors": [],
         "value_observations": [],
         "features": {
             "is_platform_investment": None,

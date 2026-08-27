@@ -1,0 +1,45 @@
+-- 016 — two more party roles, collected one party at a time.
+--
+-- R2.1 (migration 015) established the rule: one party is one collected fact, recorded
+-- independently of any later entity resolution. It covered the three roles this
+-- implementation captured and then flattened. These two it never captured at all.
+--
+--   PARENT_ACQUIRER  The company above the acquirer. The target model calls its absence
+--                    "an inventory omission, not a collapse" -- PARENT_SELLER existed
+--                    and its mirror simply was not listed. Nothing here decides
+--                    anything new about parents; it collects the other side of a
+--                    distinction the model already draws.
+--   SPONSOR_SELLER   The sponsor on the selling side. Sponsor side is explicit in the
+--                    target model because side is meaningful role information rather
+--                    than metadata to reconstruct through a join. The buy side was
+--                    already collected; the sell side was not.
+--
+-- These are coverage, not cardinality: unlike buyers and buy-side sponsors, nothing was
+-- being flattened, because nothing was being collected. The representation is the same
+-- either way -- an array of parties, one item each -- which is why this extends the
+-- existing shape rather than adding a path.
+--
+-- EVIDENCE MIRRORS THE OPPOSITE SIDE, UNCHANGED. parent_acquirers takes the same bar as
+-- parent_sellers: applicable only where the source places a DIFFERENT, higher company
+-- above the buyer. sell_side_sponsors takes the same bar as buy_side_sponsors: recorded
+-- only where the source establishes one, never inferred from a target looking
+-- sponsor-backed. No inference is broadened on either side.
+--
+-- Two confusions the prompt is written to prevent, both mirror-image:
+--   a parent is not a sponsor -- a corporate parent OWNS the buyer, a sponsor BACKS it;
+--   a sponsor's side comes from the source, never from the absence of the other side.
+-- Where a side is not established the sponsor goes in neither array. Choosing one by
+-- elimination would assert a fact the source did not state.
+--
+-- NOT IN SCOPE. No entity resolution, deduplication, alias matching, canonical entity
+-- id, `entity` row or `transaction_participant` row. SELLER, JV_PARTNER and UNDERWRITER
+-- stay unauthored: the target model lists them but defines none of them, and authoring
+-- a role whose qualifying test does not exist would mean inventing the semantics.
+-- LENDER and the financing-advisory specialty are a separate slice, owned by the
+-- low-confidence stage that already reads that evidence.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction ADD COLUMN parent_acquirers TEXT;
+ALTER TABLE staging_extraction ADD COLUMN sell_side_sponsors TEXT;

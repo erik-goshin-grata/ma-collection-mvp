@@ -102,6 +102,8 @@ def _hc(**over) -> dict:
         "acquirers": [],
         "buy_side_sponsors": [],
         "parent_sellers": [],
+        "parent_acquirers": [],
+        "sell_side_sponsors": [],
         "value_observations": [],
         "features": {"is_platform_investment": None, "is_secondary_buyout": None,
                      "is_merger_of_equals": None},

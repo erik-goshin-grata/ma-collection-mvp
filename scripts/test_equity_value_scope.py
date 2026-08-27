@@ -178,6 +178,8 @@ def _hc_result(*, with_stake_equity: bool) -> dict:
         "acquirers": [],
         "buy_side_sponsors": [],
         "parent_sellers": [],
+        "parent_acquirers": [],
+        "sell_side_sponsors": [],
         "value_observations": observations,
         "features": {
             "is_platform_investment": None,

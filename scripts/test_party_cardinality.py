@@ -21,7 +21,13 @@ a count that was never collected, so this is a collection defect, not an identit
 
 WHAT CHANGED
 
-Three required arrays, one item per party, always an array including []. The scalars are
+Five required arrays, one item per party, always an array including [].
+
+HC 0.34 added the last two as COVERAGE rather than cardinality -- PARENT_ACQUIRER and
+SPONSOR_SELLER were never collected at all, so nothing was being flattened. They are
+the mirrors of parent_sellers and buy_side_sponsors and take those roles' evidence bars
+unchanged. Same representation either way, which is why they extend this shape rather
+than adding a path. The scalars are
 unchanged and remain the display projection for every current reader.
 
 Role is carried by WHICH ARRAY a party is in. BUYER, SPONSOR_BUYER and PARENT_SELLER are
@@ -102,8 +108,26 @@ def test_prompt() -> None:
           "would not have put in the scalar field" in flat, True)
     check("the two-firm case is worked",
           '"a venture of RPM Living and New York Life" is TWO items' in flat, True)
-    for k in ('"acquirers": [', '"buy_side_sponsors": []', '"parent_sellers": []'):
-        check(f"response slot {k[:22]}", k in flat, True)
+    for k in ('"acquirers": [', '"buy_side_sponsors": []', '"parent_sellers": []',
+              '"parent_acquirers": []', '"sell_side_sponsors": []'):
+        check(f"response slot {k[:24]}", k in flat, True)
+    check("all five keys are required", "All five keys are required" in flat, True)
+
+    print("\nThe two mirror roles take their counterpart's evidence bar:")
+    check("a parent acquirer must be a DIFFERENT, higher company",
+          "places ABOVE that buyer" in flat, True)
+    check("a buyer is never its own parent", "A BUYER IS NOT ITS OWN PARENT" in flat, True)
+    # The confusion that would otherwise put one firm in two roles.
+    check("a parent is not a sponsor", "A PARENT IS NOT A SPONSOR" in flat, True)
+    check("and the distinction is stated concretely",
+          "owns the buyer outright; a sponsor backs it" in flat, True)
+    check("sell-side sponsor keeps the do-not-infer rule",
+          "Do NOT infer a seller-side sponsor" in flat, True)
+    # Side by elimination is the specific failure this rules out.
+    check("side comes from the source, not from arithmetic",
+          "SIDE COMES FROM THE SOURCE, NOT FROM ARITHMETIC" in flat, True)
+    check("an unestablished side means NEITHER array",
+          "put the sponsor in neither array rather than choosing one" in flat, True)
 
     print("\nExisting evidence and applicability rules are restated, not broadened:")
     check("sponsor evidence rule preserved",
@@ -112,7 +136,7 @@ def test_prompt() -> None:
           "target_type is subsidiary, business_unit or assets" in flat, True)
     check("only buyers carry a type",
           "no per-party attribute" in flat or "type: that firm's own classification" in flat, True)
-    check("prompt version is 0.33", hc._VERSION, "0.33")
+    check("prompt version is 0.34", hc._VERSION, "0.34")
 
 
 # ---------------------------------------------------------------------------
@@ -185,14 +209,15 @@ def _ready(conn) -> bool:
     """Guarded: seeding a column that does not exist yet raises and ABORTS the run,
     hiding every check below it."""
     cols = {r[1] for r in conn.execute("PRAGMA table_info(staging_extraction)")}
-    return {"acquirers", "buy_side_sponsors", "parent_sellers"} <= cols
+    return {"acquirers", "buy_side_sponsors", "parent_sellers",
+            "parent_acquirers", "sell_side_sponsors"} <= cols
 
 
 def test_observations() -> None:
     conn = _fresh()
     if not _ready(conn) or not hasattr(ow, "_write_party_observations"):
-        print(f"  {FAIL}  migration 015 / the party writer are not present")
-        _failures.append("migration 015 / the party writer are not present")
+        print(f"  {FAIL}  migrations 015/016 / the party writer are not present")
+        _failures.append("migrations 015/016 / the party writer are not present")
         conn.close(); return
 
     conn.execute("INSERT INTO source_raw (source_raw_id, source_type, source_tier, url,"
@@ -201,8 +226,9 @@ def test_observations() -> None:
     conn.execute(
         "INSERT INTO staging_extraction (extraction_id, source_raw_id, status,"
         " transaction_cluster_id, acquirer_name, acquirer_sponsor_name, parent_seller_name,"
-        " acquirers, buy_side_sponsors, parent_sellers, hc_prompt_version)"
-        " VALUES (1,1,'CLUSTERED','tc_1',?,?,?,?,?,?,?)",
+        " acquirers, buy_side_sponsors, parent_sellers, parent_acquirers,"
+        " sell_side_sponsors, hc_prompt_version)"
+        " VALUES (1,1,'CLUSTERED','tc_1',?,?,?,?,?,?,?,?,?)",
         ("EvCap Investments and Point Acquisitions",
          "Trident Management, Bluejay Capital",
          "Rockland Capital, LP",
@@ -210,7 +236,9 @@ def test_observations() -> None:
                      {"name": "Point Acquisitions", "type": "other_financial_sponsor"}]),
          json.dumps([{"name": "Trident Management"}, {"name": "Bluejay Capital"}]),
          json.dumps([{"name": "Rockland Capital, LP"}]),
-         "high_confidence_extraction:0.33"))
+         json.dumps([{"name": "Global Holdings plc"}]),
+         json.dumps([{"name": "Fernweh Group"}, {"name": "Kohlberg & Company"}]),
+         "high_confidence_extraction:0.34"))
     conn.commit()
     write_staging_observations_for_extraction(
         conn, 1, observation_source_stage="HC_EXTRACT", include_hc=True)
@@ -242,11 +270,34 @@ def test_observations() -> None:
     check("its internal comma is not a separator",
           json.loads(sellers[0]["field_value"])["name"], "Rockland Capital, LP")
 
-    print("\nRole is carried by the field name — the three do not mix:")
-    check("three distinct field names",
-          len({"acquirer_party", "buy_side_sponsor_party", "parent_seller_party"}), 3)
+    print("\nThe two roles added as coverage are collected the same way:")
+    pacq = rows("parent_acquirer_party")
+    check("one parent acquirer", len(pacq), 1)
+    check("named", json.loads(pacq[0]["field_value"])["name"], "Global Holdings plc")
+    # Coverage, not cardinality -- but the shape is identical, so multiples work too.
+    ssp = rows("sell_side_sponsor_party")
+    check("two sell-side sponsors", len(ssp), 2)
+    check("named independently",
+          [json.loads(r["field_value"])["name"] for r in ssp],
+          ["Fernweh Group", "Kohlberg & Company"])
+    check("distinct fact keys", len({r["observation_fact_key"] for r in ssp}), 2)
+    check("neither carries a type", any("type" in json.loads(r["field_value"])
+                                        for r in pacq + ssp), False)
+
+    print("\nThe two sponsor sides are separate roles, not one:")
+    check("buy-side and sell-side land in different field names",
+          {r["field_name"] for r in sponsors} & {r["field_name"] for r in ssp}, set())
+    check("and no firm was copied between them",
+          {json.loads(r["field_value"])["name"] for r in sponsors}
+          & {json.loads(r["field_value"])["name"] for r in ssp}, set())
+
+    print("\nRole is carried by the field name — the five do not mix:")
+    check("five distinct field names",
+          len({"acquirer_party", "buy_side_sponsor_party", "parent_seller_party",
+               "parent_acquirer_party", "sell_side_sponsor_party"}), 5)
     check("no role value is stored inside an item",
-          any("role" in json.loads(r["field_value"]) for r in buyers + sponsors + sellers), False)
+          any("role" in json.loads(r["field_value"])
+              for r in buyers + sponsors + sellers + pacq + ssp), False)
 
     print("\nThe display scalars are untouched:")
     r = conn.execute("SELECT acquirer_name, acquirer_sponsor_name, parent_seller_name"
@@ -258,13 +309,15 @@ def test_observations() -> None:
     check("parent_seller_name unchanged", r["parent_seller_name"], "Rockland Capital, LP")
 
     print("\nParties are preserved, never reconciled:")
-    for f in ("acquirer_party", "buy_side_sponsor_party", "parent_seller_party"):
+    for f in ("acquirer_party", "buy_side_sponsor_party", "parent_seller_party",
+              "parent_acquirer_party", "sell_side_sponsor_party"):
         check(f"{f} is absent from _FIELDS", f in dict(agg._FIELDS), False)
     bundles = agg._load_observation_input(conn)
     fo = bundles.get("tc_1", {}).get("field_observations", {})
     check("and none reaches the resolver",
           any(f in fo for f in ("acquirer_party", "buy_side_sponsor_party",
-                                "parent_seller_party")), False)
+                                "parent_seller_party", "parent_acquirer_party",
+                                "sell_side_sponsor_party")), False)
     conn.close()
 
 
@@ -284,8 +337,10 @@ def test_boundaries() -> None:
 
     print("\nUnauthored roles are not added:")
     flat = _norm(load_prompt_file("high_confidence_extraction")["system"])
-    for role in ("sell_side_sponsors", "lenders", "underwriters", "jv_partners",
-                 "parent_acquirers"):
+    # SELLER, JV_PARTNER and UNDERWRITER stay unauthored: the target model lists them
+    # and defines none of them, so authoring one would mean inventing its qualifying
+    # test. LENDER and the financing-advisory specialty are a separate LC-owned slice.
+    for role in ("lenders", "underwriters", "jv_partners", '"sellers"'):
         check(f"{role} absent", role in flat, False)
 
     print("\nTARGET is excluded, deliberately:")

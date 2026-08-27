@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.33 (one party, one collected fact)
+**Version:** 0.34 (the other side of two party roles)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -249,7 +249,7 @@ acquirer:
 
 PARTIES, ONE PER PARTY
 
-Three arrays record the parties themselves. A party is one firm. When a source names
+Five arrays record the parties themselves. A party is one firm. When a source names
 two firms in a role, that is two parties -- two items -- not one item holding two names.
 
 The scalar fields above are unchanged and still required. They are how these firms are
@@ -277,7 +277,37 @@ one party the two say the same thing in different shapes, and that is expected.
   target_type is subsidiary, business_unit or assets. An empty array for a standalone
   company acquisition, which is the same statement the null scalar makes.
 
-ALWAYS AN ARRAY, INCLUDING EMPTY. All three keys are required on every transaction
+- parent_acquirers: one item per parent company ABOVE the acquirer, when the source
+  establishes one.
+    name: the parent acquirer, as stated.
+  The mirror of parent_sellers, and it takes the same evidence bar. The buyer is the
+  entity acquiring; a parent acquirer is a company the source places ABOVE that buyer --
+  "a subsidiary of X", "X's wholly owned unit", "through its Y division". Empty array
+  when the source names only one buying entity, which is the ordinary case.
+
+  A PARENT IS NOT A SPONSOR. A PE firm behind a buyer is a sponsor, not a parent
+  acquirer, and belongs in buy_side_sponsors. A corporate parent owns the buyer
+  outright; a sponsor backs it. Do not put the same firm in both because the sentence
+  could be read either way -- record the one the source establishes.
+
+  A BUYER IS NOT ITS OWN PARENT. Never repeat the acquiring entity here just because it
+  is a large company. This array is populated only when the source names a DIFFERENT,
+  higher company.
+
+- sell_side_sponsors: one item per PE / private-capital sponsor backing the SELLING
+  side -- the sponsor exiting or divesting.
+    name: the sponsor, as stated.
+  The mirror of buy_side_sponsors, and it takes the same evidence rule, unchanged:
+  record a sponsor only when the source establishes one. Do NOT infer a seller-side
+  sponsor because a target appears sponsor-backed, and do not guess a fund name.
+
+  SIDE COMES FROM THE SOURCE, NOT FROM ARITHMETIC. A sponsor named in a release is not
+  a sell-side sponsor merely because it is not the buyer's. Populate this only where the
+  source establishes that the sponsor is on the selling side -- selling, exiting,
+  divesting, or backing the target being sold. Where the side is not established, put
+  the sponsor in neither array rather than choosing one.
+
+ALWAYS AN ARRAY, INCLUDING EMPTY. All five keys are required on every transaction
 element. Return `[]` when a role has no party -- an absent array and an empty one are
 not the same statement, and "there is no parent seller" is a fact worth recording
 plainly. One party is an array of one.
@@ -868,6 +898,8 @@ code fences, no preamble.
       ],
       "buy_side_sponsors": [],
       "parent_sellers": [],
+      "parent_acquirers": [],
+      "sell_side_sponsors": [],
       "deal": {
         "pct_acquired": null,
         "stake_transition_type": null,
@@ -1028,6 +1060,12 @@ Extract all transactions from this source.
         {"name": "string"}
       ],
       "parent_sellers": [
+        {"name": "string"}
+      ],
+      "parent_acquirers": [
+        {"name": "string"}
+      ],
+      "sell_side_sponsors": [
         {"name": "string"}
       ],
       "reported_multiples": [
@@ -1849,3 +1887,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.31 | 2026-08-27 | **A multiple the source states is captured, as stated.** `reported_multiples` is a new required array: one item per distinct stated multiple, carrying its type, value in turns, denominator period basis and end, numerator family and the source's verbatim wording. Until now a multiple had no home anywhere -- `value_observations` is scoped to monetary deal-value facts and "11.5x" is not a monetary figure -- so nVent's "approximately 11.5x anticipated 2026 adjusted EBITDA" about Maverick Power was captured nowhere, and the reference calculator refuses that transaction anyway for want of an `implied_enterprise_value`. **Nothing is computed here, in either direction.** A price and an EBITDA never yield a multiple, and a price and a multiple never yield an EBITDA -- the worked example pins that `ebitda_amount` stays null. **A named year is ANNUAL, not NTM**: "anticipated 2026" names a year, while NTM is the twelve months after announcement, and for a mid-year deal those are different windows. A source stating a headline multiple and an adjusted variant states TWO multiples; both are emitted and neither is chosen. The Stage 4 parser is a vocabulary filter, not a classifier: it drops an item whose type is outside the seven canonical values rather than translating a near-miss, and drops one bad item rather than failing the whole extraction. |
 | 0.32 | 2026-08-27 | **`pct_acquired` becomes evidence-only, and that includes 100.** The field previously instructed the opposite -- "Null if 100% or unstated ... Do not extract 100 -- leave null for full acquisitions" -- which collapsed two different facts into one null: a source that stated the whole company changed hands and a source that never said how much did. Aggregation compensated by assuming 100 for control event types, so an assumption reached `implied_equity_value`, `implied_enterprise_value` and the calculated multiples wearing the same clothes as a stated fact. Extracting a stated 100 is what lets the assumption be removed without losing the deals that really did say it. **A silent source stays null** -- null is "the source did not say", never a slot for the likeliest answer. The prior-ownership rule is unchanged and is now also stated as the trap it is for 100: "wholly owned subsidiary" describes ownership after the deal, so where any prior stake is in play it is consistent with acquiring the remainder and is not evidence of 100. No other field changes. |
 | 0.33 | 2026-08-27 | **Party cardinality survives collection.** Three roles were captured and then collapsed into a scalar before anything downstream could see how many parties there were: BUYER (`" and "`-joined by this prompt's own instruction), SPONSOR_BUYER (comma-delimited), and PARENT_SELLER (collapsed **silently** -- no instruction covered a joint divestiture at all). The contract already documented the loss for buyers: `acquirer.type` returns `unknown` for multiple buyers because one value cannot classify two firms, "a compatibility answer for this single scalar field". Each firm's own type was determinable and thrown away. `acquirers`, `buy_side_sponsors` and `parent_sellers` are new required arrays: **one item per party**, always an array including `[]`, since an absent array and an empty one are different statements. Only buyers carry a `type` -- the prompt defines no per-party attribute for sponsors or parent sellers and none is invented. **The scalars are unchanged** and remain the display projection for every current reader. **Role is carried by which array a party is in** -- BUYER, SPONSOR_BUYER and PARENT_SELLER are existing V3 §T5 roles, no role is invented, and no sub-role among co-buyers is added because Product specified none. **Cardinality is not a licence to infer**: every existing evidence and applicability rule is restated unchanged, and a party that would not have gone in the scalar does not go in the array. TARGET is excluded -- `target_name` does hold multi-name values, but that may be a decomposition question rather than a party one, and it is recorded rather than answered. |
+| 0.34 | 2026-08-27 | **PARENT_ACQUIRER and SPONSOR_SELLER are collected.** Two roles the target model requires and this implementation never authored at all. `parent_acquirers` is the mirror of `parent_sellers` -- the model calls its absence "an inventory omission, not a collapse", since PARENT_SELLER existed and its mirror was simply not listed. `sell_side_sponsors` is the mirror of `buy_side_sponsors` -- sponsor side is explicit in the model because side is meaningful role information, and only the buy side was being collected. Unlike 0.33 these are **coverage, not cardinality**: nothing was being flattened because nothing was being collected. The representation is the same either way, so this extends the existing array shape rather than adding a path. **Evidence mirrors the opposite side, unchanged, and no inference is broadened**: a parent acquirer needs the source to place a DIFFERENT, higher company above the buyer, and a sell-side sponsor needs the source to establish the selling side. Two mirror-image confusions are ruled out explicitly -- a corporate parent OWNS the buyer while a sponsor BACKS it, so the same firm is not put in both; and a sponsor's side comes from the source, never from the absence of the other side, so an unestablished side puts the sponsor in NEITHER array rather than one by elimination. A buyer is never repeated as its own parent. SELLER, JV_PARTNER and UNDERWRITER stay unauthored -- the model lists them and defines none of them, and authoring a role with no qualifying test would mean inventing it. |
