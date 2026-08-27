@@ -1,6 +1,6 @@
 # Deal Type Classifier Prompt
 
-**Version:** 0.15 (target_type is structural, not transaction form)
+**Version:** 0.16 (an operating business is not an asset set)
 **Repo path:** `prompts/deal_type_classifier.md`
 
 ---
@@ -267,9 +267,30 @@ For all deal types that have a target, classify target_type:
   part of a parent. Use assets only when a discrete asset or asset set is the
   thing being transferred.
 
+  People are not an asset class. A team, its founders or its staff moving to the
+  buyer is evidence about WHAT was transacted — a going concern normally moves
+  with its people — and is never evidence FOR assets. Read it the other way round
+  from how it is often written: "the team joined the buyer" supports an operating
+  business having changed hands, not an asset set.
+
+  It is not sufficient on its own, either. A team can move without a business
+  moving with it, so people transferring never settles the question by itself —
+  the operating-concern test below still has to be met on customers, revenue and
+  continuing operations.
+
+  An enumerated list does not make an asset set either. "Technology, intellectual
+  property and talent" names what a software business consists of; listing its
+  parts does not answer whether the business itself is what changed hands. Ask
+  first whether an operating concern — customers, revenue, ongoing delivery —
+  passed to the buyer. If it did, type it by its structure whatever the release
+  calls the deal. Reach for assets only when what moves is a discrete asset or
+  asset set that is separable from any continuing business.
+
 Transaction form alone does not determine target type. Do not classify a transaction as
-`assets` solely because the source calls it an "asset purchase" or says the buyer acquired
-"the assets of" a company. Use the full source to determine whether the transaction is for
+`assets` solely because the source calls it an "asset purchase", says the buyer acquired
+"the assets of" a company, or enumerates the purchase as "technology, intellectual property
+and talent assets". Legal form and an enumerated list are both ways of describing a deal,
+not evidence about what the deal was for. Use the full source to determine whether the transaction is for
 a discrete asset or asset set (`assets`) or for an operating business. An operating
 business routes to its actual structure: `standalone_company` when it is independent,
 `business_unit` or `subsidiary` when it is part of a parent. A company does not become an
@@ -1022,3 +1043,4 @@ Output:
 | 0.13 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.14 | 2026-08-24 | **`deal_type` is no longer model-authored.** It was a transitional alias: the prompt itself instructed the model to "return the same value in both fields", so it carried no separate meaning and every consumer read `v2_event_type or deal_type`. Asking for it twice invited the two to disagree with nothing to arbitrate them. Removed from the delivered output template, from the output schema and from all worked examples; the delivered contract now states it must not be emitted. **Read compatibility is unchanged** — `_resolve_v2_event_type()` still accepts a stored `deal_type` (including the legacy `SPIN_SPLIT` normalization), and the stage still writes the `deal_type` column, falling back to the resolved `v2_event_type` exactly as it already did when the key was absent. No storage migration, and the physical `v2_event_type` → `event_type` rename is deliberately NOT bundled here. **`v2_event_type` remains MVP compatibility naming, not the target Product field name** — the target Product model calls this `event_type`; `event_history_type` carries lifecycle and `combination_structure` carries merger/reverse-merger/de-SPAC structure. Paired with a Stage 9 fix: the take-private derivation read the raw `deal_type` value directly while its sibling derivation used the resolved event-type helper, so removing the key without that fix would have silently broken the flag. |
 | 0.15 | 2026-08-25 | **`target_type` is structural, not transaction form.** A 30-deal acceptance run produced mirror failures from one clause. The `assets` gloss said to use it when the release "frames the deal as a sale of specific assets rather than a going-concern unit": the framing half selected `assets` for an acquisition of the assets of an independent IT services business, and the going-concern half pushed a 295-unit apartment property into `standalone_company` because it was sold operating. `assets` is now defined by the transaction object — real estate/property, IP, product lines, contracts/rights, equipment, facilities — and states that an asset does not stop being an asset because it is operating. 0.11's prohibition on selecting `assets` **solely** from "asset purchase" / "the assets of" wording is unchanged and keeps its load-bearing "solely"; what is repaired is its destination, which named only `business_unit` and so left an independent operating company with nowhere to go. The tie-breaker is widened for the same reason. No new values, no change to the four-value taxonomy, the spin/split rules, the parent_seller rule or `asset_type` subordination. Examples 19-20 added as a mirror pair (outside the delivered fence). |
+| 0.16 | 2026-08-27 | **An operating business is not an asset set, however the purchase is worded or itemized.** Two commented rows from one review, one boundary. On an insurance agency the classifier wrote out the operating-business facts -- "KMi is an operating business with employees, clients, and a 50+ year history" -- and then chose `assets` anyway, citing the "acquired the assets of" wording and, newly, **the team joining the buyer as support for assets**. That reading is backwards: a going concern normally moves with its people, so a team transferring is evidence about what changed hands, not evidence for an asset set. 0.15's prohibition covered the legal wording and was overridden; it did not address this inference at all. The second row acquired "technology, intellectual property and talent assets" from a company that continues to exist. An enumerated bundle resembles the gloss's own examples, but listing what a software business consists of does not answer whether the business changed hands -- and there is no asset type for talent, **which this change does not add**. The gloss now states that people are not an asset class, that an enumeration is a description rather than evidence, and gives the order of the test: does an operating concern pass to the buyer, and only otherwise `assets`. Genuine isolated asset acquisitions are untouched -- real estate, product lines, contracts and operating rights keep their licensing text, and an asset still does not stop being an asset because it is operating or income-generating. |
