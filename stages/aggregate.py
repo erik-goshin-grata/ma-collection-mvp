@@ -45,7 +45,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "aggregation"
-_VERSION = "0.11"
+_VERSION = "0.12"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -612,17 +612,98 @@ def _period_end_precision(period_end: str | None) -> str | None:
 
     Formatting, not inference: "2026" is a year because the source wrote a year, and it
     stays "2026". Expanding it to 2026-12-31 would assert a day the source never gave.
+
+    One vocabulary across both normalized tables: exact | month | quarter | year, from
+    the canonical metric row. `quarter` is not produced here -- a stored period end
+    carries no quarter marking to read it off -- but it is part of the vocabulary and a
+    caller may hold it.
     """
     if not period_end:
         return None
     text = str(period_end).strip()
     if len(text) == 4 and text.isdigit():
-        return "YEAR"
+        return "year"
     if len(text) == 7:
-        return "MONTH"
+        return "month"
     if len(text) >= 10:
-        return "DAY"
+        return "exact"
     return None
+
+
+# Canonical metric_type per flat amount column. The canonical vocabulary renames
+# ADJ_EBITDA to EBITDA; this implementation's column is target_ebitda and its prompt
+# already captures "EBITDA or Adjusted EBITDA" into it, so EBITDA is the honest name.
+_FINANCIAL_METRIC_TYPES: tuple[tuple[str, str, str, str], ...] = (
+    # (metric_type, amount field, period-type field, period-end field)
+    ("REVENUE", "target_revenue", "target_revenue_period_type_v2", "target_revenue_period_end"),
+    ("EBITDA", "target_ebitda", "target_ebitda_period_type_v2", "target_ebitda_period_end"),
+)
+
+
+def _write_financial_metrics(
+    conn,
+    cluster_id: str,
+    field_values: dict,
+    metric_currencies: dict,
+    bundle: dict,
+    log: Any,
+) -> int:
+    """Write the resolved source-stated financial metrics as normalized rows.
+
+    Canonical resolved facts, following the same rule the multiple rows follow: the
+    value is the one reconciliation already chose, read from `field_values`, never from
+    a staging row. A fact whose conflict went unresolved has no value in `field_values`
+    and therefore produces NO row -- this table does not become a second place
+    disagreements are stored.
+
+    CURRENCY BELONGS TO THE ROW. Each metric carries the currency anchored to its own
+    amount, not the shared `financials_currency`, which is null whenever the two metrics
+    disagree and would strip a currency from both figures that each of them had.
+
+    SOURCE-STATED ONLY. `is_calculated` is 0 on every row: revenue and EBITDA are
+    collected, never computed here. Nothing is derived to fill this table, and no figure
+    is ever recovered from a multiple -- an as-reported multiple and a stated financial
+    are separate facts, and dividing one by the other would manufacture the third.
+
+    FX STAYS NULL. `fx_rate` and `fx_rate_date` record a conversion that was performed.
+    None is, so there is none to record.
+
+    PERIOD TYPE IS CARRIED, NOT TRANSLATED. ANNUAL stays ANNUAL and INTERIM_YTD stays
+    INTERIM_YTD; neither is folded into LTM or NTM. Precision is read off the stored
+    period end's own shape, so a bare "2026" stays a year and is never expanded to a day.
+
+    Re-aggregation replaces this transaction's rows.
+    """
+    conn.execute("DELETE FROM transaction_financial WHERE transaction_id = ?", (cluster_id,))
+    source = (bundle.get("sources") or [{}])[0]
+    written = 0
+    for metric_type, amount_field, period_type_field, period_end_field in _FINANCIAL_METRIC_TYPES:
+        amount = field_values.get(amount_field)
+        if amount is None:
+            continue
+        period_end = field_values.get(period_end_field)
+        conn.execute(
+            """
+            INSERT INTO transaction_financial (
+                transaction_id, metric_type, value_captured, value_currency,
+                period_type, period_end_date, period_end_date_precision,
+                fx_rate, fx_rate_date, margin_pct, is_calculated,
+                staging_extraction_id, source_raw_id, extraction_prompt_version
+            ) VALUES (?,?,?,?,?,?,?,NULL,NULL,NULL,0,?,?,?)
+            """,
+            (
+                cluster_id, metric_type, amount,
+                metric_currencies.get(amount_field),
+                field_values.get(period_type_field),
+                period_end, _period_end_precision(period_end),
+                source.get("staging_extraction_id"), source.get("source_raw_id"),
+                _FULL_VERSION,
+            ),
+        )
+        written += 1
+    if written:
+        log.info("cluster=%s wrote %d financial metric row(s)", cluster_id, written)
+    return written
 
 
 def _write_as_reported_multiples(
@@ -1333,10 +1414,11 @@ def _companion_from_sources(
 
 def _anchor_metric_qualifiers(
     field_values: dict, field_observations: dict[str, list[dict]]
-) -> None:
+) -> dict:
     """Re-resolve financial qualifiers against the source of their own amount (§2.10).
 
-    Mutates `field_values` in place. Every canonical field is otherwise selected
+    Mutates `field_values` in place and returns each anchored amount's own currency,
+    keyed by amount field, for callers that can hold a currency per value. Every canonical field is otherwise selected
     independently, so `target_revenue` can come from one source while
     `target_revenue_period_end` and `financials_currency` come from another. The
     period end is not cosmetic — the annual-as-trailing rule keys off it, so a
@@ -1349,6 +1431,7 @@ def _anchor_metric_qualifiers(
     """
     anchored_currencies: list[str] = []
     anchored_any_metric = False
+    per_metric_currency: dict[str, str | None] = {}
 
     for amount_field, companions in _METRIC_COMPANION_FIELDS.items():
         amount = field_values.get(amount_field)
@@ -1363,14 +1446,22 @@ def _anchor_metric_qualifiers(
         currency = _companion_from_sources(
             field_observations, "financials_currency", source_keys
         )
+        # Kept, not just counted. This currency belongs to THIS metric's own amount --
+        # the metric-row policy's first rule -- and the unanimity collapse below exists
+        # only because transaction_record has one shared column to write into. A
+        # normalized row has its own, so returning these lets each keep the currency its
+        # source actually stated, including when the two disagree and the shared column
+        # is therefore null.
+        per_metric_currency[amount_field] = currency
         if currency:
             anchored_currencies.append(currency)
 
     if not anchored_any_metric:
-        return
+        return per_metric_currency
 
     distinct = set(anchored_currencies)
     field_values["financials_currency"] = next(iter(distinct)) if len(distinct) == 1 else None
+    return per_metric_currency
 
 
 def _resolve_balance_sheet_inputs(
@@ -2177,7 +2268,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
             # §2.10 items 1-2 — re-anchor each financial qualifier to the source of
             # its own amount, before anything reads or persists them.
-            _anchor_metric_qualifiers(field_values, bundle["field_observations"])
+            metric_currencies = _anchor_metric_qualifiers(
+                field_values, bundle["field_observations"]
+            )
 
             # Derive additional fields
             field_values.update(sponsor_participant_context.get(cluster_id, {}))
@@ -2467,6 +2560,12 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Flush deferred conflict logs (must follow transaction_record INSERT for FK)
             for f_name, c_obs, c_result in pending_conflicts:
                 _log_conflict(conn, cluster_id, f_name, c_obs, c_result)
+
+            # Resolved financial metrics become canonical rows. Must follow the
+            # transaction_record INSERT above for the FK.
+            _write_financial_metrics(
+                conn, cluster_id, field_values, metric_currencies, bundle, log,
+            )
 
             # Resolved multiples become canonical rows now that a transaction_id
             # exists. Must follow the transaction_record INSERT above for the FK.

@@ -449,7 +449,10 @@ def test_canonical() -> None:
     check("type recovered from the key", r["multiple_type"], "EV_EBITDA")
     check("basis ANNUAL — not converted to NTM", r["period_basis"], "ANNUAL")
     check("period end is the bare year", r["period_end_date"], "2026")
-    check("precision YEAR", r["period_end_date_precision"], "YEAR")
+    # Lowercase since R3.4: one precision vocabulary across both normalized tables,
+    # taken from the canonical metric row (exact | month | quarter | year). Spelling,
+    # not a change of meaning -- the period end is still the bare year the source gave.
+    check("precision year", r["period_end_date_precision"], "year")
     check("source_flag as_reported", r["source_flag"], "as_reported")
     check("numerator family named", r["numerator_value_type"], "implied_enterprise_value")
     check("quality NULL — nothing was calculated", r["quality"], None)

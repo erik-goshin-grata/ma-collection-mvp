@@ -363,6 +363,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "reported_multiples" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "013_v3_reported_multiples.sql").read_text(encoding="utf-8"))
 
+    # 014 (V3 §5 source-stated financial metrics as rows). Table sentinel, like 012.
+    # It also normalizes 012's precision vocabulary onto the canonical one, so the
+    # UPDATEs run exactly once alongside the CREATE rather than on every open.
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transaction_financial'"
+    ).fetchone():
+        conn.executescript((_mig_dir / "014_v3_transaction_financial.sql").read_text(encoding="utf-8"))
+
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
     # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document
