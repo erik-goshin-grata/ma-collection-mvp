@@ -165,9 +165,15 @@ def test_response_slots() -> None:
               keys.index("stake_transition_type") == keys.index("pct_acquired") + 1
               if "stake_transition_type" in keys and "pct_acquired" in keys else False, True)
     tkeys = list(txn)
-    check("round_size sits after features, as section 6 orders it",
-          tkeys.index("round_size") == tkeys.index("features") + 1
+    # The point is that the section 4 example follows section 6's ordering, not that any
+    # two particular keys are adjacent -- HC 0.31 inserted reported_multiples between
+    # these two in BOTH sections, which is the ordering holding, not breaking.
+    check("features precedes round_size, as section 6 orders them",
+          tkeys.index("features") < tkeys.index("round_size")
           if "round_size" in tkeys and "features" in tkeys else False, True)
+    check("reported_multiples sits between them in the example, as it does in section 6",
+          tkeys.index("features") < tkeys.index("reported_multiples") < tkeys.index("round_size")
+          if "reported_multiples" in tkeys else False, True)
 
     print("\nNothing else in the response structure moved:")
     check("deal still carries offer_mechanism and sponsor_transaction_role",

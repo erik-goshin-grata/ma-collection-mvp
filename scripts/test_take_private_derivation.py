@@ -316,6 +316,7 @@ def _hc_response(outcome: object) -> dict:
                       "rumor_date": None},
             "value": {"amount": None, "currency": None, "type": "UNDISCLOSED",
                       "type_confidence": "HIGH", "qualifier": None, "per_share_price": None},
+            "reported_multiples": [],
             "value_observations": [],
             "features": {"is_secondary_buyout": None, "is_merger_of_equals": None,
                          "is_going_private_outcome": outcome},

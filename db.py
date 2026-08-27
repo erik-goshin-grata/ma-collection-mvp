@@ -359,6 +359,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     ).fetchone():
         conn.executescript((_mig_dir / "012_v3_transaction_multiple.sql").read_text(encoding="utf-8"))
 
+    # 013 (staging slot for source-stated multiples). Ordinary column sentinel.
+    if "reported_multiples" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "013_v3_reported_multiples.sql").read_text(encoding="utf-8"))
+
     # Drop 3.16 — has_earnout, has_cvr derived flags on transaction_record
     # Drop 3.18 — multi_transaction_index/total on staging_extraction
     # Drop 3.19 — linked_filings_count on transaction_record; document_title on transaction_document

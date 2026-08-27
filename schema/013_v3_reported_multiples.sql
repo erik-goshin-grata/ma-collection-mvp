@@ -1,0 +1,21 @@
+-- 013 — the staging slot for source-stated multiples.
+--
+-- One JSON column on staging_extraction, holding the array Stage 4 receives from the
+-- extraction prompt. It mirrors `value_observations` exactly: a repeating structured
+-- fact arrives as JSON on the staging row, and the stage that owns the canonical shape
+-- normalizes it later. Stage 9 turns these into transaction_multiple rows.
+--
+-- Why staging JSON and not transaction_multiple directly: Stage 4 runs before
+-- clustering, so it has no transaction_id to write against -- the same reason
+-- value_observations lands here. The array waits on the staging row until Stage 8 has
+-- assigned a cluster.
+--
+-- The column is nullable and defaults to NULL. An extraction that predates this
+-- migration, or a source that states no multiple, leaves it NULL; an extraction that
+-- ran and found nothing writes '[]'. Those are different facts and the column keeps
+-- them apart.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction ADD COLUMN reported_multiples TEXT;

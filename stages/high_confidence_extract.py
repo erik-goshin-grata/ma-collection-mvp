@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.30"
+_VERSION = "0.31"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -46,6 +46,7 @@ _REQUIRED_KEYS = frozenset({
     "value_observations",
     "features",
     "target_financials",
+    "reported_multiples",
     "model_confidence",
     "deal",
     "financials_disclosure_status",
@@ -194,6 +195,11 @@ def _validate(result: dict) -> str | None:
         otype = obs.get("type")
         if otype is not None and otype not in _VALID_VALUE_TYPES:
             return f"invalid value_observations[{i}].type: {otype!r}"
+    # Shape only. Per-item vocabulary is enforced in _reported_multiples_json, which
+    # DROPS an unusable item -- rejecting here would cost the whole extraction over one
+    # bad multiple.
+    if not isinstance(result.get("reported_multiples"), list):
+        return "invalid reported_multiples: expected list"
     features = result.get("features")
     if not isinstance(features, dict):
         return "invalid features: expected object"
@@ -256,6 +262,90 @@ def _validate(result: dict) -> str | None:
     # Validation of V2 values happens post-normalization at write time.
 
     return None
+
+
+_VALID_MULTIPLE_TYPES = frozenset({
+    "EV_REVENUE", "EV_EBITDA", "EV_EBIT", "EV_FCF", "PE", "PB", "PTBV",
+})
+_VALID_MULTIPLE_PERIOD_BASES = frozenset({"LTM", "NTM", "ANNUAL", "QUARTERLY"})
+_EV_MULTIPLE_TYPES = frozenset({"EV_REVENUE", "EV_EBITDA", "EV_EBIT", "EV_FCF"})
+_REPORTED_MULTIPLE_KEYS = frozenset({
+    "multiple_type", "multiple_value", "period_basis", "period_end_date",
+    "numerator_value_type", "as_reported_text",
+})
+
+
+def _reported_multiples_json(txn: dict, log=None, eid=None) -> str | None:
+    """Serialize the source-stated multiples array, dropping items that cannot stand.
+
+    A VOCABULARY FILTER, NOT A CLASSIFIER. An item is kept when the model named a type
+    this schema knows and a value that is a number; it is dropped otherwise. Nothing
+    here re-reads the source, infers a type from wording, or repairs a period basis --
+    that mapping belongs to the model under the prompt contract, and doing it here would
+    make the parser a second, invisible extractor.
+
+    Dropping an unusable item rather than failing `_validate` is deliberate, and matches
+    how a retired value type is handled: one bad multiple should not cost the whole
+    extraction its parties, dates and advisors.
+
+    NOTHING IS COMPUTED. A multiple with no denominator figure is a complete record of
+    what the source said. This function never divides anything by anything.
+    """
+    items = txn.get("reported_multiples")
+    if not isinstance(items, list):
+        return None
+    clean: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        unknown = set(item) - _REPORTED_MULTIPLE_KEYS
+        if unknown and log is not None:
+            log.warning("extraction_id=%s reported_multiple has unknown key(s) %r -- ignored",
+                        eid, sorted(unknown))
+        mtype = item.get("multiple_type")
+        if mtype not in _VALID_MULTIPLE_TYPES:
+            if log is not None:
+                log.warning("extraction_id=%s dropping reported_multiple with unsupported "
+                            "type %r", eid, mtype)
+            continue
+        raw_value = item.get("multiple_value")
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+            if log is not None:
+                log.warning("extraction_id=%s dropping reported_multiple %s with "
+                            "non-numeric value %r", eid, mtype, raw_value)
+            continue
+        if raw_value <= 0:
+            if log is not None:
+                log.warning("extraction_id=%s dropping reported_multiple %s with "
+                            "non-positive value %r", eid, mtype, raw_value)
+            continue
+        basis = item.get("period_basis")
+        if basis is not None and basis not in _VALID_MULTIPLE_PERIOD_BASES:
+            # The multiple itself is still a fact. Drop only the unusable basis, and say
+            # so -- a null basis is "not stated", which the schema already allows.
+            if log is not None:
+                log.warning("extraction_id=%s reported_multiple %s dropping unusable "
+                            "period_basis %r", eid, mtype, basis)
+            basis = None
+        numerator = item.get("numerator_value_type")
+        expected = ("implied_enterprise_value" if mtype in _EV_MULTIPLE_TYPES
+                    else "implied_equity_value")
+        if numerator != expected:
+            # Determined by multiple_type, so a disagreement is the model contradicting
+            # itself rather than new information. Correct it and record that we did.
+            if numerator is not None and log is not None:
+                log.warning("extraction_id=%s reported_multiple %s numerator %r does not "
+                            "follow from the type -- using %r", eid, mtype, numerator, expected)
+            numerator = expected
+        clean.append({
+            "multiple_type": mtype,
+            "multiple_value": float(raw_value),
+            "period_basis": basis,
+            "period_end_date": item.get("period_end_date"),
+            "numerator_value_type": numerator,
+            "as_reported_text": item.get("as_reported_text"),
+        })
+    return json.dumps(clean)
 
 
 def _value_observations_json(txn: dict, log=None, source_raw_id=None) -> str | None:
@@ -456,6 +546,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             tf = txn.get("target_financials") or {}
             value_observations_json = _value_observations_json(
                 txn, log, row["source_raw_id"])
+            reported_multiples_json = _reported_multiples_json(txn, log, eid)
 
             nd = dict(base_nd)
             hc_notes = txn.get("notes")
@@ -524,6 +615,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 v.get("amount"), v.get("currency"), v.get("type"),
                 v.get("type_confidence"), v.get("qualifier"), v.get("per_share_price"),
                 value_observations_json,
+                reported_multiples_json,
                 txn.get("round_size"),   # primary-capital capture (value fields null when set)
                 tf.get("revenue_amount"),
                 tf.get("revenue_period_type"),       # legacy column
@@ -569,6 +661,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         value_amount = ?,  value_currency = ?,  value_type = ?,
                         value_type_confidence = ?,  value_qualifier = ?,  per_share_price = ?,
                         value_observations = ?,
+                        reported_multiples = ?,
                         round_size = ?,
                         target_revenue = ?,
                         target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
@@ -625,6 +718,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         value_amount, value_currency, value_type,
                         value_type_confidence, value_qualifier, per_share_price,
                         value_observations,
+                        reported_multiples,
                         round_size,
                         target_revenue,
                         target_revenue_period_type, target_revenue_period_type_v2,
@@ -643,7 +737,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

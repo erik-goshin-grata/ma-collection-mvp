@@ -219,7 +219,7 @@ def _test_subordination(failures: list[str]) -> None:
                          "sponsor_name": None},
             "parent_seller": {"name": None, "ticker": None, "description": None},
             "dates": {}, "deal": {}, "target_financials": {},
-            "value": {}, "value_observations": [],
+            "value": {}, "value_observations": [], "reported_multiples": [],
             "features": {"is_platform_investment": None, "is_secondary_buyout": None,
                          "is_merger_of_equals": None},
             "financials_disclosure_status": "UNKNOWN", "model_confidence": "HIGH",

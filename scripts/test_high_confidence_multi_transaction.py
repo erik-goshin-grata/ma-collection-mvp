@@ -66,6 +66,7 @@ def _txn(target: str, acquirer: str) -> dict:
             "qualifier": None,
             "per_share_price": None,
         },
+        "reported_multiples": [],
         "value_observations": [],
         "features": {
             "is_platform_investment": None,

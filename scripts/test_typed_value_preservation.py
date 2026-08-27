@@ -80,6 +80,7 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
             "qualifier": None,
             "per_share_price": None,
         },
+        "reported_multiples": [],
         "value_observations": [
             {
                 "amount": 178_500_000,
@@ -231,6 +232,7 @@ def _insert_second_source_fixture(conn: sqlite3.Connection) -> int:
             "qualifier": None,
             "per_share_price": None,
         },
+        "reported_multiples": [],
         "value_observations": [
             {
                 "amount": 210_000_000,

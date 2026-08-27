@@ -176,6 +176,7 @@ def _hc_result(*, with_stake_equity: bool) -> dict:
             "amount": primary["amount"], "currency": "USD", "type": primary["type"],
             "type_confidence": "HIGH", "qualifier": None, "per_share_price": None,
         },
+        "reported_multiples": [],
         "value_observations": observations,
         "features": {
             "is_platform_investment": None,

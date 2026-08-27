@@ -97,6 +97,7 @@ def _hc(**deal_over) -> dict:
         "deal": deal,
         "dates": {},
         "value": {},
+        "reported_multiples": [],
         "value_observations": [],
         "features": {"is_secondary_buyout": None, "is_merger_of_equals": None},
         "target_financials": {},

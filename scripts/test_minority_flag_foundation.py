@@ -222,6 +222,7 @@ def _hc_result(stake_transition_type):
         },
         "dates": {},
         "value": {"type": None},
+        "reported_multiples": [],
         "value_observations": [],
         "features": {
             "is_platform_investment": None,

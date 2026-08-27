@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.30 (balance-sheet facts can be answered)
+**Version:** 0.31 (a stated multiple is captured as stated)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -671,6 +671,80 @@ revenue_amount. If the source states only ARR, leave revenue_amount null so ARR
 is not mistagged as GAAP revenue (which would produce a bogus EV/revenue
 multiple). A dedicated ARR field is pending schema — see the QA notes header.
 
+REPORTED MULTIPLES
+
+Capture a valuation multiple the source itself states. This is the source's own
+claim, recorded as stated. It is NOT a calculation, and nothing downstream needs
+you to make it one.
+
+- `reported_multiples` is required on every transaction element. Return an empty
+  array (`[]`) when the source states no multiple. Do not compute one to fill it.
+- A multiple is a ratio expressed in turns -- "11.5x", "approximately 12 times
+  EBITDA", "a multiple of 3.4x revenue". A monetary amount is never a multiple
+  and belongs in value_observations or target_financials.
+- One item per distinct stated multiple. A source stating both a headline
+  multiple and an adjusted variant states TWO multiples: emit both, each with
+  its own verbatim wording. Do not choose between them, and do not merge them.
+
+DO NOT CALCULATE, AND DO NOT WORK BACKWARDS. Only a multiple the source states in
+turns is captured here. If the source gives a purchase price and an EBITDA figure
+but states no multiple, emit NOTHING -- dividing them would manufacture a fact the
+source did not assert. The reverse is equally forbidden: when a source states a
+price and a multiple but no EBITDA, do NOT divide the price by the multiple to
+recover an EBITDA. Leave ebitda_amount null. A figure you computed is not a
+figure the source stated, in either direction.
+
+Fields per item:
+
+- multiple_type: EV_REVENUE | EV_EBITDA | EV_EBIT | EV_FCF | PE | PB | PTBV.
+  Read it from what the source names as the denominator. "Enterprise value
+  multiple ... of adjusted EBITDA" is EV_EBITDA -- adjusted EBITDA is EBITDA.
+  Null the whole item and omit it if you cannot tell which denominator is meant.
+- multiple_value: the number of turns, as a number. "11.5x" is 11.5. Strip the
+  "x". Never a percentage and never a currency amount.
+- period_basis: LTM | NTM | ANNUAL | QUARTERLY | null. The basis of the
+  DENOMINATOR, taken from the source's own words.
+    LTM       -- trailing/last twelve months, or "TTM"
+    NTM       -- next twelve months / forward twelve months, stated as such
+    ANNUAL    -- a NAMED fiscal or calendar year, including a forward-looking
+                 one. "anticipated 2026 adjusted EBITDA" and "2025 revenue" are
+                 both ANNUAL. A named year is an annual period whether or not it
+                 has happened yet.
+    QUARTERLY -- a named quarter
+    null      -- the source states no basis. Do not assume one.
+  A NAMED YEAR IS NOT NTM. "Anticipated 2026 EBITDA" names a year, and NTM means
+  the twelve months following the announcement -- for a deal announced mid-year
+  those are different windows. Record what the source said, not a window you
+  inferred from it.
+- period_end_date: the denominator period's end, YYYY-MM-DD or YYYY, exactly as
+  determinable from the source. For "2026" that is "2026" -- do NOT expand it to
+  "2026-12-31". Null when no period is stated.
+- numerator_value_type: implied_enterprise_value for the EV multiples
+  (EV_REVENUE, EV_EBITDA, EV_EBIT, EV_FCF); implied_equity_value for the equity
+  multiples (PE, PB, PTBV). This names which canonical value family the
+  numerator belongs to. It follows from multiple_type, and does not require the
+  source to state the numerator's amount.
+- as_reported_text: the source's verbatim wording for this multiple, trimmed to
+  the phrase itself -- "approximately 11.5x anticipated 2026 adjusted EBITDA".
+  This is what distinguishes two variants of the same multiple from each other,
+  so keep the words that distinguish them.
+
+Worked example. "The purchase price of $1.75 billion represents an effective
+enterprise value multiple of approximately 11.5x anticipated 2026 adjusted
+EBITDA, or 10.5x after adjusting for the tax benefits" yields TWO items:
+
+  {"multiple_type": "EV_EBITDA", "multiple_value": 11.5,
+   "period_basis": "ANNUAL", "period_end_date": "2026",
+   "numerator_value_type": "implied_enterprise_value",
+   "as_reported_text": "approximately 11.5x anticipated 2026 adjusted EBITDA"}
+  {"multiple_type": "EV_EBITDA", "multiple_value": 10.5,
+   "period_basis": "ANNUAL", "period_end_date": "2026",
+   "numerator_value_type": "implied_enterprise_value",
+   "as_reported_text": "10.5x after adjusting for the tax benefits"}
+
+and ebitda_amount stays null. The source stated no EBITDA; $1.75B / 11.5 is
+arithmetic you performed, not a figure anyone reported.
+
 MULTI-TRANSACTION SOURCES
 
 When a single source directly announces multiple transactions in the same
@@ -765,6 +839,7 @@ code fences, no preamble.
         }
       ],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
+      "reported_multiples": [],
       "round_size": null,
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
@@ -880,6 +955,16 @@ Extract all transactions from this source.
         "is_merger_of_equals": "boolean | null",
         "is_going_private_outcome": "true | null"
       },
+      "reported_multiples": [
+        {
+          "multiple_type": "EV_REVENUE | EV_EBITDA | EV_EBIT | EV_FCF | PE | PB | PTBV",
+          "multiple_value": "number",
+          "period_basis": "LTM | NTM | ANNUAL | QUARTERLY | null",
+          "period_end_date": "YYYY-MM-DD | YYYY | null",
+          "numerator_value_type": "implied_enterprise_value | implied_equity_value",
+          "as_reported_text": "string | null"
+        }
+      ],
       "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "cash | stock | cash_and_stock | election | other | null",
@@ -1686,3 +1771,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.28 | 2026-08-26 | **`MARKET_CAPITALIZATION` retired from the transaction-value vocabulary; the supported-concept boundary made explicit.** A de-SPAC source stating "a pre-money equity valuation of approximately $1.6 billion and a post-transaction equity valuation of approximately $2.3 billion" produced two observations typed `MARKET_CAPITALIZATION` and a canonical `value_amount` of $1.6B — although the source never uses the words market capitalization and the target was private, so the figure did not satisfy even the type it was given. The array's own scope rule already said to return `[]` when there is no explicitly supported, qualified deal-value fact; `MARKET_CAPITALIZATION` contradicted it, being defined in the same breath as "a property of the company, not of the transaction" while sitting in a deal-value vocabulary, with an instruction to capture it on source-statedness alone. It was never a Product-approved transaction field — it appears in neither Data Dictionary nor the schema, and originated as engineering containment to keep market caps out of `equity_value` (decision 2026-08-17). A WHAT IS NOT A DEAL-VALUE FACT block now states the boundary as a scope test rather than a size test: a source-stated ENTERPRISE_VALUE remains whole-company and supported. `UNDISCLOSED` is unchanged and stays reserved for a source that says terms are not disclosed. The value remains in the owning stage's `_VALID_VALUE_TYPES` purely as tolerance, so an emitted retired type is dropped and logged rather than failing the whole extraction; no stored data is rewritten and every derivation guard against legacy market-cap observations is untouched. |
 | 0.29 | 2026-08-26 | **`stake_transition_type` and `round_size` restored to the `RESPONSE FORMAT` block.** Both are instructed in this system prompt and both are already declared in section 6's output schema; neither had a key in the response structure the model is actually shown. Section 6 is documentation and reaches no model, so the delivered contract asked for two facts and offered nowhere to put them. `stake_transition_type` survived on prose alone -- the model emitted it anyway, which is precisely what hid the defect. `round_size` did not: the PRIMARY CAPITAL rule tells the model to null `value.amount` and record the figure "in `round_size` (below)", and there was no `round_size` below, so a primary-capital amount on the M&A path was nulled out of `value` and had nowhere to land. Every downstream link already existed for both -- Stage 4 reads `deal.stake_transition_type` and `txn.round_size`, both sit in the production HC observation group, and Stage 9 owns both canonical columns. **No rule text changes and no new field.** Key order follows section 6: `stake_transition_type` after `pct_acquired` in `deal`, `round_size` after `features` at transaction level. Section 7's examples are outside the fence, reach no model, and are left as they are. |
 | 0.30 | 2026-08-26 | **The five balance-sheet fields restored to the response structure.** `total_debt`, `total_debt_currency`, `cash_st`, `cash_st_currency` and `balance_sheet_as_of_date` are instructed at length in this system prompt -- with the net-figure trap, the combined-cash rule, the per-figure currency rule and a full POINT_IN_TIME paragraph -- and had no key in the `RESPONSE FORMAT` object the prose names, `target_financials`. Unlike 0.29's two fields, section 6 did not declare these either, so they existed only as prose: instructed, read by Stage 4 at `:539-543`, carried by the production HC observation group, owned as canonical columns by Stage 9, and unanswerable. Null across all 47 M&A extractions in both live corpora. **No substantive rule changed** -- the extraction rules were already complete and correct, and are deliberately untouched. `net_debt`, `net_debt_currency` and `balance_sheet_period_type` are NOT added: this prompt forbids computing net debt, and the other two are reference-derived (`balance_sheet_period_type` is the constant `POINT_IN_TIME`, written where the model cannot mislabel it). What the capture makes reachable in the reference aggregation -- calculated net debt, `implied_enterprise_value`, the `EQUITY_PLUS_TOTAL_DEBT` transaction-value branch and the first non-null multiples -- is existing behaviour becoming observable, recorded for Product inspection rather than changed here. |
+| 0.31 | 2026-08-27 | **A multiple the source states is captured, as stated.** `reported_multiples` is a new required array: one item per distinct stated multiple, carrying its type, value in turns, denominator period basis and end, numerator family and the source's verbatim wording. Until now a multiple had no home anywhere -- `value_observations` is scoped to monetary deal-value facts and "11.5x" is not a monetary figure -- so nVent's "approximately 11.5x anticipated 2026 adjusted EBITDA" about Maverick Power was captured nowhere, and the reference calculator refuses that transaction anyway for want of an `implied_enterprise_value`. **Nothing is computed here, in either direction.** A price and an EBITDA never yield a multiple, and a price and a multiple never yield an EBITDA -- the worked example pins that `ebitda_amount` stays null. **A named year is ANNUAL, not NTM**: "anticipated 2026" names a year, while NTM is the twelve months after announcement, and for a mid-year deal those are different windows. A source stating a headline multiple and an adjusted variant states TWO multiples; both are emitted and neither is chosen. The Stage 4 parser is a vocabulary filter, not a classifier: it drops an item whose type is outside the seven canonical values rather than translating a near-miss, and drops one bad item rather than failing the whole extraction. |
