@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.5 (adds `use_of_proceeds`)
+**Version:** 0.6 (`use_of_proceeds` is a bounded vocabulary)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -211,34 +211,72 @@ It is a stated number or it is nothing:
 
 USE OF PROCEEDS
 
-use_of_proceeds: What the company states it will do with the capital. This is a
-field, not prose.
+use_of_proceeds: What the company states it will do with the capital, classified
+into the vocabulary below. Not prose, and not the source's own words.
 
-- Capture ONLY uses the source explicitly states.
-- Each use is a short noun phrase — one or two words. Strip the verb, the
-  possessive, and any promotional or contextual wording around it.
-- Preserve every distinct stated use, comma-separated, in the order stated.
-- Null when the source does not say what the capital is for.
+Return the applicable categories comma-separated, in the order the source states
+them. Return every category the source independently supports, and null when the
+source does not say what the capital is for.
+
+    HIRING — recruiting, team building, headcount. Any function: a sales team, an
+      engineering team and a founding team are all HIRING.
+    PRODUCT_AND_TECHNOLOGY — building or extending the product, platform or
+      technology. Includes R&D, prototypes, tooling, technical validation, and
+      deepening what the product covers.
+    MANUFACTURING_AND_SUPPLY_CHAIN — production scale-up, manufacturing capacity,
+      supply chain.
+    GO_TO_MARKET — selling and delivering: sales and marketing activity, commercial
+      launch, customer deliveries and deployments, first commercial projects, brand.
+    MARKET_EXPANSION — reaching new customers, segments, verticals or geographies.
+    FACILITIES_AND_EQUIPMENT — plant, labs, testing infrastructure, capital
+      equipment.
+    REGULATORY_AND_COMPLIANCE — approvals, certification, regulatory capability.
+    ACQUISITIONS — buying other companies or assets.
+    DEBT_REPAYMENT — repaying or refinancing debt, strengthening the balance sheet.
+    WORKING_CAPITAL — funding day-to-day operations and working capital.
+    GENERAL_CORPORATE — the source states a use, but only in the broad standard
+      form: "general corporate purposes".
+    OTHER — a use the source states explicitly that none of the above covers.
+
+Two boundaries decide most cases:
+
+- People or function. Headcount is HIRING whatever the department. "Expand the
+  sales team" is HIRING, not GO_TO_MARKET. GO_TO_MARKET is commercial activity,
+  not the people who do it.
+- Building or selling. "Accelerate product development" is
+  PRODUCT_AND_TECHNOLOGY; "launch its initial product" is GO_TO_MARKET, because
+  the product exists and the money takes it to market. A source that spans both —
+  "advance the technology from prototypes toward first commercial pilots" —
+  supports both categories, and both are returned.
+
+Worked examples:
 
 "The proceeds will be used to expand the company's sales team and accelerate
-product development" is two distinct uses: "sales team, product development".
-Each is reduced to the thing being funded — not "expand the company's sales
-team", not "accelerate product development".
+product development" is "HIRING, PRODUCT_AND_TECHNOLOGY".
 
 "The company will use the proceeds to build its founding team and launch its
-initial product" is "founding team, product launch".
+initial product" is "HIRING, GO_TO_MARKET".
+
+"SiFly will use the funding to scale Q12 production, expand its manufacturing and
+supply-chain capabilities, and support initial customer deliveries and
+deployments. The investment will also advance DronePort development and field
+validation while expanding the go-to-market, customer-operations and regulatory
+capabilities" is "MANUFACTURING_AND_SUPPLY_CHAIN, GO_TO_MARKET,
+PRODUCT_AND_TECHNOLOGY, REGULATORY_AND_COMPLIANCE" — four categories, not one per
+phrase. Several phrases describing the same kind of use are one category, and a
+category is never repeated.
 
 Do NOT infer a use from growth, strategy or momentum language. "The round
-positions the company for its next phase of growth" and "the investment
-validates our market leadership" state no use at all: return null. A round being
-described as a growth round is not a statement of what the money buys.
+positions the company for its next phase of growth" and "the investment validates
+our market leadership" state no use at all: return null. A round being described
+as a growth round is not a statement of what the money buys.
 
-A stated use that is itself broad is still a stated use. "general corporate
-purposes" is captured as "general corporate purposes", because the source said
-it. The test is whether the source states a use, not whether the use is specific.
+A stated use that is itself broad is still a stated use: "general corporate
+purposes" is GENERAL_CORPORATE, because the source said it. The test is whether
+the source states a use, not whether the use is specific.
 
-Do not write a sentence here, and do not carry the source's marketing adjectives
-("aggressive", "transformative", "world-class") into the value.
+Return only values from the list above. Do not write the source's phrasing, do not
+invent a category, and do not repeat one.
 
 MULTI-INVESTMENT SOURCES
 
@@ -322,7 +360,7 @@ code fences, no preamble.
       "financials_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "pct_acquired": null,
-      "use_of_proceeds": "sales team, product development",
+      "use_of_proceeds": "HIRING, PRODUCT_AND_TECHNOLOGY",
       "model_confidence": "HIGH",
       "notes": null
     }
@@ -400,7 +438,7 @@ Extract all funding transactions from this source.
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "equity | safe | convertible_note | debt | warrant | null",
       "pct_acquired": "number | null",
-      "use_of_proceeds": "string | null",
+      "use_of_proceeds": "comma-separated subset of HIRING | PRODUCT_AND_TECHNOLOGY | MANUFACTURING_AND_SUPPLY_CHAIN | GO_TO_MARKET | MARKET_EXPANSION | FACILITIES_AND_EQUIPMENT | REGULATORY_AND_COMPLIANCE | ACQUISITIONS | DEBT_REPAYMENT | WORKING_CAPITAL | GENERAL_CORPORATE | OTHER, or null",
       "model_confidence": "HIGH | MEDIUM | LOW",
       "notes": "string | null"
     }
@@ -918,3 +956,4 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | 0.3 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.4 | 2026-08-24 | **`pct_acquired` added to the funding contract.** The funding path had no author for it: Stage 4 excludes funding event types and Stage 4b never asked, so an explicitly stated stake — routine in growth equity — was lost even though the staging column, the observation group and the canonical column all already carried it. The field is **stated or null**: majority/control framing, acquisition framing, and any computation from round size and valuation are all explicitly forbidden, and an unstated percentage is never rounded to 100. Example 2 already described a stated 65% in prose because the response had nowhere to put it; it now carries the value. |
 | 0.5 | 2026-08-26 | **`use_of_proceeds` added to the funding contract.** A V3 §7 `ADD` field — "source-stated intended use of the capital raised" — with a staging column, a place in the funding observation group, a canonical column Stage 9 owns and a slot on the funding review sheet, and no author anywhere. It was drafted in full for a **Funding LC** stage the design never called for; that prompt was archived to `docs/` and the columns outlived it. Both of this prompt's own worked examples contain the sentence — "the proceeds will be used to expand the company's sales team and accelerate product development" — in a contract that never asked for it. **Field-like, not prose**, by Product ruling: explicitly stated uses only, each a one- or two-word noun phrase with the verb, possessive and promotional wording stripped, every distinct use preserved comma-separated in the order stated, and null when unstated. The scalar `TEXT` datatype is preserved — V3 types it `DATA POINT`, not a repeating relationship — so multiple uses share one field, following the comma-delimit convention this repository already uses for co-sponsors. Growth, strategy and momentum framing states no use and yields null; a stated-but-broad use like "general corporate purposes" is captured as stated, because the test is whether the source states a use, not whether the use is specific. `has_board_seat` and `board_seat_notes` were drafted alongside it and are deliberately NOT added: V3 lists a flat board-representation flag and note as residue, superseded by a participant relationship with the named representative. |
+| 0.6 | 2026-08-27 | **`use_of_proceeds` becomes a bounded vocabulary.** 0.5 asked for one- or two-word noun phrases in the source's own words, and a review of seven fresh funding rows showed the predictable result: the model normalized honestly but had no bound, so one release produced ten items including five separate "...capabilities" and both "customer deliveries" and "customer deployments", while others ran to four words. Free text cannot be aggregated, compared across rows, or conflict-resolved. The fix is not a length rule. Eleven categories plus `OTHER` are **enumerated from the vocabulary the sources actually use** -- the method `advisor_specialty` established -- and every one is evidenced by real phrasing in the funding corpus except `ACQUISITIONS`, `DEBT_REPAYMENT` and `WORKING_CAPITAL`, added on Product ruling as common and materially distinct uses that should not route through `OTHER`. Designed on the `strategic_rationale` pattern: bounded taxonomy, source-stated evidence only, `OTHER` as the honest fallback -- but **flat rather than primary-plus-secondary**, because a round's proceeds genuinely split several ways with no ranking stated. Two boundaries are written out because the corpus turns on them: headcount is `HIRING` whatever the department, and building is `PRODUCT_AND_TECHNOLOGY` while selling is `GO_TO_MARKET`, with sources spanning both returning both. **Unchanged:** the source-stated-only gate, null when unstated, the scalar `TEXT` datatype and its comma-delimited representation, and V3's `DATA POINT` typing. No schema change. |

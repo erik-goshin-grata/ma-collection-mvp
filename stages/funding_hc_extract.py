@@ -27,7 +27,7 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 from lib.observation_writer import write_staging_observations_for_extraction
 
 _PROMPT_NAME = "funding_hc_extraction"
-_VERSION = "0.5"
+_VERSION = "0.6"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
@@ -96,6 +96,60 @@ _PCT_REJECT_MARKERS = (
     "no more", "more than", "less than", "greater than", "up to", "over ", "under ",
     "above", "below", "minimum", "maximum", "or more", "or less",
 )
+
+
+# `use_of_proceeds` vocabulary (funding_hc_extraction 0.6). Eleven categories plus
+# OTHER, enumerated from the phrasing the funding corpus actually uses -- the method
+# `advisor_specialty` established -- with ACQUISITIONS, DEBT_REPAYMENT and
+# WORKING_CAPITAL added on Product ruling as common, materially distinct uses that
+# should not route through OTHER.
+_VALID_PROCEEDS_USES = frozenset({
+    "HIRING", "PRODUCT_AND_TECHNOLOGY", "MANUFACTURING_AND_SUPPLY_CHAIN",
+    "GO_TO_MARKET", "MARKET_EXPANSION", "FACILITIES_AND_EQUIPMENT",
+    "REGULATORY_AND_COMPLIANCE", "ACQUISITIONS", "DEBT_REPAYMENT",
+    "WORKING_CAPITAL", "GENERAL_CORPORATE", "OTHER",
+})
+
+
+def _clean_proceeds(raw: Any, log: Any, eid: int) -> str | None:
+    """Keep the vocabulary values, in the order given, without repeats.
+
+    A bounded vocabulary that is not enforced is not bounded, so the same filter
+    `rationale_tag` applies to `secondary_rationales` applies here: values outside
+    the taxonomy are dropped and logged rather than stored, and a repeat of a
+    category is dropped too -- the field answers which kinds of use were stated,
+    and saying one twice adds nothing.
+
+    Clearing, not rejecting, exactly as `_clean_pct` does. A `_validate` failure
+    marks the whole extraction PROMPT_FAILED, and losing a funding row over one
+    malformed optional field would be out of proportion to the fact lost.
+
+    Case is folded because the vocabulary is the contract, not the capitalization.
+    Everything that survives is a value the delivered prompt offered.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    kept: list[str] = []
+    dropped: list[str] = []
+    for part in text.split(","):
+        value = part.strip().upper()
+        if not value:
+            continue
+        if value not in _VALID_PROCEEDS_USES:
+            dropped.append(part.strip())
+        elif value not in kept:
+            kept.append(value)
+    if dropped:
+        log.warning("extraction_id=%d use_of_proceeds dropping non-vocabulary value(s): %r",
+                    eid, dropped)
+    if not kept:
+        if not dropped:
+            log.warning("extraction_id=%d clearing unusable use_of_proceeds: %r", eid, raw)
+        return None
+    return ", ".join(kept)
 
 
 def _clean_pct(raw, log, eid: int) -> float | None:
@@ -275,6 +329,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # own tuple by design (bug #6), so a value computed inline in round_params
             # would silently never reach a multi-transaction row.
             pct_acquired = _clean_pct(txn.get("pct_acquired"), log, eid)
+            use_of_proceeds = _clean_proceeds(txn.get("use_of_proceeds"), log, eid)
 
             round_params = (
                 co.get("name"), co.get("domain"), co.get("ticker"),
@@ -298,7 +353,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 txn.get("financials_disclosure_status"),
                 txn.get("consideration_type"),
                 pct_acquired,
-                txn.get("use_of_proceeds"),
+                use_of_proceeds,
                 txn.get("model_confidence"),
                 _VERSION,
                 json.dumps(nd) if nd else None,
@@ -390,7 +445,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         dt.get("closed_date"), dt.get("closed_date_precision"),
                         txn.get("financials_disclosure_status"), txn.get("consideration_type"),
                         pct_acquired,
-                        txn.get("use_of_proceeds"),
+                        use_of_proceeds,
                         txn.get("model_confidence"), _VERSION,
                         json.dumps(nd) if nd else None,
                         row["dt_prompt_version"], i, multi_total,
