@@ -1,7 +1,7 @@
 # Product Validation Pass — Checkpoint & Handoff
 
 **Date:** 2026-08-28
-**Verified against:** `ma-collection-mvp` `origin/main` @ `edd8af7` (2026-08-27)
+**Verified against:** `ma-collection-mvp` `origin/main` @ `2d1d2ef` (2026-08-28)
 **Product Contract in force:** Transactions V3 — `V3-PC-1.0`
 **Package baseline this pass started from:** `origin/main` @ `2e2ccb7` (2026-08-22) · schema `010`
 
@@ -10,12 +10,16 @@
 ## What this document is
 
 A **checkpoint and handoff** for the Product validation pass that ran from the
-`V3-PC-1.0` release to `edd8af7`. It records what was validated, what was
+`V3-PC-1.0` release to `2d1d2ef`. It records what was validated, what was
 established, what was deliberately left undecided, and how to reproduce an
 acceptance run.
 
+**This is the repository freeze point for Engineering validation.** Documentation was
+reconciled against the landed implementation on 2026-08-28; no implementation behaviour
+moved in that reconciliation.
+
 **It is not a specification, and it does not compete with one.** The canonical
-package is unchanged and remains authoritative:
+package remains authoritative:
 
 | Artifact | Role | Status |
 | --- | --- | --- |
@@ -29,6 +33,12 @@ package wins. This document's only independent claim is about **what has landed
 in the reference implementation since the package was last reconciled**, and every
 such claim below was read out of `origin/main` rather than recalled.
 
+Of the four, only the **Data Dictionary** was touched in the closing reconciliation, and
+only to bring its current-state field entries in line with what landed — which is the job
+its own role statement gives it. The **Release Manifest** and the **Change & Decision
+Register** are untouched: their baseline is the release identity of `V3-PC-1.0`, and
+moving it is a Product act reserved for the next reconciliation (§8).
+
 The same MVP/Engineering boundary the package sets applies verbatim here:
 `ma-collection-mvp` is the **Product/MVP reference implementation** used to develop
 and validate the contract. It is separate from the Engineering production
@@ -37,13 +47,13 @@ implementation detail is a target requirement unless the contract says so.
 
 ### How the facts here were verified
 
-Every version, count and status was read from `origin/main` at `edd8af7`, not from
+Every version, count and status was read from `origin/main` at `2d1d2ef`, not from
 working-tree state or from session recollection:
 
 - prompt versions from each prompt's own `**Version:**` line;
 - stage versions from each stage's `_VERSION` constant;
 - migrations from `git ls-tree origin/main schema/`;
-- the deterministic suite executed from a clean clone checked out at `edd8af7`.
+- the deterministic suite executed from a clean clone checked out at `2d1d2ef`.
 
 ---
 
@@ -51,8 +61,8 @@ working-tree state or from session recollection:
 
 ### 1.1 Deterministic suite — the only result measured in this pass
 
-**71 of 71 scripts in `scripts/test_*.py` pass at `origin/main` @ `edd8af7`**, executed
-from a clean clone. The `V3-PC-1.0` baseline recorded 47; the pass added 24.
+**72 of 72 scripts in `scripts/test_*.py` pass at `origin/main` @ `2d1d2ef`**, executed
+from a clean clone. The `V3-PC-1.0` baseline recorded 47; the pass added 25.
 
 Four of those are cross-cutting parity checks, all green:
 `test_prompt_stage_version_parity.py` · `test_response_slot_parity.py` ·
@@ -93,7 +103,7 @@ only from one machine's shell history. It is now a single command with a preflig
 
 ## 2. Contracts established in this pass
 
-37 commits between `2e2ccb7` and `edd8af7`. Grouped by what each settled. Every prompt
+38 commits between `2e2ccb7` and `2d1d2ef`. Grouped by what each settled. Every prompt
 version and migration below was read from `origin/main`.
 
 ### 2.1 Observation, reconciliation and canonical form
@@ -128,6 +138,7 @@ where disagreement is stored.
 | `pct_acquired` | The assumed 100 is removed. Unstated is `None`, and `None` means the source did not say. Control-deal branch selection now takes a control boolean rather than a percentage — the same condition, without the invented figure |
 | Structural target typing | The target is typed by what is transacted, not by how the deal is worded |
 | Sale process | A search for a buyer is not a transaction |
+| Disclosure | The target's operating financials and the deal's terms are disclosed independently, and are recorded on two axes rather than one. §3 |
 | Buy-side coherence | HC no longer asserts a buy side that contradicts itself |
 | Use of proceeds | Bounded to a vocabulary rather than free text, so it can be aggregated and compared |
 
@@ -145,7 +156,7 @@ This is a deliberate loss of invented precision, not a regression.
 
 ---
 
-## 3. Delivered but not yet on `origin/main`
+## 3. The final Product correction — two disclosure axes
 
 **Two independent disclosure axes** — the final correction from the acceptance review.
 One field was carrying two questions: `financials_disclosure_status` was asked to
@@ -153,40 +164,41 @@ classify the *deal's* terms while the target model defines it as the disclosure 
 for the *target's* operating financials. `transaction_terms_disclosure_status` separates
 them, on the same three-value vocabulary.
 
-Status at the time of writing: committed on
-`claude/transaction-extraction-validation-ozjqes`, parented on `edd8af7`, verified by
-clean-clone application (72/72). **It is not on `origin/main`**, so every version in §4
-below is the pre-slice value. Push from this environment is blocked by GitHub App
-authorization; the change was delivered as a patch.
+**Landed on `origin/main` as `2d1d2ef` (2026-08-28).** Migration `020`; HC 0.36,
+funding HC 0.7, aggregation 0.13, deal summary 0.17; review sheet 1.3. The versions in §4
+are post-slice.
 
-Two documentation updates become owed **once that slice lands** — both deliberately not
-made here, because this pass makes no code, prompt, schema, dictionary or test changes:
+Both axes take the same vocabulary — `DISCLOSED · UNDISCLOSED · UNKNOWN`. `DISCLOSED`
+means at least one relevant fact **on that axis**, never completeness; `UNDISCLOSED`
+requires the source to say so; silence is `UNKNOWN`. A mixed answer is the common case in
+either direction. `PARTIALLY_DISCLOSED` was deliberately not added, and
+`value_type = UNDISCLOSED` is untouched.
 
-1. `docs/v3_data_dictionary.md:134` describes `transaction_terms_disclosure_status` as a
-   field "the reference implementation does not yet carry". That stops being true.
-2. `scripts/run_collection_validation.py`'s module docstring names the same field as
-   "unavailable in the reference implementation and neither proxied nor invented". The
-   slice makes the docstring contradict the code beneath it. **This is a defect
-   introduced by that slice**, recorded here rather than quietly fixed.
+The two documentation statements this slice falsified were corrected in the
+reconciliation that follows it, not left owed: `docs/v3_data_dictionary.md` no longer
+describes the field as one the reference implementation does not carry, and
+`scripts/run_collection_validation.py`'s docstring no longer lists it as unavailable.
+`seller_sponsor` stays on that list — `transaction_record` still carries no sell-side
+sponsor name, only `sell_side_sponsors` at staging.
 
 ---
 
-## 4. Version and migration state at `origin/main` @ `edd8af7`
+## 4. Version and migration state at `origin/main` @ `2d1d2ef`
 
 | Prompt | Version | Stage `_VERSION` |
 | --- | --- | --- |
 | `relevancy_filter` | 0.9 | 0.9 |
 | `deal_type_classifier` | 0.16 | 0.16 |
-| `high_confidence_extraction` | 0.35 | 0.35 |
-| `funding_hc_extraction` | 0.6 | 0.6 |
+| `high_confidence_extraction` | 0.36 | 0.36 |
+| `funding_hc_extraction` | 0.7 | 0.7 |
 | `low_confidence_extraction` | 0.13 | 0.13 |
-| `aggregation` | 0.12 | 0.12 |
-| `deal_summary` | 0.16 | 0.16 |
+| `aggregation` | 0.13 | 0.13 |
+| `deal_summary` | 0.17 | 0.17 |
 | `strategic_rationale` | 0.6 | 0.6 |
 | `agreement_*` (5) | 0.2 / 0.3 | — |
 | `prompt_conventions` | 0.5 | n/a (convention document) |
 
-Migrations `001`–`019`. Sentinel-guarded and hand-registered in `db.py::_apply_migrations`;
+Migrations `001`–`020`. Sentinel-guarded and hand-registered in `db.py::_apply_migrations`;
 **the directory is not globbed, so a migration without a guard block never runs.**
 
 ---
@@ -314,23 +326,30 @@ extraction, with a fully green suite, because nothing tied the two together.
 
 ---
 
-## 8. Documentation drift found — recorded, not fixed
+## 8. Documentation drift — what was corrected, and what was deliberately not
 
-Verified against `origin/main`. **No documentation was corrected in this pass**; these are
-inputs to the next reconciliation, which is the artifact entitled to move these numbers.
+Every row was verified against `origin/main` @ `2d1d2ef`.
 
-| Document | Drift |
+**Corrected**, because the true value is mechanical and readable from the repository:
+
+| Document | Drift, and the correction |
 | --- | --- |
-| `docs/prompt_versions.md` | Marked *Reconciled: 2026-08-24*, and its Current State table is behind on every prompt changed after that date — it lists HC 0.24, funding HC 0.4, aggregation 0.6, relevancy 0.8, classifier 0.14, LC 0.11, against 0.35 / 0.6 / 0.12 / 0.9 / 0.16 / 0.13 on `origin/main`. **Why it survived:** `test_prompt_stage_version_parity.py` asserts prompt ↔ stage parity and does not read this document |
-| `docs/v3_release_manifest.md` | Baseline block still reads `2e2ccb7` / schema `010` / 47 tests, against `edd8af7` / `019` / 71 |
-| `docs/v3_change_decision_register.md` | Carries no row for any decision settled in this pass |
-| `docs/project_state.md` | Already banner-marked as a dated 2026-08-14 snapshot. Accurate as labelled; noted so it is not mistaken for current state |
-| `docs/change_log.md` | Last entry 2026-08-11 |
+| `docs/prompt_versions.md` | Its Current State table had gone stale on six prompts — it carried HC 0.24, funding HC 0.4, aggregation 0.6, relevancy 0.8, classifier 0.14, LC 0.11. Now read from the prompt headers and the stage `_VERSION` constants. **Why it drifted:** `test_prompt_stage_version_parity.py` asserts prompt ↔ stage parity and does not read this document, so nothing holds the table to the repository — it can drift again, and the document now says so |
+| `docs/v3_data_dictionary.md` | The two disclosure axes described the terms axis as one the reference implementation did not carry, and inherited an open `PARTIALLY_DISCLOSED` question into the field vocabulary. Both axes now carry their landed definitions and the three-value vocabulary, with the `PARTIALLY_DISCLOSED` reconciliation moved to the open-items list where it belongs. `use_of_proceeds` is no longer described as unauthored by the funding path |
+| `scripts/run_collection_validation.py` | Its docstring listed `transaction_terms_disclosure_status` as unavailable and neither proxied nor invented. It is now captured and canonical. `seller_sponsor` stays on that list, verified: `transaction_record` carries no sell-side sponsor name |
+
+**Deliberately not corrected:**
+
+| Document | Why it is left alone |
+| --- | --- |
+| `docs/v3_release_manifest.md` · `docs/v3_change_decision_register.md` | Their baseline block (`2e2ccb7` / schema `010` / 47 tests) is the **release identity of `V3-PC-1.0`** — a bill of materials for a dated release, not a claim about today. Moving it would mint a new contract version, which is a Product act and not documentation reconciliation. They also carry no row for the decisions settled in this pass; adding rows and statuses is the reconciliation's job, not a docs sweep's |
+| `docs/project_state.md` | Already banner-marked as a dated 2026-08-14 snapshot and accurate as labelled |
+| `docs/change_log.md` · `docs/*handoff*` · `docs/session_handoff_*` · `docs/grata_v2_*` · `docs/decisions*.md` | Historical records and superseded documents. Their values are correct **as of their own dates**, and rewriting them would destroy the record this package explicitly preserves as the authority for *why* |
 
 The register's own versioning rule governs what happens next: the next reconciliation
 increments to `V3-PC-1.1` (statuses move) or `V3-PC-2.0` (a settled decision is reversed).
 **Nothing in this pass reverses a settled decision**, so `V3-PC-1.1` is the expected
-increment.
+increment, and the manifest's baseline moves there.
 
 ---
 

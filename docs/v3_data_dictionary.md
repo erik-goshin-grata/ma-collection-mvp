@@ -1,6 +1,6 @@
 # Transactions Data Dictionary — Target Model
 
-**Product Contract:** Transactions V3 — `V3-PC-1.0` · **Reconciled:** 2026-08-24
+**Product Contract:** Transactions V3 — `V3-PC-1.0` · **Reconciled:** 2026-08-28
 
 *What the target Transactions data model is, surface by surface, and what changes from
 Grata today. Why a decision was taken lives in the audit layer — see the last section.*
@@ -130,8 +130,8 @@ negative.
 | `is_lbo` | KEEP | Exists | Leveraged buyout characteristic | FLAG | Collected | | |
 | `recap_type` | KEEP | Exists | Recapitalisation sub-type | ENUM — DIVIDEND · EQUITY · LEVERAGED · SPONSOR_RECAP | Collected | | |
 | four `is_*_recap` flags | REMOVE | All four exist | — | — | — | | Each is `recap_type = <value>` |
-| `financials_disclosure_status` | KEEP | Exists | Disclosure state for company financial metrics | ENUM — DISCLOSED · PARTIALLY_DISCLOSED · UNDISCLOSED · UNKNOWN | Collected | `DISCLOSED` = at least one value stated, **not** that everything is known | Vocabulary as recorded in the Grata baseline. The reference implementation carries a three-value subset without `PARTIALLY_DISCLOSED`; that reconciliation is **open** and is not settled here |
-| `transaction_terms_disclosure_status` | ADD | Missing | Disclosure state for deal economics, consideration and value terms | ENUM — same vocabulary as `financials_disclosure_status` | Collected | | **The second disclosure axis — the concept is settled.** Deal terms and company financials are disclosed independently. Its final representation is unresolved: the shared vocabulary inherits the open `PARTIALLY_DISCLOSED` question, and the reference implementation does not yet carry the field |
+| `financials_disclosure_status` | KEEP | Exists | Disclosure state for the **target company's own operating financials** — revenue, EBITDA, ARR and the like. Not the price, the consideration or the deal's terms | ENUM — DISCLOSED · UNDISCLOSED · UNKNOWN | Collected | `DISCLOSED` = at least one target financial figure stated, **not** that everything is known. `UNDISCLOSED` requires the source to say so on this axis; silence is `UNKNOWN` | Answered independently of `transaction_terms_disclosure_status`; neither is evidence for the other. **`PARTIALLY_DISCLOSED` is deliberately not part of the target vocabulary** — the Grata baseline records it, that reconciliation stays open, and adding a fourth value on an open question would freeze it |
+| `transaction_terms_disclosure_status` | ADD | Missing | Disclosure state for the **deal's economics** — value, price, consideration and the terms of the transaction. Not the target's operating financials | ENUM — DISCLOSED · UNDISCLOSED · UNKNOWN, the same vocabulary as `financials_disclosure_status` | Collected | `DISCLOSED` = at least one deal value or term stated. `UNDISCLOSED` requires the source to say so on this axis; silence is `UNKNOWN` | **The second disclosure axis.** Deal terms and company financials are disclosed independently and a mixed answer is the common case, in either direction. "Financial terms were not disclosed" is a claim about the DEAL and is licensed by this field, not by `financials_disclosure_status`. `PARTIALLY_DISCLOSED` is not part of the vocabulary, as above. `value_type = UNDISCLOSED` is untouched and remains a separate affirmative signal on the value axis |
 | `competing_bid` | ADD | Not evidenced in Grata | A competing or topping bid is referenced | FLAG | Collected | | |
 | `regulatory_approvals_required` | ADD | Not evidenced in Grata | Specific regulatory approvals are called out | FLAG | Collected | | |
 | `has_go_shop` · `go_shop_period_days` | ADD | Not evidenced in Grata | Go-shop provision and its duration | FLAG · NUMBER | Collected | Duration null when not stated | |
@@ -282,7 +282,7 @@ keeps that.
 | `is_unicorn_round` | KEEP | Exists | The round establishes or confirms unicorn status | FLAG | **Collected** | | **Collected, not derived.** Sources assert unicorn status without stating a post-money valuation, so deriving it would discard the rows where the claim is the only evidence |
 | `cvc_participation` | KEEP | Exists | A corporate venture arm participated | FLAG | Collected | | |
 | `is_oversubscribed` | KEEP | Exists | The round was oversubscribed | FLAG | Collected | | |
-| `use_of_proceeds` | ADD | Not evidenced in available artifacts | Source-stated intended use of the capital raised | DATA POINT | Collected | Null = not stated | In scope. The reference implementation's funding path does not yet author it — a collection-coverage gap, not a reason to drop the field |
+| `use_of_proceeds` | ADD | Not evidenced in available artifacts | Source-stated intended use of the capital raised | DATA POINT | Collected | Null = not stated | In scope. **The reference implementation's funding path now authors it** (funding HC 0.6): a bounded vocabulary of eleven categories plus `OTHER`, source-stated only, comma-delimited in one scalar, null when unstated |
 | round currency · valuation currency | **BASELINE TO CONFIRM** | `value_currency` exists on the metric row | The currency of the value it belongs to | ISO 4217 | Collected | | **Target requirement settled; Grata delta to confirm.** In the metric-row model each value carries its own currency |
 | **board representation** | **→ Parties & Participants** | — | The investor and the named representative | RELATIONSHIP | Relationship | | Not a funding flag plus free text. It is a participant fact and follows the named-people principle |
 
@@ -525,10 +525,12 @@ reader does not mistake an unresolved representation for a concept Product never
   baseline and no target home chosen.
 - **`target_security_type` vocabulary.** The field is settled; its value set is to be reconciled
   against agreement extraction before it is frozen.
-- **Second transaction-terms disclosure axis.** `transaction_terms_disclosure_status` is a
-  settled concept with prior grounding. Its final vocabulary is unresolved — the baseline
-  records `PARTIALLY_DISCLOSED` on both disclosure fields and the reference implementation does
-  not carry it.
+- **`PARTIALLY_DISCLOSED` on the two disclosure axes.** The Grata baseline records it on both
+  disclosure fields and the target vocabulary is the three values `DISCLOSED · UNDISCLOSED ·
+  UNKNOWN`. Whether the baseline's fourth value has a home is **unresolved and deliberately
+  left so** — it was not adopted on the strength of an open question. The axes themselves are
+  settled and no longer open: `transaction_terms_disclosure_status` is defined above and is
+  carried by the reference implementation.
 - **Agreement `merger_structure` reconciliation.** Agreement extraction carries a single-valued
   `merger_structure`. The target splits that information across `combination_structure` and
   `offer_mechanism`. How the agreement field reconciles against the two target fields is

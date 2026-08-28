@@ -53,8 +53,12 @@ Two clean sheets for Product plus a rejection list. Deliberately excluded:
 `mvp_*` labels, transaction-level `acquirer_type` (buyer classification belongs to
 the participating entity, not the transaction), a repeated RELEVANT column on
 transaction rows, and derived multiples/implied values -- those stay diagnostic in
-the DB. `seller_sponsor` and `transaction_terms_disclosure_status` are unavailable
-in the reference implementation and are neither proxied nor invented.
+the DB. `seller_sponsor` is still unavailable -- `transaction_record` carries no
+sell-side sponsor name, only `sell_side_sponsors` at staging -- and it is neither
+proxied nor invented. `transaction_terms_disclosure_status` WAS listed here on the
+same grounds and no longer belongs: it is captured, canonical and on both sheets as
+of the two-disclosure-axes change. Being genuinely captured is the one way a name
+leaves this list.
 
 Run from project root:
     python scripts/run_collection_validation.py --pages out/collection_20260826/pages \
