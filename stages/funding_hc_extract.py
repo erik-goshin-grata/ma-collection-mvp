@@ -27,14 +27,15 @@ from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_
 from lib.observation_writer import write_staging_observations_for_extraction
 
 _PROMPT_NAME = "funding_hc_extraction"
-_VERSION = "0.6"
+_VERSION = "0.7"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _FUNDING_EVENT_TYPES = frozenset({"VC_ROUND", "GROWTH_EQUITY", "VENTURE_DEBT"})
 
 _REQUIRED_KEYS = frozenset({
     "company", "investors", "round", "dates",
-    "financials_disclosure_status", "model_confidence",
+    "financials_disclosure_status", "transaction_terms_disclosure_status",
+    "model_confidence",
 })
 
 _VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
@@ -59,6 +60,9 @@ def _validate(result: dict) -> str | None:
     fds = result.get("financials_disclosure_status")
     if fds not in _VALID_FINANCIALS_DISCLOSURE:
         return f"invalid financials_disclosure_status: {fds!r}"
+    tds = result.get("transaction_terms_disclosure_status")
+    if tds not in _VALID_FINANCIALS_DISCLOSURE:
+        return f"invalid transaction_terms_disclosure_status: {tds!r}"
 
     investors = result.get("investors")
     if not isinstance(investors, list):
@@ -351,6 +355,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 dt.get("closed_date"),
                 dt.get("closed_date_precision"),
                 txn.get("financials_disclosure_status"),
+                txn.get("transaction_terms_disclosure_status"),
                 txn.get("consideration_type"),
                 pct_acquired,
                 use_of_proceeds,
@@ -388,6 +393,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         closed_date = ?,
                         closed_date_precision = ?,
                         financials_disclosure_status = ?,
+                        transaction_terms_disclosure_status = ?,
                         consideration_type = COALESCE(consideration_type, ?),
                         pct_acquired = ?,
                         use_of_proceeds = ?,
@@ -416,14 +422,15 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         is_extension_round, round_price_direction, is_bridge_round,
                         announced_date, announced_date_precision,
                         closed_date, closed_date_precision,
-                        financials_disclosure_status, consideration_type, pct_acquired,
+                        financials_disclosure_status, transaction_terms_disclosure_status,
+                        consideration_type, pct_acquired,
                         use_of_proceeds,
                         model_confidence, hc_prompt_version, notes,
                         dt_prompt_version,
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     # Explicit param tuple matching the 37-column list above.
@@ -443,7 +450,9 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         1 if rd.get("is_bridge_round") else 0,
                         dt.get("announced_date"), dt.get("announced_date_precision"),
                         dt.get("closed_date"), dt.get("closed_date_precision"),
-                        txn.get("financials_disclosure_status"), txn.get("consideration_type"),
+                        txn.get("financials_disclosure_status"),
+                        txn.get("transaction_terms_disclosure_status"),
+                        txn.get("consideration_type"),
                         pct_acquired,
                         use_of_proceeds,
                         txn.get("model_confidence"), _VERSION,

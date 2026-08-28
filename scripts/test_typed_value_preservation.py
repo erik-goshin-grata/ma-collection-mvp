@@ -111,6 +111,7 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
             "is_merger_of_equals": None,
         },
         "financials_disclosure_status": "DISCLOSED",
+        "transaction_terms_disclosure_status": "DISCLOSED",
         "target_financials": {
             "revenue_amount": 210_000_000,
             "revenue_period_type": "ANNUAL",
@@ -261,6 +262,7 @@ def _insert_second_source_fixture(conn: sqlite3.Connection) -> int:
             "is_merger_of_equals": None,
         },
         "financials_disclosure_status": "DISCLOSED",
+        "transaction_terms_disclosure_status": "DISCLOSED",
         "target_financials": {},
         "model_confidence": "HIGH",
     }

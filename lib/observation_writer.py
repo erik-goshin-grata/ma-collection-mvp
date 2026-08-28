@@ -101,6 +101,7 @@ HC_FIELDS = (
     "target_revenue_period_type_v2",
     "target_ebitda_period_type_v2",
     "financials_disclosure_status",
+    "transaction_terms_disclosure_status",
 )
 
 # `hostile` was removed here on 2026-08-20 (V3 §T11). Stage 7 no longer writes that

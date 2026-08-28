@@ -89,6 +89,7 @@ def _txn(target: str, acquirer: str) -> dict:
             "currency": None,
         },
         "financials_disclosure_status": "UNDISCLOSED",
+        "transaction_terms_disclosure_status": "UNDISCLOSED",
         "consideration_type": None,
         "model_confidence": "HIGH",
         "notes": "Two acquisitions announced in the same release.",

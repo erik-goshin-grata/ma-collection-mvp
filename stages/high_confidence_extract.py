@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.35"
+_VERSION = "0.36"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -56,6 +56,7 @@ _REQUIRED_KEYS = frozenset({
     "model_confidence",
     "deal",
     "financials_disclosure_status",
+    "transaction_terms_disclosure_status",
 })
 # TOLERANCE, NOT AUTHORIZATION. `MARKET_CAPITALIZATION` is retired from the delivered
 # vocabulary (prompt 0.28): a market cap is not a deal-value fact, and Product never
@@ -231,6 +232,12 @@ def _validate(result: dict) -> str | None:
     fds = result.get("financials_disclosure_status")
     if fds not in _VALID_FINANCIALS_DISCLOSURE:
         return f"invalid financials_disclosure_status: {fds!r}"
+    # The second axis takes the same vocabulary and the same required-ness. Answered
+    # separately from the first: a source states the target's financials and the deal's
+    # terms independently, and neither is evidence for the other.
+    tds = result.get("transaction_terms_disclosure_status")
+    if tds not in _VALID_FINANCIALS_DISCLOSURE:
+        return f"invalid transaction_terms_disclosure_status: {tds!r}"
 
     # consideration_type — optional but must be valid if present
     ct = result.get("consideration_type")
@@ -713,6 +720,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 tf.get("cash_st_currency"),
                 tf.get("balance_sheet_as_of_date"),
                 txn.get("financials_disclosure_status"),  # new
+                txn.get("transaction_terms_disclosure_status"),
                 txn.get("consideration_type"),            # new (direct from prompt)
                 txn.get("model_confidence"), _VERSION, json.dumps(nd) if nd else None,
             )
@@ -756,6 +764,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         cash_st = ?,  cash_st_currency = ?,
                         balance_sheet_as_of_date = ?,
                         financials_disclosure_status = ?,
+                        transaction_terms_disclosure_status = ?,
                         consideration_type = COALESCE(consideration_type, ?),
                         model_confidence = ?,  hc_prompt_version = ?,  notes = ?,
                         multi_transaction_index = ?,  multi_transaction_total = ?,
@@ -815,13 +824,14 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         cash_st, cash_st_currency,
                         balance_sheet_as_of_date,
                         financials_disclosure_status,
+                        transaction_terms_disclosure_status,
                         consideration_type,
                         model_confidence, hc_prompt_version, notes,
                         dt_prompt_version,
                         multi_transaction_index, multi_transaction_total,
                         created_at, updated_at
                     ) VALUES (
-                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                        ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                     )
                     """,
                     (row["source_raw_id"], "HC_EXTRACTED",

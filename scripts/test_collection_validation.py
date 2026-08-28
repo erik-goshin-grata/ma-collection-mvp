@@ -246,9 +246,9 @@ def main() -> None:
     # merely hidden. Sheet 1.2 adds one more M&A column, deal_rationale, once Stage 13
     # became part of the run. The counts stay pinned so a column set cannot drift
     # silently; they move only alongside a _REVIEW_SHEET_VERSION bump, asserted with them.
-    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.2")
-    check("M&A column count is 84", len(fv._MA_COLS), 84)
-    check("Funding column count is 45", len(fv._FUNDING_COLS), 45)
+    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.3")
+    check("M&A column count is 85", len(fv._MA_COLS), 85)
+    check("Funding column count is 46", len(fv._FUNDING_COLS), 46)
     check("M&A row emits exactly the declared columns", list(ma[0].keys()), fv._MA_COLS)
     check("Funding row emits exactly the declared columns",
           list(funding[0].keys()), fv._FUNDING_COLS)
@@ -288,9 +288,12 @@ def main() -> None:
                 "implied_equity_value", "implied_enterprise_value"):
         check(f"derived {col} stays diagnostic",
               col in fv._MA_COLS or col in fv._FUNDING_COLS, False)
-    # Confirmed reference gaps: absent, and not proxied by a lookalike.
+    # transaction_terms_disclosure_status left this list when the second disclosure
+    # axis was added: it is now genuinely captured rather than proxied, which is the
+    # one way a name may leave a not-invented list. `seller_sponsor` stays -- it is
+    # still unavailable, and a lookalike would still be an invention.
     for col in ("seller_sponsor", "seller_sponsor_name",
-                "transaction_terms_disclosure", "transaction_terms_disclosure_status"):
+                "transaction_terms_disclosure"):
         check(f"unavailable {col} not invented",
               col in fv._MA_COLS or col in fv._FUNDING_COLS, False)
     check("financials_disclosure_status kept under its own name, not repurposed",

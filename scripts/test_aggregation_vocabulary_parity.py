@@ -84,6 +84,8 @@ EXCLUDED = {
     "target_revenue_period_type": "listed as period_type, which carries its own LTM/NTM rule",
     "target_ebitda_period_type": "listed as period_type, which carries its own LTM/NTM rule",
     "financials_disclosure_status": "listed in the prompt's existing context vocabulary",
+    "transaction_terms_disclosure_status": "the second disclosure axis; same "
+        "vocabulary as financials_disclosure_status, listed with it",
     "announced_date_precision": "listed as date_precision",
     "closed_date_precision": "listed as date_precision",
     "signing_date_precision": "listed as date_precision",
@@ -117,6 +119,8 @@ _FIELD_ENUMS = {
     "sponsor_transaction_role": hc._VALID_SPONSOR_TRANSACTION_ROLE,
     "stake_transition_type": hc._VALID_STAKE_TRANSITION_TYPES,
     "financials_disclosure_status": hc._VALID_FINANCIALS_DISCLOSURE,
+    "transaction_terms_disclosure_status": hc._VALID_FINANCIALS_DISCLOSURE,
+    "transaction_terms_disclosure_status": hc._VALID_FINANCIALS_DISCLOSURE,
     "announced_date_precision": hc._VALID_DATE_PRECISIONS,
     "closed_date_precision": hc._VALID_DATE_PRECISIONS,
     "signing_date_precision": hc._VALID_DATE_PRECISIONS,

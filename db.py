@@ -363,6 +363,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "reported_multiples" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "013_v3_reported_multiples.sql").read_text(encoding="utf-8"))
 
+    # 020 (second disclosure axis: transaction terms). Column sentinel.
+    if "transaction_terms_disclosure_status" not in _existing("staging_extraction"):
+        conn.executescript((_mig_dir / "020_v3_transaction_terms_disclosure.sql").read_text(encoding="utf-8"))
+
     # 019 (seller participation). Column sentinel.
     if "sellers" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "019_v3_seller_participation.sql").read_text(encoding="utf-8"))

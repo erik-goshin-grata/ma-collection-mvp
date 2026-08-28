@@ -240,6 +240,7 @@ def _hc_result(stake_transition_type):
         },
         "target_financials": {},
         "financials_disclosure_status": "UNKNOWN",
+        "transaction_terms_disclosure_status": "UNKNOWN",
         "model_confidence": "HIGH",
     }
 

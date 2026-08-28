@@ -23,7 +23,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "deal_summary"
-_VERSION = "0.16"
+_VERSION = "0.17"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 # prompt_version is NOT here: provenance is caller-owned, stamped from _FULL_VERSION
 # below. Requiring it rejected otherwise valid responses for omitting a field the
@@ -258,6 +258,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # claims. Its canonical meaning is narrow and the prompt says so: DISCLOSED is
             # "at least one financial value is stated", NOT "all terms are known".
             financials_disclosure_status=_f(tr["financials_disclosure_status"]),
+            transaction_terms_disclosure_status=_f(
+                tr["transaction_terms_disclosure_status"]),
             advisors_summary=_f(advisors_summary),
         )
 

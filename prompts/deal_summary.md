@@ -1,6 +1,6 @@
 # Deal Summary Prompt
 
-**Version:** 0.16 (funding round facts reach the summary)
+**Version:** 0.17 (two disclosure axes)
 **Repo path:** `prompts/deal_summary.md`
 
 ---
@@ -117,6 +117,7 @@ values are lowercase. `SPIN_SPLIT` replaced by `SPIN_OFF` / `SPLIT_OFF`.
     "use_of_proceeds": null
   },
   "financials_disclosure_status": "DISCLOSED",
+  "transaction_terms_disclosure_status": "UNDISCLOSED",
   "advisors_summary": "Goldman Sachs and Wachtell, Lipton, Rosen & Katz advised Acme; Morgan Stanley and Kirkland & Ellis advised Beta."
 }
 ```
@@ -126,8 +127,10 @@ round facts on VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT events. Every member is p
 through as stored: null means the fact is not established, never a disclosed zero and
 never a denial.
 
-`financials_disclosure_status` is source-level and narrow: DISCLOSED means at least one
-financial value was stated, not that every term is known.
+`financials_disclosure_status` and `transaction_terms_disclosure_status` are source-level
+and narrow, and they are separate axes: the first is the target's operating financials,
+the second the deal's value and terms. DISCLOSED on either means at least one relevant
+fact on THAT axis was stated, not that every term is known.
 
 **Orchestrator-derived fields passed to this prompt:**
 - `consideration_type` — derived enum — {CASH, STOCK, CASH_AND_STOCK, ELECTION, OTHER}.
@@ -295,22 +298,34 @@ must not be merged, substituted for one another, or added together.
 
 FUNDING DISCLOSURE, and disclosure generally
 
-FINANCIALS DISCLOSURE carries the canonical financials_disclosure_status, whose
-meaning is narrow and must not be widened:
+TWO DISCLOSURE AXES ARRIVE, AND THEY ANSWER DIFFERENT QUESTIONS.
 
-- UNDISCLOSED — the source EXPLICITLY stated terms were not disclosed. This is
-  the only value that licenses "Financial terms were not disclosed" on its own.
-- DISCLOSED — AT LEAST ONE financial value is stated. It does NOT mean every
-  term is known. Never treat it as a warrant that nothing is missing, and never
-  use it to claim completeness.
-- UNKNOWN — the source is silent on financials, neither stating nor denying.
+TRANSACTION TERMS DISCLOSURE is about the DEAL — its value, price, consideration
+and terms. FINANCIALS DISCLOSURE is about the TARGET's own operating financials —
+revenue, EBITDA and the like.
+
+They are independent, and a source routinely settles them differently. Do not read
+one as evidence about the other, and do not merge them into a single statement.
+
+Both use the same narrow vocabulary, which must not be widened:
+
+- UNDISCLOSED — the source EXPLICITLY declined to state that axis.
+- DISCLOSED — AT LEAST ONE relevant fact on that axis is stated. It does NOT mean
+  everything on that axis is known. Never treat it as a warrant that nothing is
+  missing, and never use it to claim completeness.
+- UNKNOWN — the source is silent on that axis, neither stating nor denying.
   Silent, not undisclosed. Say nothing about disclosure.
 
-Affirmative non-disclosure language requires an affirmative signal: either
-FINANCIALS DISCLOSURE = UNDISCLOSED, or value_type = UNDISCLOSED. Absent, empty
-or null input is NOT such a signal. A canonical null means the fact was not
-established, which is not the same as the source having declined to state it —
-so when a fact is missing, write less, and never assert that it was withheld.
+"Financial terms were not disclosed" IS A CLAIM ABOUT THE DEAL. It is licensed by
+TRANSACTION TERMS DISCLOSURE = UNDISCLOSED, or by value_type = UNDISCLOSED.
+FINANCIALS DISCLOSURE = UNDISCLOSED does NOT license it — that value says the
+TARGET's own financials were withheld, which is a different sentence and must be
+written as one.
+
+Absent, empty or null input is NOT an affirmative signal on either axis. A
+canonical null means the fact was not established, which is not the same as the
+source having declined to state it — so when a fact is missing, write less, and
+never assert that it was withheld.
 
 Tier guard: transaction value and stake-level equity value describe what changed
 hands. They are not financial-multiple numerators. EV/Revenue and EV/EBITDA
@@ -377,6 +392,7 @@ GO-SHOP: {go_shop_json}
 TERMINATION FEES: {termination_fees_json}
 FUNDING: {funding_json}
 FINANCIALS DISCLOSURE: {financials_disclosure_status}
+TRANSACTION TERMS DISCLOSURE: {transaction_terms_disclosure_status}
 
 TARGET FINANCIALS:
 - Revenue: {target_revenue} ({target_revenue_period})
@@ -568,3 +584,4 @@ Output:
 | 0.14 | 2026-08-21 | **Example 3's `TARGET TYPE: spinco` corrected to `subsidiary`; `MINORITY_INVESTMENT` framing labelled as legacy-row compatibility.** V3 §T3 removed `spinco`, so a worked example supplying it taught an input the summary can never receive. `subsidiary` follows from the example's own stated facts — a distributed entity with `TARGET STATUS: SUBSIDIARY_OF_PUBLIC`, typed on its structural merits as §T3 requires — so no new Product semantics are introduced. `MINORITY_INVESTMENT` keeps its framing rule, now explicitly marked as compatibility for stored rows rather than a current classifier output. |
 | 0.15 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.16 | 2026-08-22 | **Canonical funding fields reach the summary; non-disclosure language now requires an affirmative signal.** Every funding field was already fetched by `SELECT tr.*` and then dropped: the template had no funding placeholder, and the words "funding", "round" and "Series" appeared nowhere in the delivered system prompt. Funding events also derive no transaction value by design -- a round is primary capital, not a purchase price -- so the VALUE block arrived null, the model met VALUE FRAMING's `UNDISCLOSED` line, and asserted "Financial terms were not disclosed" on rounds whose size, valuation and total-raised were all correctly stored. In the PL integration run that was 4 of 7 funding transactions, including Castelion ($800M Series C equity + $250M facility + $13B post-money) and Rillet ($100M at $1B post-money). **Added:** `FUNDING: {funding_json}` carrying `round_label`, `round`, `vc_stage`, `round_size`, `round_currency`, `pre_money_valuation`, `post_money_valuation`, `valuation_currency`, `facility_size`, `total_raised_to_date`, `round_price_direction`, `is_extension_round`, `is_bridge_round`, `use_of_proceeds`, passed through uncoerced so a null stays null; and `FINANCIALS DISCLOSURE: {financials_disclosure_status}` for every deal type, the only affirmative disclosure signal this prompt has ever had. **Rules:** a VC_ROUND / GROWTH_EQUITY / VENTURE_DEBT deal-type framing entry; a null `value_type` on a funding event is categorically inapplicable rather than undisclosed; FUNDING FRAMING keeps `round_size` (this round), `total_raised_to_date` (cumulative), `facility_size` (a separate instrument) and the valuations (what the company is worth, not what it raised) as distinct facts that may not be merged or summed; up/down framing uses the canonical `round_price_direction` and there is no `is_down_round` to invent; `is_extension_round` / `is_bridge_round` license positive framing when true and silence when false. **Disclosure semantics are deliberately narrow:** only `UNDISCLOSED` -- from `financials_disclosure_status` or `value_type` -- licenses "Financial terms were not disclosed". `DISCLOSED` means at least one financial value was stated, NOT that every term is known, and is never a claim of completeness; `UNKNOWN` is silence. A canonical null means not established, which is not the source declining to state it, so a missing fact means write less -- never assert it was withheld. |
+| 0.17 | 2026-08-27 | **Two disclosure axes arrive, and the non-disclosure licence moves to the right one.** "Financial terms were not disclosed" is a claim about the DEAL, so it is licensed by `transaction_terms_disclosure_status = UNDISCLOSED` or `value_type = UNDISCLOSED`. `financials_disclosure_status = UNDISCLOSED` no longer licenses it: that value says the TARGET's own financials were withheld, which is a different sentence and must be written as one. Previously one field answered both questions, so a source that withheld its revenue could license a claim about the price it never made. Both axes keep the narrow vocabulary -- DISCLOSED is at least one relevant fact on that axis and never completeness, UNKNOWN is silence -- and a null on either remains not-established rather than withheld. |

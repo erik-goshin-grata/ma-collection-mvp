@@ -283,15 +283,15 @@ def test_unchanged() -> None:
         financials_currency="USD", log=log, cluster_id="c2")
     check("no EV still NOT_CALCULABLE", r["multiple_quality"], "NOT_CALCULABLE")
 
-    check("Stage 9 still owns 120 canonical columns",
-          len(getattr(agg, "_STAGE9_OWNED_COLUMNS", ())), 120)
+    check("Stage 9 still owns 121 canonical columns",
+          len(getattr(agg, "_STAGE9_OWNED_COLUMNS", ())), 121)
     check("the flat financial columns are still Stage 9's",
           all(c in agg._STAGE9_OWNED_COLUMNS
               for c in ("target_revenue", "target_ebitda", "financials_currency")), True)
     check("no metric row field leaked into the column list",
           any(c in agg._STAGE9_OWNED_COLUMNS
               for c in ("value_captured", "metric_type", "is_calculated")), False)
-    check("aggregate version is 0.12", agg._VERSION, "0.12")
+    check("aggregate version is 0.13", agg._VERSION, "0.13")
 
     print("\nBalance-sheet metrics are deliberately not written:")
     src = (ROOT / "stages" / "aggregate.py").read_text(encoding="utf-8")

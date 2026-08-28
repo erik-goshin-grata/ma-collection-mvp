@@ -84,6 +84,7 @@ def _fund(**over) -> dict:
         "round": rnd,
         "dates": {"announced_date": "2026-05-04", "announced_date_precision": "exact"},
         "financials_disclosure_status": "DISCLOSED",
+        "transaction_terms_disclosure_status": "DISCLOSED",
         "model_confidence": "HIGH",
     }
 

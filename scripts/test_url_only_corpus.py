@@ -230,9 +230,9 @@ def test_untouched(fv) -> None:
     check("still exactly one INSERT", len(re.findall(r"INSERT INTO", src)), 1)
     check("and it is into source_raw", "INSERT INTO source_raw" in src, True)
     check("still the same stage list", len(fv.PIPELINE), 9)
-    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.2")
-    check("M&A sheet 84 columns", len(fv._MA_COLS), 84)
-    check("funding sheet still 45 columns", len(fv._FUNDING_COLS), 45)
+    check("review sheet version", fv._REVIEW_SHEET_VERSION, "1.3")
+    check("M&A sheet 85 columns", len(fv._MA_COLS), 85)
+    check("funding sheet still 46 columns", len(fv._FUNDING_COLS), 46)
     check("never writes to transaction_record",
           bool(re.search(r"(UPDATE|DELETE\s+FROM)\s+transaction_record", src)), False)
 

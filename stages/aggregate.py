@@ -45,7 +45,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "aggregation"
-_VERSION = "0.12"
+_VERSION = "0.13"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _CONF_RANK = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
@@ -132,6 +132,7 @@ _FIELDS = [
     ("cash_st_currency", "string"),
     ("balance_sheet_as_of_date", "date"),
     ("financials_disclosure_status", "string"),
+    ("transaction_terms_disclosure_status", "string"),
     ("consideration_components", "json"),
     ("hostile", "boolean"),          # legacy; no longer written by Stage 7 (V3 §T11)
     ("deal_attitude", "string"),     # FRIENDLY | HOSTILE | null
@@ -2088,6 +2089,7 @@ _STAGE9_OWNED_COLUMNS: tuple[str, ...] = (
     "target_ebitda_period_end",
     "financials_currency",
     "financials_disclosure_status",
+    "transaction_terms_disclosure_status",
     "ev_to_revenue_ltm",
     "ev_to_revenue_ntm",
     "ev_to_ebitda_ltm",
@@ -2483,6 +2485,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     field_values.get("target_ebitda_period_end"),
                     field_values.get("financials_currency"),
                     field_values.get("financials_disclosure_status"),
+                    field_values.get("transaction_terms_disclosure_status"),
                     multiples["ev_to_revenue_ltm"],
                     multiples["ev_to_revenue_ntm"],
                     multiples["ev_to_ebitda_ltm"],

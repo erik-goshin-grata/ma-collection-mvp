@@ -224,7 +224,7 @@ def main() -> None:
     check("declared retired from authoring", "MARKET_CAPITALIZATION" in retired, True)
     base = {"target": {}, "acquirer": {}, "parent_seller": {}, "dates": {}, "value": {},
             "deal": {}, "features": {}, "target_financials": {},
-            "financials_disclosure_status": "UNKNOWN", "model_confidence": "HIGH",
+            "financials_disclosure_status": "UNKNOWN", "transaction_terms_disclosure_status": "UNKNOWN", "model_confidence": "HIGH",
             "reported_multiples": [],
             "acquirers": [],
             "buy_side_sponsors": [],

@@ -188,6 +188,7 @@ def _hc_result(*, with_stake_equity: bool) -> dict:
             "is_merger_of_equals": None,
         },
         "financials_disclosure_status": "DISCLOSED",
+        "transaction_terms_disclosure_status": "DISCLOSED",
         "target_financials": {},
         "model_confidence": "HIGH",
     }

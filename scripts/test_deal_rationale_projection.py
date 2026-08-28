@@ -219,9 +219,9 @@ def test_column(fv) -> None:
     check("deal_rationale is an M&A column", "deal_rationale" in fv._MA_COLS, True)
     check("it is not a Funding column -- Stage 13 tags acquisitions",
           "deal_rationale" in fv._FUNDING_COLS, False)
-    check("M&A sheet is 84 columns", len(fv._MA_COLS), 84)
-    check("Funding sheet is unchanged at 45", len(fv._FUNDING_COLS), 45)
-    check("sheet version bumped to 1.2", fv._REVIEW_SHEET_VERSION, "1.2")
+    check("M&A sheet is 85 columns", len(fv._MA_COLS), 85)
+    check("Funding sheet is unchanged at 46", len(fv._FUNDING_COLS), 46)
+    check("sheet version bumped to 1.3", fv._REVIEW_SHEET_VERSION, "1.3")
 
     # It reads beside the summary, because that is what a reviewer reads it with.
     # Guarded: on a pre-change tree the column is absent and .index() would raise

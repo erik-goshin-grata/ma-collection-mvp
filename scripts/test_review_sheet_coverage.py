@@ -134,11 +134,11 @@ def main() -> int:
     # ------------------------------------------------------- 1. the approved shape
     print("\nThe approved column set, exactly:")
     # 83 at sheet 1.1; deal_rationale made it 84 when Stage 13 joined the run.
-    check("M&A sheet is 84 columns", len(ma), 84)
-    check("funding sheet is 45 columns", len(funding), 45)
+    check("M&A sheet is 85 columns", len(ma), 85)
+    check("funding sheet is 46 columns", len(funding), 46)
     check("no duplicate M&A columns", len(ma), len(ma_set))
     check("no duplicate funding columns", len(funding), len(funding_set))
-    check("review sheet version", getattr(h, "_REVIEW_SHEET_VERSION", None), "1.2")
+    check("review sheet version", getattr(h, "_REVIEW_SHEET_VERSION", None), "1.3")
 
     print("\nThe 22 M&A facts sheet 1.1 surfaces:")
     for col in _ADDED_MA:
@@ -196,8 +196,8 @@ def main() -> int:
 
     # ------------------------------------------------------- 5. presentation only
     print("\nProjecting a sheet stores nothing:")
-    check("Stage 9 still owns 120 canonical columns",
-          len(aggregate._STAGE9_OWNED_COLUMNS), 120)
+    check("Stage 9 still owns 121 canonical columns",
+          len(aggregate._STAGE9_OWNED_COLUMNS), 121)
     check("the harness writes to exactly one table",
           len(re.findall(r"INSERT INTO", src)), 1)
     check("and that table is source_raw", "INSERT INTO source_raw" in src, True)

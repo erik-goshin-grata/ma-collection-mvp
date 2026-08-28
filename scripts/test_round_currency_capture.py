@@ -71,6 +71,7 @@ def _run() -> int:
                               "post_money_valuation": 250000000, "valuation_currency": "EUR"},
                     "dates": {"announced_date": "2026-08-01"},
                     "financials_disclosure_status": "DISCLOSED",
+                    "transaction_terms_disclosure_status": "DISCLOSED",
                     "model_confidence": "HIGH",
                 },
                 {  # INSERT branch (i>0) — round currency GBP
@@ -79,6 +80,7 @@ def _run() -> int:
                     "round": {"label": "Seed", "size": 3000000, "currency": "GBP"},
                     "dates": {"announced_date": "2026-08-01"},
                     "financials_disclosure_status": "DISCLOSED",
+                    "transaction_terms_disclosure_status": "DISCLOSED",
                     "model_confidence": "HIGH",
                 },
             ]

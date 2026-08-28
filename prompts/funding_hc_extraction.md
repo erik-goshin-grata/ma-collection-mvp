@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.6 (`use_of_proceeds` is a bounded vocabulary)
+**Version:** 0.7 (the terms axis reaches funding)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -172,12 +172,40 @@ dates:
   Null when pending close or close date not stated.
 - closed_date_precision: exact | month | quarter | year | null
 
-FINANCIALS DISCLOSURE STATUS
+DISCLOSURE — TWO AXES, ANSWERED SEPARATELY
+
+A source discloses the company's own financials and the round's terms
+independently, and these two fields record them independently. Answer each from
+what the source says about THAT axis only. One is never evidence for the other.
 
 financials_disclosure_status:
-- DISCLOSED — at least one financial value (round size, valuation) is stated
-- UNDISCLOSED — source explicitly states terms are not disclosed
-- UNKNOWN — source is silent on financials
+The COMPANY's own operating financials — ARR, revenue, EBITDA, growth rates and
+the like. NOT the round size, the valuation or the round's terms.
+- DISCLOSED — at least one company financial figure is stated
+- UNDISCLOSED — the source explicitly says the company's financials are not being
+  disclosed
+- UNKNOWN — the source is silent on the company's financials, neither stating nor
+  denying
+
+transaction_terms_disclosure_status:
+The ROUND's economics — round size, pre- and post-money valuation, facility size,
+and the terms of the financing. NOT the company's operating financials.
+- DISCLOSED — at least one round value or term is stated
+- UNDISCLOSED — the source explicitly says terms were not disclosed ("the round
+  size was not disclosed," "terms of the financing were not announced")
+- UNKNOWN — the source is silent on the round's terms, neither stating nor denying
+
+DISCLOSED DOES NOT MEAN COMPLETE. On either axis it means at least one relevant
+fact was stated, never that everything is known.
+
+UNDISCLOSED REQUIRES THE SOURCE TO SAY SO. Silence is UNKNOWN, on both axes. A
+round that simply never mentions a valuation has not declined to state one.
+
+THE MIXED ANSWER IS ORDINARY. A release announcing "$50 million Series B" and
+nothing about the company's numbers is transaction_terms_disclosure_status =
+DISCLOSED and financials_disclosure_status = UNKNOWN — the most common funding
+release there is. A round that states "$20 million in ARR" while withholding the
+round size is the reverse. Do not copy one answer into the other field.
 
 CONSIDERATION TYPE
 
@@ -357,7 +385,8 @@ code fences, no preamble.
         "closed_date": "2026-07-15",
         "closed_date_precision": "exact"
       },
-      "financials_disclosure_status": "DISCLOSED",
+      "financials_disclosure_status": "UNKNOWN",
+      "transaction_terms_disclosure_status": "DISCLOSED",
       "consideration_type": "equity",
       "pct_acquired": null,
       "use_of_proceeds": "HIRING, PRODUCT_AND_TECHNOLOGY",
@@ -436,6 +465,7 @@ Extract all funding transactions from this source.
         "closed_date_precision": "exact | month | quarter | year | null"
       },
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
+      "transaction_terms_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "equity | safe | convertible_note | debt | warrant | null",
       "pct_acquired": "number | null",
       "use_of_proceeds": "comma-separated subset of HIRING | PRODUCT_AND_TECHNOLOGY | MANUFACTURING_AND_SUPPLY_CHAIN | GO_TO_MARKET | MARKET_EXPANSION | FACILITIES_AND_EQUIPMENT | REGULATORY_AND_COMPLIANCE | ACQUISITIONS | DEBT_REPAYMENT | WORKING_CAPITAL | GENERAL_CORPORATE | OTHER, or null",
@@ -944,6 +974,8 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | Model conflates facility_size and round.size for VENTURE_DEBT | Example 3 addresses; notes field captures |
 | Model returns SAFE for all pre-seed rounds regardless of source language | Example 5 note flags that this is an inference; monitor via QA |
 | Legacy uppercase investor_type (VC_FIRM etc.) | Parser normalizes to lowercase; logs warning |
+| `financials_disclosure_status` or `transaction_terms_disclosure_status` missing | Parser rejects — both axes are required |
+| Model reports a stated round size as `financials_disclosure_status = DISCLOSED` | Round size is the TERMS axis; the prompt says so and works the mixed answer both ways |
 
 ---
 
@@ -957,3 +989,4 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | 0.4 | 2026-08-24 | **`pct_acquired` added to the funding contract.** The funding path had no author for it: Stage 4 excludes funding event types and Stage 4b never asked, so an explicitly stated stake — routine in growth equity — was lost even though the staging column, the observation group and the canonical column all already carried it. The field is **stated or null**: majority/control framing, acquisition framing, and any computation from round size and valuation are all explicitly forbidden, and an unstated percentage is never rounded to 100. Example 2 already described a stated 65% in prose because the response had nowhere to put it; it now carries the value. |
 | 0.5 | 2026-08-26 | **`use_of_proceeds` added to the funding contract.** A V3 §7 `ADD` field — "source-stated intended use of the capital raised" — with a staging column, a place in the funding observation group, a canonical column Stage 9 owns and a slot on the funding review sheet, and no author anywhere. It was drafted in full for a **Funding LC** stage the design never called for; that prompt was archived to `docs/` and the columns outlived it. Both of this prompt's own worked examples contain the sentence — "the proceeds will be used to expand the company's sales team and accelerate product development" — in a contract that never asked for it. **Field-like, not prose**, by Product ruling: explicitly stated uses only, each a one- or two-word noun phrase with the verb, possessive and promotional wording stripped, every distinct use preserved comma-separated in the order stated, and null when unstated. The scalar `TEXT` datatype is preserved — V3 types it `DATA POINT`, not a repeating relationship — so multiple uses share one field, following the comma-delimit convention this repository already uses for co-sponsors. Growth, strategy and momentum framing states no use and yields null; a stated-but-broad use like "general corporate purposes" is captured as stated, because the test is whether the source states a use, not whether the use is specific. `has_board_seat` and `board_seat_notes` were drafted alongside it and are deliberately NOT added: V3 lists a flat board-representation flag and note as residue, superseded by a participant relationship with the named representative. |
 | 0.6 | 2026-08-27 | **`use_of_proceeds` becomes a bounded vocabulary.** 0.5 asked for one- or two-word noun phrases in the source's own words, and a review of seven fresh funding rows showed the predictable result: the model normalized honestly but had no bound, so one release produced ten items including five separate "...capabilities" and both "customer deliveries" and "customer deployments", while others ran to four words. Free text cannot be aggregated, compared across rows, or conflict-resolved. The fix is not a length rule. Eleven categories plus `OTHER` are **enumerated from the vocabulary the sources actually use** -- the method `advisor_specialty` established -- and every one is evidenced by real phrasing in the funding corpus except `ACQUISITIONS`, `DEBT_REPAYMENT` and `WORKING_CAPITAL`, added on Product ruling as common and materially distinct uses that should not route through `OTHER`. Designed on the `strategic_rationale` pattern: bounded taxonomy, source-stated evidence only, `OTHER` as the honest fallback -- but **flat rather than primary-plus-secondary**, because a round's proceeds genuinely split several ways with no ranking stated. Two boundaries are written out because the corpus turns on them: headcount is `HIRING` whatever the department, and building is `PRODUCT_AND_TECHNOLOGY` while selling is `GO_TO_MARKET`, with sources spanning both returning both. **Unchanged:** the source-stated-only gate, null when unstated, the scalar `TEXT` datatype and its comma-delimited representation, and V3's `DATA POINT` typing. No schema change. |
+| 0.7 | 2026-08-27 | **The second disclosure axis reaches the funding path too.** `transaction_terms_disclosure_status` joins `financials_disclosure_status` with the same vocabulary and the same required-ness, so a round whose size was withheld is distinguishable from one whose company financials were. **`financials_disclosure_status` narrows on this path**: it was defined here as "at least one financial value (round size, valuation) is stated", which is the round's terms and not the company's numbers at all. It now means the company's own operating financials -- ARR, revenue, EBITDA -- and the round's economics move to the new field. The §4 worked example moves with the definition. The most common funding release states a round size and no company financials, which is DISCLOSED terms and UNKNOWN financials, and the prompt works that case explicitly because copying one answer into the other field is the failure this correction exists to prevent. Both write paths carry it -- this stage keeps two separate parameter tuples by design, and a field added to one and not the other vanishes from every multi-transaction source. |

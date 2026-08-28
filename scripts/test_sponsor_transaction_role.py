@@ -108,6 +108,7 @@ def _hc(**deal_over) -> dict:
         "features": {"is_secondary_buyout": None, "is_merger_of_equals": None},
         "target_financials": {},
         "financials_disclosure_status": "UNKNOWN",
+        "transaction_terms_disclosure_status": "UNKNOWN",
         "model_confidence": "HIGH",
     }
 

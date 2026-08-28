@@ -559,8 +559,8 @@ def test_no_drift() -> None:
     check("user template unchanged in shape", "{title}" in prompt["user_template"], True)
 
     print("\nR1.2 changed no derivation — the reference layer only became observable:")
-    check("Stage 9 still owns 120 canonical columns",
-          len(aggregate._STAGE9_OWNED_COLUMNS), 120)
+    check("Stage 9 still owns 121 canonical columns",
+          len(aggregate._STAGE9_OWNED_COLUMNS), 121)
     # This pinned the branch's docstring verbatim to prove R1.2 had not touched the
     # derivation, which is still true and is what the line asserts. The wording itself
     # moved in aggregation 0.11: the branch no longer keys on a percentage at all.

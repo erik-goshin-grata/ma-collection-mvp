@@ -156,7 +156,7 @@ def test_prompt() -> None:
           "target_type is subsidiary, business_unit or assets" in flat, True)
     check("only buyers carry a type",
           "no per-party attribute" in flat or "type: that firm's own classification" in flat, True)
-    check("prompt version is 0.35", hc._VERSION, "0.35")
+    check("prompt version is 0.36", hc._VERSION, "0.36")
 
 
 # ---------------------------------------------------------------------------
@@ -394,9 +394,9 @@ def test_boundaries() -> None:
           "Priority Dispatch" in text and "decomposition" in text, True)
 
     print("\nNothing else moved:")
-    check("Stage 9 still owns 120 canonical columns",
-          len(getattr(agg, "_STAGE9_OWNED_COLUMNS", ())), 120)
-    check("aggregate version unchanged at 0.12", agg._VERSION, "0.12")
+    check("Stage 9 still owns 121 canonical columns",
+          len(getattr(agg, "_STAGE9_OWNED_COLUMNS", ())), 121)
+    check("aggregate version unchanged at 0.13", agg._VERSION, "0.13")
 
 
 def main() -> int:

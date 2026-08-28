@@ -382,7 +382,7 @@ def sources_by_transaction(conn) -> dict:
 # so a sheet can be tied to the columns that produced it -- otherwise a 61-column and an
 # 83-column ma_review.csv are indistinguishable after the fact. Deliberately NOT a column:
 # it describes the sheet, not any transaction.
-_REVIEW_SHEET_VERSION = "1.2"
+_REVIEW_SHEET_VERSION = "1.3"
 
 # Column order is the review order. Lifecycle scalars are displayed under readable
 # names -- status/announced_date/closed_date -- while their MVP provenance stays in
@@ -410,7 +410,7 @@ _MA_COLS = [
     "value_amount", "value_currency", "value_type", "deal_value_currency",
     "target_revenue", "target_revenue_period_type", "target_revenue_period_end",
     "target_ebitda", "target_ebitda_period_type", "target_ebitda_period_end",
-    "financials_currency", "financials_disclosure_status",
+    "financials_currency", "financials_disclosure_status", "transaction_terms_disclosure_status",
     "is_take_private", "is_going_private_outcome",
     "is_secondary_buyout", "is_merger_of_equals", "hostile",
     "deal_attitude", "approach_type", "competing_bid", "regulatory_approvals_required",
@@ -439,7 +439,7 @@ _FUNDING_COLS = [
     "funding_advisors", "advisors_side_not_established",
     "target_revenue", "target_revenue_period_type",
     "target_ebitda", "target_ebitda_period_type",
-    "financials_currency", "financials_disclosure_status",
+    "financials_currency", "financials_disclosure_status", "transaction_terms_disclosure_status",
     "deal_summary",
     "overall_review", "missing_or_wrong_fields", "review_notes",
 ]

@@ -557,7 +557,7 @@ def test_unchanged() -> None:
     print("\nThe canonical column set did not move:")
     owned = getattr(agg, "_STAGE9_OWNED_COLUMNS", None)
     if owned is not None:
-        check("Stage 9 still owns 120 columns", len(owned), 120)
+        check("Stage 9 still owns 121 columns", len(owned), 121)
         check("no multiple row field leaked into the column list",
               any(c in owned for c in ("source_flag", "multiple_as_reported",
                                        "denominator_financial_id")), False)

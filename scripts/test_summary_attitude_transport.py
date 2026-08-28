@@ -551,10 +551,23 @@ def _test_prompt_contract(failures: list[str]) -> None:
             failures.append(f"deal_summary system prompt: {rule!r} is not delivered to the "
                             f"model — {why}")
     # The disclosure gate is the rule that stops absent input becoming a false claim.
-    if "UNDISCLOSED" not in system or "at least one financial value" not in system.lower():
-        failures.append("deal_summary system prompt: the narrow financials_disclosure_status "
-                        "semantics are not delivered — DISCLOSED must not read as "
-                        "'every term is known'")
+    # The wording became per-axis when the second disclosure axis was added; the
+    # guarantee is unchanged and is asserted on the meaning rather than one phrasing.
+    low = system.lower()
+    if "undisclosed" not in low or "at least one relevant fact" not in low:
+        failures.append("deal_summary system prompt: the narrow disclosure semantics are "
+                        "not delivered — DISCLOSED must not read as complete disclosure")
+    # And the licence must sit on the axis that actually makes the claim: the deal's
+    # terms, not the target's own financials.
+    # The delivered prompt names the axis by the label the model is shown, which is
+    # what the template supplies; the snake_case field name lives in the input-shape
+    # documentation and reaches no model.
+    if "TRANSACTION TERMS DISCLOSURE" not in system:
+        failures.append("deal_summary system prompt: the transaction-terms disclosure axis "
+                        "is not delivered")
+    if "does NOT license it" not in system:
+        failures.append("deal_summary system prompt: financials_disclosure_status must not "
+                        "license a claim about the deal's terms")
     if "is_down_round" not in system:
         failures.append("deal_summary system prompt: the prohibition on inventing an "
                         "is_down_round field is missing")

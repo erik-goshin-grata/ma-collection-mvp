@@ -320,9 +320,9 @@ def test_boundaries() -> None:
           "UNIQUE" in adv.upper(), False)
 
     print("\nNothing else moved:")
-    check("Stage 9 still owns 120 canonical columns",
-          len(getattr(agg, "_STAGE9_OWNED_COLUMNS", ())), 120)
-    check("aggregate version unchanged at 0.12", agg._VERSION, "0.12")
+    check("Stage 9 still owns 121 canonical columns",
+          len(getattr(agg, "_STAGE9_OWNED_COLUMNS", ())), 121)
+    check("aggregate version unchanged at 0.13", agg._VERSION, "0.13")
 
 
 def main() -> int:

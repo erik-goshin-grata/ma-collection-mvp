@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.35 (who is disposing, not who owns)
+**Version:** 0.36 (two disclosure axes, answered separately)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -725,12 +725,43 @@ ownership percentages, board composition, or management roles.
   This records the OUTCOME only. Who the buyer is does not belong to this field
   and is captured separately by acquirer.type.
 
+DISCLOSURE — TWO AXES, ANSWERED SEPARATELY
+
+A source discloses the target's financials and the deal's terms independently, and
+these two fields record them independently. Answer each from what the source says
+about THAT axis only. One is never evidence for the other.
+
 financials_disclosure_status:
-Classify whether financial terms are disclosed in this source:
-  DISCLOSED — at least one financial value is stated
-  UNDISCLOSED — source explicitly states terms not disclosed ("terms were not
-    disclosed," "financial terms were not announced," etc.)
-  UNKNOWN — source is silent on financials (neither states nor denies)
+The TARGET's own operating financials — revenue, EBITDA, ARR, margins, and the
+like. NOT the price, the consideration or the deal's terms.
+  DISCLOSED — at least one target financial figure is stated
+  UNDISCLOSED — the source explicitly says the target's financials are not being
+    disclosed
+  UNKNOWN — the source is silent on the target's financials, neither stating nor
+    denying
+
+transaction_terms_disclosure_status:
+The DEAL's economics — value, price, consideration, and the terms of the
+transaction. NOT the target's operating financials.
+  DISCLOSED — at least one deal value or term is stated
+  UNDISCLOSED — the source explicitly says terms were not disclosed ("terms were
+    not disclosed," "financial terms of the transaction were not announced")
+  UNKNOWN — the source is silent on the deal's terms, neither stating nor denying
+
+DISCLOSED DOES NOT MEAN COMPLETE. On either axis it means at least one relevant
+fact was stated, never that everything is known. Do not read it as a warrant that
+nothing is missing.
+
+UNDISCLOSED REQUIRES THE SOURCE TO SAY SO. Silence is UNKNOWN, on both axes. A
+source that simply never mentions a price has not declined to state one, and
+recording a refusal that was never made is a claim the source did not make.
+
+THE COMMON CASE IS A MIXED ANSWER. "Terms of the transaction were not disclosed.
+Beta generated $50 million in revenue last year" is
+transaction_terms_disclosure_status = UNDISCLOSED and
+financials_disclosure_status = DISCLOSED. The reverse happens just as often: a
+price with no company financials is DISCLOSED terms and UNKNOWN financials. Do not
+copy one answer into the other field.
 
 consideration_type:
 Classify the consideration structure if determinable from the source:
@@ -963,6 +994,7 @@ code fences, no preamble.
       "reported_multiples": [],
       "round_size": null,
       "financials_disclosure_status": "DISCLOSED",
+      "transaction_terms_disclosure_status": "DISCLOSED",
       "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": null,
@@ -1109,6 +1141,7 @@ Extract all transactions from this source.
       ],
       "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
+      "transaction_terms_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "consideration_type": "cash | stock | cash_and_stock | election | other | null",
       "target_financials": {
         "revenue_amount": "number | null",
@@ -1876,7 +1909,8 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | `value.type` not in valid set | Parser rejects |
 | `acquirer.type` uses legacy uppercase (e.g. PRIVATE_EQUITY) | Parser rejects — V2 lowercase required |
 | `revenue_period_type` or `ebitda_period_type` not in valid set | Parser rejects |
-| `financials_disclosure_status` missing | Parser rejects — required field in V2 |
+| `financials_disclosure_status` or `transaction_terms_disclosure_status` missing | Parser rejects — both axes are required |
+| Model copies one disclosure axis into the other | The prompt names the mixed answer as the common case and works an example both ways; QA samples the rate at which the two agree |
 | `features.is_going_private_outcome` emitted as `false` | Normalized to null before persistence and logged. NOT rejected: the row's other extraction is valid, and a rejection here is fatal to every transaction from the source. `false` is not a Product state for this field — the model is never asked to establish that a target remains public — so it is defensive normalization, not a discarded observation |
 | Model assumes LTM when period not stated | Critical — prompt explicitly forbids; QA samples check period_type = null rate |
 | Model populates closed_date with future expected close date | Prompt addresses; parser flags dates > 30 days from published_date as suspect |
@@ -1918,3 +1952,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.33 | 2026-08-27 | **Party cardinality survives collection.** Three roles were captured and then collapsed into a scalar before anything downstream could see how many parties there were: BUYER (`" and "`-joined by this prompt's own instruction), SPONSOR_BUYER (comma-delimited), and PARENT_SELLER (collapsed **silently** -- no instruction covered a joint divestiture at all). The contract already documented the loss for buyers: `acquirer.type` returns `unknown` for multiple buyers because one value cannot classify two firms, "a compatibility answer for this single scalar field". Each firm's own type was determinable and thrown away. `acquirers`, `buy_side_sponsors` and `parent_sellers` are new required arrays: **one item per party**, always an array including `[]`, since an absent array and an empty one are different statements. Only buyers carry a `type` -- the prompt defines no per-party attribute for sponsors or parent sellers and none is invented. **The scalars are unchanged** and remain the display projection for every current reader. **Role is carried by which array a party is in** -- BUYER, SPONSOR_BUYER and PARENT_SELLER are existing V3 §T5 roles, no role is invented, and no sub-role among co-buyers is added because Product specified none. **Cardinality is not a licence to infer**: every existing evidence and applicability rule is restated unchanged, and a party that would not have gone in the scalar does not go in the array. TARGET is excluded -- `target_name` does hold multi-name values, but that may be a decomposition question rather than a party one, and it is recorded rather than answered. |
 | 0.34 | 2026-08-27 | **PARENT_ACQUIRER and SPONSOR_SELLER are collected.** Two roles the target model requires and this implementation never authored at all. `parent_acquirers` is the mirror of `parent_sellers` -- the model calls its absence "an inventory omission, not a collapse", since PARENT_SELLER existed and its mirror was simply not listed. `sell_side_sponsors` is the mirror of `buy_side_sponsors` -- sponsor side is explicit in the model because side is meaningful role information, and only the buy side was being collected. Unlike 0.33 these are **coverage, not cardinality**: nothing was being flattened because nothing was being collected. The representation is the same either way, so this extends the existing array shape rather than adding a path. **Evidence mirrors the opposite side, unchanged, and no inference is broadened**: a parent acquirer needs the source to place a DIFFERENT, higher company above the buyer, and a sell-side sponsor needs the source to establish the selling side. Two mirror-image confusions are ruled out explicitly -- a corporate parent OWNS the buyer while a sponsor BACKS it, so the same firm is not put in both; and a sponsor's side comes from the source, never from the absence of the other side, so an unestablished side puts the sponsor in NEITHER array rather than one by elimination. A buyer is never repeated as its own parent. SELLER, JV_PARTNER and UNDERWRITER stay unauthored -- the model lists them and defines none of them, and authoring a role with no qualifying test would mean inventing it. |
 | 0.35 | 2026-08-27 | **SELLER: the party actually disposing.** The buyer side of the hierarchy was collected and the sell side was only half of it -- `parent_sellers` held the corporate parent above a disposing party, and the disposing party itself had nowhere to go. The mirror now runs the same way on both sides: X acquires makes X the buyer, X-a-subsidiary-of-Y acquires makes X the buyer with Y the parent acquirer, so X sells makes X the seller and X-a-subsidiary-of-Y sells makes X the seller with Y the parent seller. **A parent seller is not a substitute for a seller** -- promoting a parent into the seller's place, or leaving `sellers` empty because `parent_sellers` is populated, loses exactly the fact this array exists to hold. **Owning is not selling**: a party identified as an owner, holder or backer is not a seller, because ownership is a state and disposing is an act, and no seller is inferred from who owned the target, from the target's own identity, from sponsor backing or from the transaction's structure. **The target is not automatically the seller** -- being bought is a different sentence from disposing of something. Most acquisition releases name no disposing party, and an empty array is the ordinary answer rather than a gap to fill by reasoning. SPONSOR_SELLER stays a different participation: a sponsor backs a party on the selling side, a seller disposes, and a firm established as both is recorded once in each. JV_PARTNER and UNDERWRITER stay unauthored. |
+| 0.36 | 2026-08-27 | **Disclosure becomes two axes, because a source settles them independently.** One field was carrying two questions: this contract asked it to "classify whether financial terms are disclosed" and the summary used it to license "Financial terms were not disclosed" -- both about the DEAL -- while the target model defines the same field as the disclosure state for the TARGET's operating financials. A release saying "terms of the transaction were not disclosed" while quoting the target's revenue is an ordinary sentence, and under one field it could only be recorded by choosing an axis and being wrong about the other. `financials_disclosure_status` now means the target's own operating financials and nothing else; `transaction_terms_disclosure_status` is added for the deal's value, price, consideration and terms. Same vocabulary on both, same meanings: DISCLOSED is at least one relevant fact on THAT axis and never completeness, UNDISCLOSED requires the source to say so, UNKNOWN is silence. **The mixed answer is the common case** and the prompt says so with a worked example, because copying one answer into the other field is the failure this correction exists to prevent. `PARTIALLY_DISCLOSED` is deliberately not added -- the baseline records it and the reconciliation is open. `value_type = UNDISCLOSED` is untouched and remains an affirmative signal. |

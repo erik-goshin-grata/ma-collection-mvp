@@ -162,8 +162,8 @@ def main() -> int:
     check("transaction value still names its own debt basis",
           "EQUITY_PLUS_TOTAL_DEBT" in (aggregate._derive_transaction_value.__doc__ or ""),
           True)
-    check("Stage 9 still owns 120 canonical columns",
-          len(aggregate._STAGE9_OWNED_COLUMNS), 120)
+    check("Stage 9 still owns 121 canonical columns",
+          len(aggregate._STAGE9_OWNED_COLUMNS), 121)
 
     print("\nVersion:")
     md = (ROOT / "prompts" / "aggregation.md").read_text(encoding="utf-8")

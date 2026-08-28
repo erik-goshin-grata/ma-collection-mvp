@@ -334,6 +334,7 @@ def _txn(company: str, **overrides) -> dict:
         "dates": {"announced_date": "2026-06-01", "announced_date_precision": "exact",
                   "closed_date": None, "closed_date_precision": None},
         "financials_disclosure_status": "DISCLOSED",
+        "transaction_terms_disclosure_status": "DISCLOSED",
         "consideration_type": "equity",
         "pct_acquired": None,
         "use_of_proceeds": None,
