@@ -30,11 +30,11 @@ by `scripts/test_prompt_stage_version_parity.py`.
 | Aggregation (Conflict Resolution) | `prompts/aggregation.md` | **0.13** | 0.13 | 2026-08-28 | 0.13: the transaction-terms disclosure axis becomes canonical. 0.12: source-stated revenue and EBITDA become normalized rows carrying their own currency. 0.11: the assumed `pct_acquired = 100` is removed. 0.10: source-stated multiples become `as_reported` rows |
 | Deal Summary | `prompts/deal_summary.md` | **0.17** | 0.17 | 2026-08-28 | 0.17: two disclosure axes — "Financial terms were not disclosed" is a claim about the DEAL and is licensed by the terms axis, not by `financials_disclosure_status`. 0.16: canonical funding facts reach the summary; non-disclosure language requires an affirmative signal (`ENG-V3-021`) |
 | Strategic Rationale | `prompts/strategic_rationale.md` | **0.6** | 0.6 | 2026-08-21 | Three structure-derived defaults remain live — **tabled**, see §R7+§R9+§S2.1 and `ENG-V3-006` |
-| Agreement — Recitals | `prompts/agreement_recitals.md` | **0.3** | — | 2026-08-21 | |
-| Agreement — Consideration | `prompts/agreement_consideration.md` | **0.2** | — | 2026-08-21 | |
-| Agreement — Capitalization | `prompts/agreement_capitalization.md` | **0.2** | — | 2026-08-21 | |
-| Agreement — Termination | `prompts/agreement_termination.md` | **0.2** | — | 2026-08-21 | |
-| Agreement — Conditions | `prompts/agreement_conditions.md` | **0.2** | — | 2026-08-21 | |
+| Agreement — Recitals | `prompts/agreement_recitals.md` | **0.7** | — | 2026-09-02 | 0.7: two narrow `PARENT_ACQUIRER`/NOT-A-MERGER corrections. 0.6: `parent_acquirer_name`/`merger_sub_name`/`target_name` retired for a `parties[]` array on V3's `role` vocabulary (+`MERGER_SUB`). 0.4–0.5: data-model alignment, target_name/Seller fix |
+| Agreement — Consideration | `prompts/agreement_consideration.md` | **0.3** | — | 2026-09-02 | 0.3: V3 alignment — added `amount`; removed `per_share_price_total`; form enum aligned to V3 (+`CONTINGENT_CONSIDERATION`); `DEBT_ASSUMED` tightened to a stated amount |
+| Agreement — Capitalization | `prompts/agreement_capitalization.md` | **0.3** | — | 2026-09-02 | 0.3: V3 alignment — removed `weighted_avg_strike_price` (no V3 concept); Restricted Stock classified by underlying stock type, not `OTHER` |
+| Agreement — Termination | `prompts/agreement_termination.md` | **0.3** | — | 2026-09-02 | 0.3: documentation-only — §8 no longer instructs computing an implied fee amount from a stated multiple (V3 treats amount and percentage as Collected, not Derived). Six named fields and both currency fields unchanged |
+| Agreement — Conditions | `prompts/agreement_conditions.md` | **0.3** | — | 2026-09-02 | 0.3: V3 alignment — dropped `has_mac_clause`/`requires_target_shareholder_vote`/`target_vote_threshold`/`closing_conditions_summary` (no V3 concept); added `regulatory_approvals_required` |
 | *(conventions)* | `prompts/prompt_conventions.md` | **0.5** | n/a | 2026-08-21 | Convention document, not a delivered prompt. 0.5: prompt provenance is caller-owned (S-G) |
 
 > **The Funding LC row is gone, not omitted.** The drafted Funding LC prompt never became an
@@ -64,7 +64,7 @@ by `scripts/test_prompt_stage_version_parity.py`.
 | Stage 4b — Funding HC Extract | `funding_hc_extraction` | Funding-typed rows |
 | Stage 7 — Low Confidence Extract | `low_confidence_extraction` | Every HC_EXTRACTED row |
 | Stage 9 — Aggregate | `aggregation` | Same-tier field conflicts only |
-| Stage 11 — Agreement Extract | `agreement_*` (five sub-prompts) | Transactions with unextracted agreement documents |
+| Stage 11 — Agreement HC (logical name for `agreement_extract`) | `agreement_*` (five sub-prompts) | Transactions with unextracted agreement documents |
 | Stage 12 — Summarize | `deal_summary` | Each transaction_record with no current summary |
 | Stage 13 — Rationale Tag | `strategic_rationale` | Each transaction_record with a current summary |
 

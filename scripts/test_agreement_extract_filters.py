@@ -24,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from stages.agreement_extract import (
     _CANONICAL_FIELD_OBSERVATION_MAP,
     _DEFINED_TERM_RE,
-    _ENTITY_NAME_FIELDS,
     _OBSERVATION_REJECT_VALUES,
     _PLACEHOLDER_RE,
     _clear_stale_canonical_fields,
@@ -43,7 +42,7 @@ C1_CASES = [
     ("merger_structure", "REVERSE_TRIANGULAR", False, "REVERSE_TRIANGULAR accepted"),
     ("merger_structure", "DIRECT", False, "DIRECT accepted"),
     ("merger_structure", None, False, "None accepted (skipped by None guard, not UNKNOWN guard)"),
-    ("has_mac_clause", "UNKNOWN", False, "UNKNOWN not in reject list for has_mac_clause"),
+    ("regulatory_approvals_required", "UNKNOWN", False, "UNKNOWN not in reject list for regulatory_approvals_required"),
 ]
 
 
@@ -56,6 +55,11 @@ def _would_reject_c1(field_name: str, field_value) -> bool:
 
 # ---------------------------------------------------------------------------
 # Change 2 — Defined-term and placeholder rejection
+#
+# The rejection check used to be gated behind a fixed _ENTITY_NAME_FIELDS
+# field-name set; that set was retired in agreement_recitals 0.6 in favor of
+# the repeating parties[] array (party.{role} compound observations), so the
+# check now applies to every party name unconditionally, not by field name.
 # ---------------------------------------------------------------------------
 
 C2_DEFINED_TERM_CASES = [
@@ -88,9 +92,7 @@ C2_PLACEHOLDER_CASES = [
 ]
 
 
-def _would_reject_c2(field_name: str, value: str) -> bool:
-    if field_name not in _ENTITY_NAME_FIELDS:
-        return False
+def _would_reject_c2(value: str) -> bool:
     sv = str(value).strip()
     return bool(_DEFINED_TERM_RE.match(sv) or _PLACEHOLDER_RE.search(sv))
 
@@ -258,22 +260,22 @@ def run_canonical_clear_tests() -> bool:
     # Test 2: filter-rejection case (no observation written; stale TR value present)
     conn = _make_canonical_db()
     _insert_tr(conn, "txn2", acquirer_merger_sub_name="Merger Sub")
-    # No observation for merger_sub_name (filtered before insert — never written)
+    # No observation for party.MERGER_SUB (filtered before insert — never written)
     _clear_stale_canonical_fields(conn, "txn2", _NOW, _NULL_LOG)
     got = _get_tr(conn, "txn2", "acquirer_merger_sub_name")
     ok = got is None
-    print(f"  {'PASS' if ok else 'FAIL'}  no obs for merger_sub_name → acquirer_merger_sub_name becomes NULL (got {got!r})")
+    print(f"  {'PASS' if ok else 'FAIL'}  no obs for party.MERGER_SUB → acquirer_merger_sub_name becomes NULL (got {got!r})")
     all_pass = all_pass and ok
 
     # Test 3: multiple observations, all soft-deleted → field NULLed
     conn = _make_canonical_db()
-    _insert_tr(conn, "txn3", has_mac_clause="1")
+    _insert_tr(conn, "txn3", regulatory_approvals_required="1")
     for _ in range(3):
-        _insert_obs(conn, "txn3", "has_mac_clause", "1", is_current=0)
+        _insert_obs(conn, "txn3", "regulatory_approvals_required", "1", is_current=0)
     _clear_stale_canonical_fields(conn, "txn3", _NOW, _NULL_LOG)
-    got = _get_tr(conn, "txn3", "has_mac_clause")
+    got = _get_tr(conn, "txn3", "regulatory_approvals_required")
     ok = got is None
-    print(f"  {'PASS' if ok else 'FAIL'}  3 soft-deleted obs → has_mac_clause becomes NULL (got {got!r})")
+    print(f"  {'PASS' if ok else 'FAIL'}  3 soft-deleted obs → regulatory_approvals_required becomes NULL (got {got!r})")
     all_pass = all_pass and ok
 
     # Test 4: mix of current and soft-deleted → current wins, field not NULLed
@@ -293,16 +295,16 @@ def run_canonical_clear_tests() -> bool:
         conn, "txn5",
         merger_structure="DIRECT",
         acquirer_merger_sub_name="Sub Inc.",
-        has_mac_clause="1",
-        requires_target_shareholder_vote="1",
         target_fee_amount="50000000",
-        closing_conditions_summary="Some summary",
+        target_fee_percentage="2.5",
+        has_go_shop="1",
+        regulatory_approvals_required="1",
     )
     # No observations at all
     _clear_stale_canonical_fields(conn, "txn5", _NOW, _NULL_LOG)
     stale = [
-        col for col in ["merger_structure", "acquirer_merger_sub_name", "has_mac_clause",
-                         "requires_target_shareholder_vote", "target_fee_amount", "closing_conditions_summary"]
+        col for col in ["merger_structure", "acquirer_merger_sub_name", "target_fee_amount",
+                         "target_fee_percentage", "has_go_shop", "regulatory_approvals_required"]
         if _get_tr(conn, "txn5", col) is not None
     ]
     ok = not stale
@@ -331,14 +333,14 @@ def run_canonical_clear_tests() -> bool:
 
     # Test 8: unrelated fields untouched (fields with current observations are NOT NULLed)
     conn = _make_canonical_db()
-    _insert_tr(conn, "txn8", has_mac_clause="1", merger_structure="DIRECT")
-    _insert_obs(conn, "txn8", "has_mac_clause", "1", is_current=1)
+    _insert_tr(conn, "txn8", regulatory_approvals_required="1", merger_structure="DIRECT")
+    _insert_obs(conn, "txn8", "regulatory_approvals_required", "1", is_current=1)
     # No merger_structure observation
     _clear_stale_canonical_fields(conn, "txn8", _NOW, _NULL_LOG)
-    mac = _get_tr(conn, "txn8", "has_mac_clause")
+    reg = _get_tr(conn, "txn8", "regulatory_approvals_required")
     ms = _get_tr(conn, "txn8", "merger_structure")
-    ok = mac == "1" and ms is None
-    print(f"  {'PASS' if ok else 'FAIL'}  has_mac_clause preserved (obs current); merger_structure NULLed (no obs) (mac={mac!r}, ms={ms!r})")
+    ok = reg == "1" and ms is None
+    print(f"  {'PASS' if ok else 'FAIL'}  regulatory_approvals_required preserved (obs current); merger_structure NULLed (no obs) (reg={reg!r}, ms={ms!r})")
     all_pass = all_pass and ok
 
     return all_pass
@@ -363,7 +365,7 @@ def run_tests() -> bool:
     print()
     print("--- Change 2a: defined-term rejection ---")
     for val, should_reject, desc in C2_DEFINED_TERM_CASES:
-        got = _would_reject_c2("parent_acquirer_name", val)
+        got = _would_reject_c2(val)
         ok = got == should_reject
         print(f"  {'PASS' if ok else 'FAIL'}  [{val!r:45s}]  {desc}")
         if not ok:

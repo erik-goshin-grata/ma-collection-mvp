@@ -1,6 +1,6 @@
 # Agreement Capitalization Extraction Prompt
 
-**Version:** 0.2 (provenance is caller-owned)
+**Version:** 0.3
 **Repo path:** `prompts/agreement_capitalization.md`
 
 ---
@@ -54,11 +54,12 @@ SECURITY TYPES — normalized enum:
 
 When the source combines types (e.g., "Stock Awards" includes RSUs and PSUs without breakdown), use RSU and note the inclusion in the notes field.
 
+RESTRICTED STOCK
+Restricted stock (or "restricted stock awards"/RSAs) — actual issued and outstanding shares subject to vesting or repurchase restrictions — is classified by its underlying stock type (COMMON_STOCK, or PREFERRED_STOCK if the restricted shares are preferred). Do NOT use OTHER for restricted stock. Preserve the source's descriptive name in security_type_as_reported (e.g., "Company Restricted Stock") and note the vesting/repurchase restriction in the notes field. Do not confuse restricted stock with RSUs: restricted stock is actually issued and outstanding shares today; an RSU is an unvested unit-based promise to deliver shares in the future and is not currently outstanding stock.
+
 security_class: normalized class label ("Class A", "Class B", "Series C") or null for single-class types.
 
 shares_outstanding_as_of: the specific date these counts are as-of, in YYYY-MM-DD format. Use null when source gives only a general reference without a specific date.
-
-weighted_avg_strike_price: for OPTIONS, SARs, and WARRANTs only — the stated weighted average exercise/strike price. Null for all other types.
 
 consideration_treatment: how this security converts in the merger:
 - CASH_OUT: holders receive cash
@@ -83,7 +84,6 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
       "security_class": "Class A",
       "shares_outstanding": 245000000,
       "shares_outstanding_as_of": "2026-04-15",
-      "weighted_avg_strike_price": null,
       "consideration_treatment": null,
       "consideration_per_share": null,
       "consideration_currency": null,
@@ -121,7 +121,6 @@ SECTION TEXT:
 | `securities[].security_class` | string\|null | "Class A", "Series C", null for single-class |
 | `securities[].shares_outstanding` | integer\|null | Share count |
 | `securities[].shares_outstanding_as_of` | string\|null | YYYY-MM-DD |
-| `securities[].weighted_avg_strike_price` | number\|null | For options/SARs/warrants |
 | `securities[].consideration_treatment` | enum\|null | CASH_OUT \| CONVERSION \| ASSUMED \| CANCELLED \| ROLLOVER \| OTHER |
 | `securities[].consideration_per_share` | number\|null | Per-security consideration |
 | `securities[].consideration_currency` | string\|null | ISO 4217 |
@@ -152,7 +151,6 @@ As of March 31, 2026, there were outstanding: (a) options to purchase an aggrega
       "security_class": "Class A",
       "shares_outstanding": 312450000,
       "shares_outstanding_as_of": "2026-03-31",
-      "weighted_avg_strike_price": null,
       "consideration_treatment": null,
       "consideration_per_share": null,
       "consideration_currency": null,
@@ -164,7 +162,6 @@ As of March 31, 2026, there were outstanding: (a) options to purchase an aggrega
       "security_class": "Class B",
       "shares_outstanding": 87200000,
       "shares_outstanding_as_of": "2026-03-31",
-      "weighted_avg_strike_price": null,
       "consideration_treatment": null,
       "consideration_per_share": null,
       "consideration_currency": null,
@@ -176,7 +173,6 @@ As of March 31, 2026, there were outstanding: (a) options to purchase an aggrega
       "security_class": "Class A",
       "shares_outstanding": 18340000,
       "shares_outstanding_as_of": "2026-03-31",
-      "weighted_avg_strike_price": 14.22,
       "consideration_treatment": null,
       "consideration_per_share": null,
       "consideration_currency": null,
@@ -188,7 +184,6 @@ As of March 31, 2026, there were outstanding: (a) options to purchase an aggrega
       "security_class": null,
       "shares_outstanding": 22100000,
       "shares_outstanding_as_of": "2026-03-31",
-      "weighted_avg_strike_price": null,
       "consideration_treatment": null,
       "consideration_per_share": null,
       "consideration_currency": null,
@@ -219,7 +214,6 @@ There were no shares of Company Preferred Stock issued and outstanding. As of Ap
       "security_class": null,
       "shares_outstanding": 45238100,
       "shares_outstanding_as_of": "2026-04-15",
-      "weighted_avg_strike_price": null,
       "consideration_treatment": "CASH_OUT",
       "consideration_per_share": 42.00,
       "consideration_currency": "USD",
@@ -231,7 +225,6 @@ There were no shares of Company Preferred Stock issued and outstanding. As of Ap
       "security_class": null,
       "shares_outstanding": 1820000,
       "shares_outstanding_as_of": "2026-04-15",
-      "weighted_avg_strike_price": 28.60,
       "consideration_treatment": "CANCELLED",
       "consideration_per_share": null,
       "consideration_currency": null,
@@ -240,6 +233,67 @@ There were no shares of Company Preferred Stock issued and outstanding. As of Ap
   ],
   "model_confidence": "HIGH",
   "notes": null
+}
+```
+
+### Example 3 — Restricted stock classified by underlying stock type
+
+**Input section text:**
+```
+Section 4.2 Capitalization. (a) The authorized capital stock of the Company consists of 500,000,000 shares of Company Common Stock, par value $0.01 per share, and 5,000,000 shares of preferred stock, par value $0.01 per share (“Preferred Stock”). As of the date of this Agreement: (i) 203,972,384 shares of Company Common Stock were issued and outstanding, (ii) 1,097,137 shares of Company Restricted Stock were issued and outstanding, (iii) 23,658,753 shares of Company Common Stock were issuable upon the exercise of outstanding Company Options (whether or not presently exercisable), (iv) 31,900,000 shares of Company Common Stock were authorized for issuance under the Company Stock Plan, (v) no shares of Preferred Stock were issued or outstanding and (vi) no shares of Company Common Stock were held in treasury by the Company.
+```
+
+**Expected output:**
+```json
+{
+  "securities": [
+    {
+      "security_type": "COMMON_STOCK",
+      "security_type_as_reported": "Company Common Stock, par value $0.01 per share",
+      "security_class": null,
+      "shares_outstanding": 203972384,
+      "shares_outstanding_as_of": null,
+      "consideration_treatment": null,
+      "consideration_per_share": null,
+      "consideration_currency": null,
+      "notes": null
+    },
+    {
+      "security_type": "COMMON_STOCK",
+      "security_type_as_reported": "Company Restricted Stock",
+      "security_class": null,
+      "shares_outstanding": 1097137,
+      "shares_outstanding_as_of": null,
+      "consideration_treatment": null,
+      "consideration_per_share": null,
+      "consideration_currency": null,
+      "notes": "Restricted stock (issued and outstanding, subject to vesting/repurchase restrictions), not RSUs."
+    },
+    {
+      "security_type": "OPTIONS",
+      "security_type_as_reported": "Company Options",
+      "security_class": null,
+      "shares_outstanding": 23658753,
+      "shares_outstanding_as_of": null,
+      "consideration_treatment": null,
+      "consideration_per_share": null,
+      "consideration_currency": null,
+      "notes": "Shares issuable upon exercise of outstanding Company Options."
+    },
+    {
+      "security_type": "PREFERRED_STOCK",
+      "security_type_as_reported": "Preferred Stock, par value $0.01 per share",
+      "security_class": null,
+      "shares_outstanding": 0,
+      "shares_outstanding_as_of": null,
+      "consideration_treatment": null,
+      "consideration_per_share": null,
+      "consideration_currency": null,
+      "notes": "5,000,000 shares authorized; none issued or outstanding."
+    }
+  ],
+  "model_confidence": "HIGH",
+  "notes": "Counts stated 'as of the date of this Agreement'; no specific calendar date given in this excerpt."
 }
 ```
 
@@ -252,6 +306,7 @@ There were no shares of Company Preferred Stock issued and outstanding. As of Ap
 | Section states authorized shares only, not outstanding | Return shares_outstanding null; note authorized count in notes field |
 | Combined award types ("Stock Awards" — RSU + PSU combined) | Use RSU type; note combined in per-security notes field |
 | Share counts given as ranges or estimates | Use the stated number; note uncertainty in notes |
+| Restricted stock / RSAs (actual outstanding shares subject to vesting/repurchase, not units) | Classify by underlying stock type (COMMON_STOCK / PREFERRED_STOCK); never OTHER; preserve the source's name in security_type_as_reported |
 
 ---
 
@@ -261,3 +316,4 @@ There were no shares of Company Preferred Stock issued and outstanding. As of Ap
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version — per-class capitalization |
 | 0.2 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples and the `{prompt_version}` line from the user template. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.3 | 2026-09-02 | **V3 alignment** (see `logs/agreement_baseline_20260901/capitalization_v3_alignment_review.md`). (1) Removed `weighted_avg_strike_price` — no strike/exercise-price concept exists anywhere in `docs/v3_data_dictionary.md`. This is a live schema column (`transaction_security.weighted_avg_strike_price`); it is simply no longer authored going forward, not removed from the schema. Never actually populated on any of the four documents used for this review's regression. (2) Added an explicit RESTRICTED STOCK rule: issued-and-outstanding restricted stock/RSAs are classified by their underlying stock type (COMMON_STOCK/PREFERRED_STOCK), never `OTHER`, with the source's descriptive name preserved in `security_type_as_reported` — found misapplied on Aon's real regression output, where 1,097,137 shares of "Company Restricted Stock" fell into the `OTHER` catch-all for lack of this instruction. No enum value was added: restricted stock is not a distinct `security_type`, it is a description of already-outstanding shares of an existing type. |

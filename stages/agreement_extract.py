@@ -1,10 +1,38 @@
 """
-Stage 11: agreement_extract
+Stage 11: agreement_extract — logically "Agreement HC"
 
 Extracts structured fields from deal-document sections stored in
 transaction_document_section (populated by Stage 10, sec_documents).
 
-For each transaction with linked deal-document sections, runs 5 section-
+Architecture note (2026-09-03, agreement_extraction_architecture_review.md): this
+stage's five section-specific prompts are, together, the logical AGREEMENT_HC
+extraction layer — deterministic Stage 10 navigation feeding five specialized
+high-confidence extractors, each owning a disjoint slice of the same "facts an
+agreement states explicitly" contract:
+
+    AGREEMENT_HC (logical)
+      ├── Parties & Structure   → agreement_recitals
+      ├── Consideration         → agreement_consideration
+      ├── Capitalization        → agreement_capitalization
+      ├── Regulatory            → agreement_conditions
+      └── Termination / Go-Shop → agreement_termination
+
+The five calls stay physically separate — a consolidated single-call design was
+evaluated and rejected for now (see the review doc §3/§5/§8); nothing about the
+runtime below changed as a result of that review. `observation_source_stage =
+'AGREEMENT_EXTRACT'` is the physical provenance identifier and is unchanged; it
+corresponds to the logical AGREEMENT_HC layer and is not renamed to match, since
+that would be a migration/compatibility change for a purely aesthetic reason.
+
+There is no Agreement LC stage today, and none is implied by this grouping.
+AGREEMENT_HC explicitly does not own: Summary, Rationale, source/transaction
+linking or reconciliation, or anything sourced from proxy "Background of the
+Merger" narrative / DEFM14A-specific process history (competing bids, advisors,
+fairness opinions) — those remain separate, unbuilt concerns; DEFM14A is fetched
+today only as one more deal-document type for the same five section extractors,
+not as a distinct narrative-extraction path.
+
+For each transaction with linked deal-document sections, runs the 5 section-
 specific prompts against HIGH/MEDIUM-confidence sections from deal documents
 (8K_EXHIBIT_21, DEFM14A, S4, SC_TOT, DEFA14A).  Results are written to:
   - transaction_security (per-security-class rows)
@@ -16,6 +44,8 @@ all are extracted.  For transaction_security, all rows are kept.  For scalar
 fields on transaction_record, FIELD_FILING_TYPE_PRIORITY determines which
 source type populates each canonical column; fields without explicit rules use
 most-recent-filing-date wins.  Conflicts are logged to aggregation_conflict_log.
+Missing sections simply mean no call for that extractor — this stage never forces
+all five calls per agreement.
 
 Diff surfacing (Drop 3.20b): after all sections are processed for a transaction,
 observation_changes_summary on transaction_record is populated with a structured
@@ -57,11 +87,11 @@ _SECTION_PROMPT_MAP = {
 }
 
 _VERSIONS = {
-    "agreement_recitals": "0.3",
-    "agreement_consideration": "0.2",
-    "agreement_capitalization": "0.2",
-    "agreement_termination": "0.2",
-    "agreement_conditions": "0.2",
+    "agreement_recitals": "0.7",
+    "agreement_consideration": "0.3",
+    "agreement_capitalization": "0.3",
+    "agreement_termination": "0.3",
+    "agreement_conditions": "0.3",
 }
 
 _SLEEP = 1.0  # between LLM calls
@@ -69,7 +99,7 @@ _SLEEP = 1.0  # between LLM calls
 # Fields in extraction results that are not written as observations
 _OBSERVATION_SKIP = frozenset({
     "model_confidence", "notes", "prompt_version",
-    "consideration_components", "securities",
+    "consideration_components", "securities", "parties",
 })
 
 # Closed-vocab field values treated as non-observations (skip insert + canonical)
@@ -77,8 +107,12 @@ _OBSERVATION_REJECT_VALUES: dict[str, frozenset[str]] = {
     "merger_structure": frozenset({"UNKNOWN"}),
 }
 
-# Entity-name fields — filtered for defined-term references and draft placeholders
-_ENTITY_NAME_FIELDS = frozenset({"parent_acquirer_name", "target_name", "merger_sub_name", "acquirer_name"})
+# Defined-term references and draft placeholders — rejected wherever a legal entity
+# name is expected. Was gated behind a fixed _ENTITY_NAME_FIELDS field-name set
+# (parent_acquirer_name/target_name/merger_sub_name); those three scalar fields were
+# retired in agreement_recitals 0.6 in favor of the repeating parties[] array (see
+# the party.{role} compound-observation block below), so the check now applies to
+# every party name directly rather than being gated by field name.
 _DEFINED_TERM_RE = re.compile(
     r"^(Parent|Company|Purchaser|Seller|Buyer|Target|Acquirer|SPAC|Sponsor|"
     r"Issuer|Holdco|Topco|Bidco|Merger\s+Sub|Sub|Acquireco|Acquisitionco|AcquireCo)$",
@@ -93,17 +127,14 @@ _PLACEHOLDER_RE = re.compile(r"\[|\]|…|\[[A-Z][^\]]*\]", re.IGNORECASE)
 # (individual components are stored as consideration.{form}.{attr}).
 _CANONICAL_FIELD_OBSERVATION_MAP: dict[str, str] = {
     "merger_structure":                  "merger_structure",
-    "acquirer_merger_sub_name":          "merger_sub_name",
+    "acquirer_merger_sub_name":          "party.MERGER_SUB",
     "target_fee_amount":                 "target_termination_fee",
     "target_fee_percentage":             "target_termination_fee_pct",
     "acquirer_fee_amount":               "acquirer_termination_fee",
     "acquirer_fee_percentage":           "acquirer_termination_fee_pct",
     "has_go_shop":                       "has_go_shop",
     "go_shop_period_days":               "go_shop_period_days",
-    "has_mac_clause":                    "has_mac_clause",
-    "requires_target_shareholder_vote":  "requires_target_shareholder_vote",
-    "target_vote_threshold":             "target_vote_threshold",
-    "closing_conditions_summary":        "closing_conditions_summary",
+    "regulatory_approvals_required":     "regulatory_approvals_required",
 }
 
 
@@ -114,7 +145,14 @@ _CANONICAL_FIELD_OBSERVATION_MAP: dict[str, str] = {
 def _compute_diluted_shares(securities: list[dict]) -> tuple[int | None, str]:
     """Compute target_total_diluted_shares from a list of security dicts.
 
-    Uses most-recent observation per (security_type, security_class).
+    Uses most-recent observation per (security_type, security_class,
+    security_type_as_reported). The reported designation is included so that
+    distinct source-supported populations sharing one security_type with no
+    class/as-of to distinguish them (e.g. Aon's ordinary "Company Common Stock"
+    and "Company Restricted Stock", both COMMON_STOCK) are not collapsed into
+    one — the same distinguishing signal used by idx_security_unique_current
+    (Drop 3.33). A genuine duplicate mention of the same security still shares
+    all three key parts and still collapses to its most-recent observation.
     Returns (count, quality_flag) where quality is COMPLETE | PARTIAL | NOT_AVAILABLE.
     """
     if not securities:
@@ -122,7 +160,7 @@ def _compute_diluted_shares(securities: list[dict]) -> tuple[int | None, str]:
 
     by_key: dict[tuple, dict] = {}
     for s in securities:
-        key = (s.get("security_type"), s.get("security_class"))
+        key = (s.get("security_type"), s.get("security_class"), s.get("security_type_as_reported"))
         existing = by_key.get(key)
         if existing is None:
             by_key[key] = s
@@ -236,11 +274,6 @@ def _write_observations(
         # Reject closed-vocab non-observations (UNKNOWN treated as absent)
         if field_name in _OBSERVATION_REJECT_VALUES and str(field_value) in _OBSERVATION_REJECT_VALUES[field_name]:
             continue
-        # Reject defined-term and placeholder values for entity-name fields
-        if field_name in _ENTITY_NAME_FIELDS:
-            sv = str(field_value).strip()
-            if _DEFINED_TERM_RE.match(sv) or _PLACEHOLDER_RE.search(sv):
-                continue
 
         insert_observation(
             conn,
@@ -309,6 +342,37 @@ def _write_observations(
                 extraction_prompt_version=extraction_prompt_version,
                 observation_source_stage="AGREEMENT_EXTRACT",
             )
+
+    # Compound: parties → party.{role} (agreement_recitals 0.6). Repeating by
+    # design — zero, one, or many entries per role (multiple MERGER_SUBs in a
+    # two-step structure; the same entity in two roles, e.g. Sangamo as both
+    # SELLER and TARGET, writes two independent rows under two field names).
+    # Stage 11's job stops here: this writes a legal-name observation only, with
+    # no entity_id and no transaction_participant row — entity resolution is a
+    # separate, downstream concern this stage does not perform.
+    for party in extraction_results.get("parties") or []:
+        role = party.get("role")
+        name = (party.get("name") or "").strip()
+        if not role or not name:
+            continue
+        if _DEFINED_TERM_RE.match(name) or _PLACEHOLDER_RE.search(name):
+            continue
+        insert_observation(
+            conn,
+            transaction_id=transaction_id,
+            field_name=f"party.{role}",
+            field_value=name,
+            source_document_id=source_document_id,
+            source_section_id=source_section_id,
+            source_type=filing_type,
+            source_tier="T1",
+            model_confidence=model_confidence,
+            filing_type=filing_type,
+            agreement_dated_as_of=agreement_dated_as_of,
+            filing_date=filing_date,
+            extraction_prompt_version=extraction_prompt_version,
+            observation_source_stage="AGREEMENT_EXTRACT",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -453,8 +517,15 @@ def _apply_recitals(
     log: Any,
 ) -> None:
     updates: dict[str, Any] = {}
-    # Only write merger_sub_name to TR if it's a real legal entity name (not defined-term)
-    msub = (result.get("merger_sub_name") or "").strip()
+    # acquirer_merger_sub_name is a scalar TR column; parties[] can carry more than
+    # one MERGER_SUB entry (two-step structures — BitGo, Victory Capital). Take the
+    # first/primary one, in array order, same as the prior scalar merger_sub_name
+    # field did. Additional merger subs still land in the party.MERGER_SUB
+    # observations written by _write_observations — nothing beyond the first is lost,
+    # just not promoted to this canonical column. Only write if it's a real legal
+    # entity name (not a bare defined-term label).
+    merger_subs = [p for p in (result.get("parties") or []) if p.get("role") == "MERGER_SUB"]
+    msub = (merger_subs[0].get("name") or "").strip() if merger_subs else ""
     if msub and not _DEFINED_TERM_RE.match(msub) and not _PLACEHOLDER_RE.search(msub):
         updates["acquirer_merger_sub_name"] = msub
     # Only write merger_structure if it's a real value (UNKNOWN is a non-observation)
@@ -592,16 +663,10 @@ def _apply_conditions(
     log: Any,
 ) -> None:
     updates: dict[str, Any] = {}
-    if result.get("has_mac_clause") is not None:
-        updates["has_mac_clause"] = 1 if result["has_mac_clause"] else 0
-    if result.get("requires_target_shareholder_vote") is not None:
-        updates["requires_target_shareholder_vote"] = (
-            1 if result["requires_target_shareholder_vote"] else 0
+    if result.get("regulatory_approvals_required") is not None:
+        updates["regulatory_approvals_required"] = (
+            1 if result["regulatory_approvals_required"] else 0
         )
-    if result.get("target_vote_threshold"):
-        updates["target_vote_threshold"] = result["target_vote_threshold"]
-    if result.get("closing_conditions_summary"):
-        updates["closing_conditions_summary"] = result["closing_conditions_summary"][:2000]
     if not updates:
         return
     _update_transaction_record(

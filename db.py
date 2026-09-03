@@ -579,13 +579,28 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     # names would not catch the duplicate because SQLite treats NULLs as distinct
     # in unique indexes. Scoped to is_current=1; soft-deleted history unconstrained.
     # Wipe transaction_security before migrating if duplicate rows already exist.
+    #
+    # Drop 3.33 — add security_type_as_reported to the key (Capitalization V3
+    # alignment, item 1). Ordinary Common Stock and Restricted Common Stock are
+    # distinct, source-supported populations that agreement_capitalization 0.3
+    # correctly classifies under the same security_type (COMMON_STOCK) with no
+    # security_class or shares_outstanding_as_of to distinguish them — the 3.26
+    # key collided and INSERT OR IGNORE silently dropped the second row (Aon:
+    # "Company Restricted Stock", 1,097,137 shares). security_type_as_reported
+    # already carries exactly the distinguishing fact and was already written on
+    # every row; only the index was missing it. DROP+CREATE because IF NOT EXISTS
+    # cannot redefine an existing index of the same name. A genuine rerun of the
+    # same section still produces the same reported designation (temperature 0.0,
+    # same input), so true duplicates still collide under the wider key.
+    conn.execute("DROP INDEX IF EXISTS idx_security_unique_current")
     conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_security_unique_current
         ON transaction_security (
             extraction_source_document_id,
             security_type,
             COALESCE(security_class, ''),
-            COALESCE(shares_outstanding_as_of, '')
+            COALESCE(shares_outstanding_as_of, ''),
+            COALESCE(security_type_as_reported, '')
         )
         WHERE is_current = 1
     """)

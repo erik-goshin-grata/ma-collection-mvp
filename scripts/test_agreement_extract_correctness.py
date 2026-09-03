@@ -372,7 +372,8 @@ def _make_security_conn() -> sqlite3.Connection:
             extraction_source_document_id,
             security_type,
             COALESCE(security_class, ''),
-            COALESCE(shares_outstanding_as_of, '')
+            COALESCE(shares_outstanding_as_of, ''),
+            COALESCE(security_type_as_reported, '')
         )
         WHERE is_current = 1;
     """)

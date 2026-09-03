@@ -1,6 +1,6 @@
 # Agreement Termination Fees Extraction Prompt
 
-**Version:** 0.2 (provenance is caller-owned)
+**Version:** 0.3
 **Repo path:** `prompts/agreement_termination.md`
 
 ---
@@ -172,7 +172,7 @@ Section 8.3 Termination Fees.
 | Failure | Handling |
 | :--- | :--- |
 | Section describes only triggers (§7.1) without fee amounts | Return fee amounts null; model_confidence MEDIUM or LOW |
-| Fee stated as multiple of another fee ("2x the Company Termination Fee") | Compute implied amount if base fee found in same text; otherwise return null and note |
+| Fee stated as multiple of another fee ("2x the Company Termination Fee") without also stating that fee's own dollar amount | Return the multiple-based fee amount null and note the stated multiple; never compute a dollar figure from it |
 | Non-USD currency | Extract as stated; populate currency field appropriately |
 
 ---
@@ -183,3 +183,4 @@ Section 8.3 Termination Fees.
 | :--- | :--- | :--- |
 | 0.1 | 2026-05-04 | Initial version — termination fees + go-shop |
 | 0.2 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples and the `{prompt_version}` line from the user template. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
+| 0.3 | 2026-09-02 | **Documentation-only correction** (V3 alignment review — see `logs/agreement_baseline_20260901/termination_v3_alignment_review.md`; the six named fields, the write path, and both currency fields are otherwise unchanged and confirmed already aligned). §8's "Fee stated as multiple of another fee" row previously instructed computing an implied dollar amount from a stated multiple — this line was never actually sent to the model (`load_prompt_file()` sends only §4/§5), so it never changed live behavior, but it contradicted `docs/v3_data_dictionary.md`'s treatment of both fee amount and percentage as Collected, not Derived. Corrected to return null and note the stated multiple instead, matching the row above it. No change to §4, §5, §6, §7, or `stages/agreement_extract.py`. |

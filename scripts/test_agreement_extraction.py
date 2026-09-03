@@ -2,17 +2,17 @@
 Validation script for Drop 3.20a agreement extraction prompts.
 
 Five tests, one per section-specific prompt:
-  1. agreement_recitals   — party identification + Merger Sub demotion
+  1. agreement_recitals   — party identification + Merger Sub demotion (parties[])
   2. agreement_consideration — cash per share and CVR components
   3. agreement_capitalization — multi-class share counts
   4. agreement_termination — termination fees + go-shop
-  5. agreement_conditions — MAC clause, shareholder vote, conditions summary
+  5. agreement_conditions — regulatory approvals required (V3-aligned)
 
 Each test constructs a synthetic section excerpt, calls the prompt directly
 via the configured LLM provider, and validates the response shape and key field values.
 
 Key assertions:
-  - Recitals: Merger Sub is identified separately from parent acquirer
+  - Recitals: Merger Sub is a separate party (role MERGER_SUB), distinct from BUYER
   - Capitalization: two common stock classes + options produce three rows
 
 Skipped if the selected provider API key is not set. Estimated API cost depends
@@ -212,29 +212,31 @@ def test_recitals(cfg, conn) -> bool:
     print()
 
     ok = True
-    parent = result.get("parent_acquirer_name", "")
-    sub = result.get("merger_sub_name") or ""
-    target = result.get("target_name", "")
+    parties = result.get("parties", [])
     structure = result.get("merger_structure", "")
 
-    if "Merger Sub" in parent or "Merger Subsidiary" in parent:
-        print(f"FAIL: parent_acquirer_name contains Merger Sub name: {parent!r}")
+    buyer_names = [p.get("name", "") for p in parties if p.get("role") == "BUYER"]
+    target_names = [p.get("name", "") for p in parties if p.get("role") == "TARGET"]
+    merger_sub_names = [p.get("name", "") for p in parties if p.get("role") == "MERGER_SUB"]
+
+    if any("Merger Sub" in n or "Merger Subsidiary" in n for n in buyer_names):
+        print(f"FAIL: BUYER party name contains Merger Sub name: {buyer_names!r}")
         ok = False
-    if "Horizon" not in parent and "Horizon Capital" not in parent:
-        print(f"FAIL: parent_acquirer_name should contain 'Horizon Capital': {parent!r}")
+    if not any("Horizon" in n for n in buyer_names):
+        print(f"FAIL: no BUYER party containing 'Horizon', got {buyer_names!r}")
         ok = False
-    if not sub or "Merger" not in sub and "Subsidiary" not in sub:
-        print(f"FAIL: merger_sub_name should contain 'Merger Sub' / 'Subsidiary': {sub!r}")
+    if not any("Merger" in n or "Subsidiary" in n for n in merger_sub_names):
+        print(f"FAIL: no MERGER_SUB party found, got {merger_sub_names!r}")
         ok = False
-    if "Pinnacle" not in target:
-        print(f"FAIL: target_name should contain 'Pinnacle': {target!r}")
+    if not any("Pinnacle" in n for n in target_names):
+        print(f"FAIL: no TARGET party containing 'Pinnacle', got {target_names!r}")
         ok = False
     if structure not in ("REVERSE_TRIANGULAR", "TENDER_OFFER"):
         print(f"FAIL: merger_structure expected REVERSE_TRIANGULAR, got {structure!r}")
         ok = False
 
     if ok:
-        print("PASS: Merger Sub correctly separated from parent acquirer.")
+        print("PASS: Merger Sub correctly separated from BUYER as its own party.")
     return ok
 
 
@@ -341,32 +343,21 @@ def test_termination(cfg, conn) -> bool:
 
 def test_conditions(cfg, conn) -> bool:
     print("=" * 60)
-    print("Test 5: agreement_conditions — MAC clause + shareholder vote")
+    print("Test 5: agreement_conditions — regulatory approvals required")
     print("=" * 60)
     result = _run_prompt("agreement_conditions", _CONDITIONS_TEXT, cfg, conn)
     print(json.dumps(result, indent=2))
     print()
 
     ok = True
-    has_mac = result.get("has_mac_clause")
-    req_vote = result.get("requires_target_shareholder_vote")
-    threshold = result.get("target_vote_threshold")
-    summary = result.get("closing_conditions_summary") or ""
+    reg = result.get("regulatory_approvals_required")
 
-    if not has_mac:
-        print(f"FAIL: has_mac_clause expected True, got {has_mac}")
-        ok = False
-    if not req_vote:
-        print(f"FAIL: requires_target_shareholder_vote expected True, got {req_vote}")
-        ok = False
-    if threshold not in ("MAJORITY_OUTSTANDING", "OTHER"):
-        print(f"WARN: target_vote_threshold expected MAJORITY_OUTSTANDING, got {threshold!r}")
-    if len(summary) < 20:
-        print(f"FAIL: closing_conditions_summary too short: {summary!r}")
+    if not reg:
+        print(f"FAIL: regulatory_approvals_required expected True (HSR + CFIUS named), got {reg}")
         ok = False
 
     if ok:
-        print("PASS: MAC clause and shareholder vote correctly identified.")
+        print("PASS: regulatory approval requirement correctly identified.")
     return ok
 
 
