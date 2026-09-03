@@ -10,7 +10,9 @@ prompt is called once for that specific field. All LLM conflict resolutions
 are logged to aggregation_conflict_log.
 
 After field resolution:
-  - consideration_type is derived from consideration_components
+  - consideration_type is derived from consideration_components on the M&A path;
+    on the funding path (where no component vocabulary applies) it falls back to
+    Funding HC's own collected instrument classification
   - is_take_private / is_minority are derived from deal context. is_add_on and
     is_platform_investment are NOT: V3 §T7 replaces both with the extracted
     sponsor_transaction_role, and their columns are retained but unwritten.
@@ -160,6 +162,12 @@ _FIELDS = [
     ("use_of_proceeds", "string"),
     ("has_board_seat", "boolean"),
     ("board_seat_notes", "string"),
+    # Funding instrument/security classification (2026-09-03). M&A HC no longer
+    # authors this field (retired 0.37); only Funding HC writes it now. Loaded here so
+    # it reaches field_values -- the fallback that actually uses it lives at the
+    # canonical-write call site below, since the M&A path's own derived value must
+    # keep taking precedence when it exists.
+    ("consideration_type", "string"),
 ]
 
 _FIELD_NAMES = {f for f, _ in _FIELDS}
@@ -2277,6 +2285,14 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             # Derive additional fields
             field_values.update(sponsor_participant_context.get(cluster_id, {}))
             ctype = _derive_consideration_type(field_values.get("consideration_components"))
+            if ctype is None:
+                # Funding path only. No consideration_components vocabulary applies to
+                # a funding round (SAFE / convertible_note / warrant have no component-
+                # form equivalent), so the derivation above never fires for one. Fall
+                # back to Funding HC's own collected instrument classification -- never
+                # read on the M&A path, where the field is not authored at all (0.37)
+                # and this key is therefore always absent from field_values there.
+                ctype = field_values.get("consideration_type")
             derived = _derive_flags(field_values)
             txn_status = _derive_transaction_status(
                 field_values.get("event_history_type"), field_values.get("closed_date")
