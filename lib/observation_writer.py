@@ -151,6 +151,14 @@ FUNDING_FIELDS = (
     "use_of_proceeds",
     "has_board_seat",
     "board_seat_notes",
+    # Funding instrument/security classification (2026-09-03). Shares the
+    # `consideration_type` column and canonical field with the M&A path, but the two
+    # never collide: Stage 4 no longer authors this field at all (retired 0.37), and
+    # Stage 9's derivation from `consideration_components` returns null for every
+    # funding row (SAFE/convertible_note/warrant have no component-form equivalent).
+    # Omitting this line would strand a correctly extracted value on staging_
+    # extraction forever, since Stage 9 reads observations by default.
+    "consideration_type",
 )
 
 SOURCE_ROW_PRESENT_FIELD = "__source_row_present"
@@ -454,6 +462,11 @@ PARTY_ARRAY_FIELDS: tuple[tuple[str, str], ...] = (
     ("parent_acquirers", "parent_acquirer_party"),
     ("sell_side_sponsors", "sell_side_sponsor_party"),
     ("sellers", "seller_party"),
+    # JV_PARTNER (2026-09-03). Same preservation pattern as the six roles above.
+    # Populated only on a JOINT_VENTURE event (enforced in stages/high_confidence_
+    # extract.py, not here); preservation-only like its siblings, since this field
+    # name is deliberately absent from aggregate's _FIELDS.
+    ("jv_partners", "jv_partner_party"),
 )
 
 

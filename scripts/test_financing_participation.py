@@ -132,7 +132,7 @@ def test_prompt() -> None:
           "capital_markets" in lc._VALID_ADVISOR_SPECIALTIES, False)
     check("ordinary M&A advisory is untouched",
           "financial_advisory" in lc._VALID_ADVISOR_SPECIALTIES, True)
-    check("LC version is 0.13", lc._VERSION, "0.13")
+    check("LC version is 0.14", lc._VERSION, "0.14")
 
 
 # ---------------------------------------------------------------------------

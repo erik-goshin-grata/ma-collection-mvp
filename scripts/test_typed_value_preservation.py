@@ -86,6 +86,7 @@ def _insert_fixture(conn: sqlite3.Connection) -> int:
         "parent_sellers": [],
         "parent_acquirers": [],
         "sell_side_sponsors": [],
+        "jv_partners": [],
         "sellers": [],
         "value_observations": [
             {
@@ -245,6 +246,7 @@ def _insert_second_source_fixture(conn: sqlite3.Connection) -> int:
         "parent_sellers": [],
         "parent_acquirers": [],
         "sell_side_sponsors": [],
+        "jv_partners": [],
         "sellers": [],
         "value_observations": [
             {

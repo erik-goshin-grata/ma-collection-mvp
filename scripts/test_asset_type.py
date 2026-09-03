@@ -223,6 +223,7 @@ def _test_subordination(failures: list[str]) -> None:
             "parent_sellers": [],
             "parent_acquirers": [],
             "sell_side_sponsors": [],
+            "jv_partners": [],
             "sellers": [],
             "features": {"is_platform_investment": None, "is_secondary_buyout": None,
                          "is_merger_of_equals": None},

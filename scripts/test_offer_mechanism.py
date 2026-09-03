@@ -104,6 +104,7 @@ def _hc(**over) -> dict:
         "parent_sellers": [],
         "parent_acquirers": [],
         "sell_side_sponsors": [],
+        "jv_partners": [],
         "sellers": [],
         "value_observations": [],
         "features": {"is_platform_investment": None, "is_secondary_buyout": None,

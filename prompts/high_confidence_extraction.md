@@ -1,6 +1,6 @@
 # High Confidence Extraction Prompt
 
-**Version:** 0.36 (two disclosure axes, answered separately)
+**Version:** 0.37 (jv_partners collected; consideration_type retired)
 **Repo path:** `prompts/high_confidence_extraction.md`
 
 ---
@@ -341,6 +341,30 @@ CARDINALITY IS NOT A LICENCE TO INFER. These arrays change how many parties can 
 recorded, not what counts as evidence for one. Every rule above about when a role
 applies and what establishes it is unchanged. Do not add a party to an array that you
 would not have put in the scalar field.
+
+JOINT VENTURE PARTIES
+
+- jv_partners: one item per party the source identifies as forming, contributing to,
+  or taking an ownership interest in a NEWLY FORMED joint venture.
+    name: the partner, as the source names it.
+  Populate ONLY when DEAL TYPE is JOINT_VENTURE. Empty array `[]` for every other deal
+  type -- this is not a general-purpose "other parties" array, and no other
+  classification authors it.
+
+  DO NOT INFER AN UNNAMED PARTNER. Record only the parties the source actually names.
+  A source stating "a 50/50 joint venture" without naming both sides supports only the
+  party or parties it names, not a symmetric pair invented to fill the other seat.
+
+  AN EXISTING JV IS NOT THIS ARRAY'S CONCERN. When an already-formed joint venture
+  entity is itself the acquirer or target of a DIFFERENT transaction -- buying another
+  company, or being bought -- that is an ordinary transaction under its own deal type,
+  and the JV entity's name goes in acquirer/target/acquirers/sellers exactly as it
+  would for any other buyer or target. Do not populate jv_partners merely because the
+  word "joint venture" appears in a party's own name; this array records who is
+  forming THIS transaction's new JV, not what kind of entity a party happens to be.
+
+  ALWAYS AN ARRAY, INCLUDING EMPTY, REQUIRED ON EVERY TRANSACTION ELEMENT -- same
+  convention as the six party arrays above.
 
 parent_seller:
 - name: Parent company divesting the target (when target_type is subsidiary,
@@ -763,15 +787,6 @@ financials_disclosure_status = DISCLOSED. The reverse happens just as often: a
 price with no company financials is DISCLOSED terms and UNKNOWN financials. Do not
 copy one answer into the other field.
 
-consideration_type:
-Classify the consideration structure if determinable from the source:
-  cash — all-cash deal
-  stock — all-stock deal
-  cash_and_stock — mixed consideration
-  election — shareholder election between cash and stock
-  other — other structure (e.g., earnout-only, complex)
-  null — not determinable from this source
-
 TARGET FINANCIALS
 
 target_financials:
@@ -957,6 +972,7 @@ code fences, no preamble.
       "parent_sellers": [],
       "parent_acquirers": [],
       "sell_side_sponsors": [],
+      "jv_partners": [],
       "deal": {
         "pct_acquired": null,
         "stake_transition_type": null,
@@ -995,7 +1011,6 @@ code fences, no preamble.
       "round_size": null,
       "financials_disclosure_status": "DISCLOSED",
       "transaction_terms_disclosure_status": "DISCLOSED",
-      "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": null,
         "revenue_period_type": null,
@@ -1129,6 +1144,9 @@ Extract all transactions from this source.
       "sell_side_sponsors": [
         {"name": "string"}
       ],
+      "jv_partners": [
+        {"name": "string"}
+      ],
       "reported_multiples": [
         {
           "multiple_type": "EV_REVENUE | EV_EBITDA | EV_EBIT | EV_FCF | PE | PB | PTBV",
@@ -1142,7 +1160,6 @@ Extract all transactions from this source.
       "round_size": "number | null",
       "financials_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
       "transaction_terms_disclosure_status": "DISCLOSED | UNDISCLOSED | UNKNOWN",
-      "consideration_type": "cash | stock | cash_and_stock | election | other | null",
       "target_financials": {
         "revenue_amount": "number | null",
         "revenue_period_type": "LTM | NTM | ANNUAL | QUARTERLY | INTERIM_YTD | null",
@@ -1247,7 +1264,6 @@ Output:
       ],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
-      "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": 120000000,
         "revenue_period_type": "ANNUAL",
@@ -1344,7 +1360,6 @@ Output:
       ],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": true},
       "financials_disclosure_status": "DISCLOSED",
-      "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": 385000000,
         "revenue_period_type": "LTM",
@@ -1430,7 +1445,6 @@ Output:
       "value_observations": [],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "UNDISCLOSED",
-      "consideration_type": null,
       "target_financials": {
         "revenue_amount": null,
         "revenue_period_type": null,
@@ -1526,7 +1540,6 @@ Output:
       ],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
-      "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": 280000000,
         "revenue_period_type": "LTM",
@@ -1604,7 +1617,6 @@ Output:
       "value_observations": [],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "UNDISCLOSED",
-      "consideration_type": null,
       "target_financials": {
         "revenue_amount": null, "revenue_period_type": null,
         "revenue_period_end": null, "ebitda_amount": null,
@@ -1661,7 +1673,6 @@ Output:
       ],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
-      "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": null, "revenue_period_type": null,
         "revenue_period_end": null, "ebitda_amount": null,
@@ -1721,7 +1732,6 @@ Output:
       "value_observations": [],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
-      "consideration_type": null,
       "target_financials": {
         "revenue_amount": 200000000,
         "revenue_period_type": "NTM",
@@ -1803,7 +1813,6 @@ Output:
       ],
       "features": {"is_secondary_buyout": null, "is_merger_of_equals": null, "is_going_private_outcome": null},
       "financials_disclosure_status": "DISCLOSED",
-      "consideration_type": "cash",
       "target_financials": {
         "revenue_amount": 210000000,
         "revenue_period_type": "ANNUAL",
@@ -1953,3 +1962,4 @@ the case most likely to be mistyped: a public target is not evidence of a tender
 | 0.34 | 2026-08-27 | **PARENT_ACQUIRER and SPONSOR_SELLER are collected.** Two roles the target model requires and this implementation never authored at all. `parent_acquirers` is the mirror of `parent_sellers` -- the model calls its absence "an inventory omission, not a collapse", since PARENT_SELLER existed and its mirror was simply not listed. `sell_side_sponsors` is the mirror of `buy_side_sponsors` -- sponsor side is explicit in the model because side is meaningful role information, and only the buy side was being collected. Unlike 0.33 these are **coverage, not cardinality**: nothing was being flattened because nothing was being collected. The representation is the same either way, so this extends the existing array shape rather than adding a path. **Evidence mirrors the opposite side, unchanged, and no inference is broadened**: a parent acquirer needs the source to place a DIFFERENT, higher company above the buyer, and a sell-side sponsor needs the source to establish the selling side. Two mirror-image confusions are ruled out explicitly -- a corporate parent OWNS the buyer while a sponsor BACKS it, so the same firm is not put in both; and a sponsor's side comes from the source, never from the absence of the other side, so an unestablished side puts the sponsor in NEITHER array rather than one by elimination. A buyer is never repeated as its own parent. SELLER, JV_PARTNER and UNDERWRITER stay unauthored -- the model lists them and defines none of them, and authoring a role with no qualifying test would mean inventing it. |
 | 0.35 | 2026-08-27 | **SELLER: the party actually disposing.** The buyer side of the hierarchy was collected and the sell side was only half of it -- `parent_sellers` held the corporate parent above a disposing party, and the disposing party itself had nowhere to go. The mirror now runs the same way on both sides: X acquires makes X the buyer, X-a-subsidiary-of-Y acquires makes X the buyer with Y the parent acquirer, so X sells makes X the seller and X-a-subsidiary-of-Y sells makes X the seller with Y the parent seller. **A parent seller is not a substitute for a seller** -- promoting a parent into the seller's place, or leaving `sellers` empty because `parent_sellers` is populated, loses exactly the fact this array exists to hold. **Owning is not selling**: a party identified as an owner, holder or backer is not a seller, because ownership is a state and disposing is an act, and no seller is inferred from who owned the target, from the target's own identity, from sponsor backing or from the transaction's structure. **The target is not automatically the seller** -- being bought is a different sentence from disposing of something. Most acquisition releases name no disposing party, and an empty array is the ordinary answer rather than a gap to fill by reasoning. SPONSOR_SELLER stays a different participation: a sponsor backs a party on the selling side, a seller disposes, and a firm established as both is recorded once in each. JV_PARTNER and UNDERWRITER stay unauthored. |
 | 0.36 | 2026-08-27 | **Disclosure becomes two axes, because a source settles them independently.** One field was carrying two questions: this contract asked it to "classify whether financial terms are disclosed" and the summary used it to license "Financial terms were not disclosed" -- both about the DEAL -- while the target model defines the same field as the disclosure state for the TARGET's operating financials. A release saying "terms of the transaction were not disclosed" while quoting the target's revenue is an ordinary sentence, and under one field it could only be recorded by choosing an axis and being wrong about the other. `financials_disclosure_status` now means the target's own operating financials and nothing else; `transaction_terms_disclosure_status` is added for the deal's value, price, consideration and terms. Same vocabulary on both, same meanings: DISCLOSED is at least one relevant fact on THAT axis and never completeness, UNDISCLOSED requires the source to say so, UNKNOWN is silence. **The mixed answer is the common case** and the prompt says so with a worked example, because copying one answer into the other field is the failure this correction exists to prevent. `PARTIALLY_DISCLOSED` is deliberately not added -- the baseline records it and the reconciliation is open. `value_type = UNDISCLOSED` is untouched and remains an affirmative signal. |
+| 0.37 | 2026-09-03 | **Two closure items from the HC alignment review. `jv_partners` collected; `consideration_type` retired.** (1) A real historical extraction (Wärtsilä/RCT Solutions, pre-0.27) showed the representational gap a JOINT_VENTURE event forces: with no party shape for co-forming partners, the model invented a synthetic acquirer name and a `consortium` type for a transaction with no buyer or target at all. `jv_partners` is a seventh party array, same preservation pattern as the other six, populated ONLY when DEAL TYPE is JOINT_VENTURE, name only, no invented per-partner attributes, and never populated merely because an already-formed JV is the buyer or target of a DIFFERENT, ordinary transaction. (2) `consideration_type` is removed from this contract. It was added at 0.12 as "an interim field (pending consideration_component table)" -- that table now exists as `low_confidence_extraction`'s `consideration_components`, which reliably preserves a stated form with a null amount on real private deals (cash-and-stock, amount undisclosed; cash-only, amount undisclosed), and the canonical `consideration_type` has been fully derived from those typed components, form-only, with zero dependency on this field, for as long as either has existed. Removing it changes nothing observable: it was never in the HC observation field group and never reached `transaction_field_observation` or canonical output under any configuration. This is not licence to infer consideration from missing terms -- that discipline was never this field's job and stays with `low_confidence_extraction`'s own evidence-only components. |

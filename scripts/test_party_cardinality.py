@@ -42,9 +42,11 @@ WHAT THIS IS NOT
 No entity resolution, deduplication, alias matching, canonical entity id, `entity` row
 or `transaction_participant` row. Matching a name to an identity is separate work.
 
-Roles this implementation does not author at all -- SELLER, SPONSOR_SELLER,
-PARENT_ACQUIRER, LENDER, JV_PARTNER, UNDERWRITER -- are coverage gaps rather than
-collapses; adding them would be new extraction, not cardinality preservation.
+Roles this implementation does not author at all -- LENDER, UNDERWRITER -- are
+coverage gaps rather than collapses; adding them would be new extraction, not
+cardinality preservation. JV_PARTNER joined the collected roles at HC 0.37 (see
+scripts/test_jv_partner.py) -- a seventh array, same preservation pattern, gated to
+a JOINT_VENTURE event rather than to the buyer/seller hierarchy this file covers.
 
 TARGET is excluded. `target_name` does hold multi-name values -- 'Priority Dispatch,
 Inc. and Diamond Expedited' in the current corpus -- but that may mean decomposition
@@ -117,6 +119,7 @@ def test_prompt() -> None:
               '"sellers": []'):
         check(f"response slot {k[:24]}", k in flat, True)
     check("all six keys are required", "All six keys are required" in flat, True)
+    check("prompt version is 0.37", hc._VERSION, "0.37")
 
     print("\nThe seller hierarchy mirrors the buyer hierarchy:")
     # The failure this exists to prevent: a parent standing in for the seller.
@@ -156,7 +159,6 @@ def test_prompt() -> None:
           "target_type is subsidiary, business_unit or assets" in flat, True)
     check("only buyers carry a type",
           "no per-party attribute" in flat or "type: that firm's own classification" in flat, True)
-    check("prompt version is 0.36", hc._VERSION, "0.36")
 
 
 # ---------------------------------------------------------------------------
@@ -380,10 +382,11 @@ def test_boundaries() -> None:
 
     print("\nUnauthored roles are not added:")
     flat = _norm(load_prompt_file("high_confidence_extraction")["system"])
-    # SELLER, JV_PARTNER and UNDERWRITER stay unauthored: the target model lists them
-    # and defines none of them, so authoring one would mean inventing its qualifying
-    # test. LENDER and the financing-advisory specialty are a separate LC-owned slice.
-    for role in ("underwriters", "jv_partners"):
+    # UNDERWRITER stays unauthored: the target model lists it and defines no
+    # qualifying test, so authoring it would mean inventing one. LENDER and the
+    # financing-advisory specialty are a separate LC-owned slice. JV_PARTNER joined
+    # the collected roles at HC 0.37 -- see scripts/test_jv_partner.py, not here.
+    for role in ("underwriters",):
         check(f"{role} absent", role in flat, False)
 
     print("\nTARGET is excluded, deliberately:")

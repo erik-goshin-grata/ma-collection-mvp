@@ -231,6 +231,7 @@ def main() -> None:
             "parent_sellers": [],
             "parent_acquirers": [],
             "sell_side_sponsors": [],
+            "jv_partners": [],
             "sellers": [],
             "value_observations": []}
     check("a clean response validates", hc._validate(dict(base)) is None, True)
@@ -269,6 +270,7 @@ def main() -> None:
                               "parent_sellers": [],
                               "parent_acquirers": [],
                               "sell_side_sponsors": [],
+                              "jv_partners": [],
                               "sellers": [],
                               "value_observations": []})
     check("Ursa Major: amount null", ursa.get("amount"), None)

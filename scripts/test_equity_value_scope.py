@@ -180,6 +180,7 @@ def _hc_result(*, with_stake_equity: bool) -> dict:
         "parent_sellers": [],
         "parent_acquirers": [],
         "sell_side_sponsors": [],
+        "jv_partners": [],
         "sellers": [],
         "value_observations": observations,
         "features": {

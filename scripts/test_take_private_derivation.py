@@ -323,6 +323,7 @@ def _hc_response(outcome: object) -> dict:
             "parent_sellers": [],
             "parent_acquirers": [],
             "sell_side_sponsors": [],
+            "jv_partners": [],
             "sellers": [],
             "value_observations": [],
             "features": {"is_secondary_buyout": None, "is_merger_of_equals": None,

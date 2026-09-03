@@ -837,7 +837,7 @@ Output:
 }
 ```
 
-**Example 5 — SAFE with undisclosed amount:**
+**Example 5 — Instrument not stated: consideration_type stays null:**
 
 Input:
 ```
@@ -897,14 +897,24 @@ Output:
         "closed_date_precision": "exact"
       },
       "financials_disclosure_status": "UNDISCLOSED",
-      "consideration_type": "safe",
+      "consideration_type": null,
       "pct_acquired": null,
       "model_confidence": "HIGH",
-      "notes": "YC typically invests via SAFE; consideration_type inferred from investor type and pre-seed stage. Amount explicitly undisclosed."
+      "notes": "Instrument not stated. Y Combinator commonly invests via SAFE, and this stage is a pre-seed round, but neither fact is a statement about THIS instrument -- consideration_type stays null rather than inferred from investor identity or round stage."
     }
   ]
 }
 ```
+
+This is the same discipline as `pct_acquired` above, applied to the instrument: the source
+never names a security (no "SAFE", "convertible note", "preferred stock", or similar), so
+`consideration_type` is null. Y Combinator's typical investment vehicle and the round's
+pre-seed stage are both real, well-known facts about the *investor* and the *stage* -- and
+both are exactly the kind of general/statistical knowledge rule 1 already forbids using to
+fill a gap the source left open. The same applies in the other direction: `GROWTH_EQUITY`
+does not by itself license `equity`, and `VENTURE_DEBT` does not by itself license `debt` --
+each is a real, common pattern, and neither is a statement the source made about this
+transaction's own instrument.
 
 ---
 
@@ -972,7 +982,7 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | Model returns `pct_acquired` as `"65%"`, `0`, `>100`, or a range | Parser clears the field with a warning and keeps the extraction; a bad optional percentage never fails the row |
 | Model returns single transaction for a multi-investment portfolio page | Few-shot Example 4 addresses; parser checks array length vs source signals |
 | Model conflates facility_size and round.size for VENTURE_DEBT | Example 3 addresses; notes field captures |
-| Model returns SAFE for all pre-seed rounds regardless of source language | Example 5 note flags that this is an inference; monitor via QA |
+| Model returns a non-null `consideration_type` (e.g. SAFE) from investor identity or round stage alone, with no instrument language in the source | §4's CONSIDERATION TYPE definition and Example 5 both instruct null in this case; not a delivered-contract defect, but a real risk from the model's own general knowledge about common investor patterns -- monitor via QA |
 | Legacy uppercase investor_type (VC_FIRM etc.) | Parser normalizes to lowercase; logs warning |
 | `financials_disclosure_status` or `transaction_terms_disclosure_status` missing | Parser rejects — both axes are required |
 | Model reports a stated round size as `financials_disclosure_status = DISCLOSED` | Round size is the TERMS axis; the prompt says so and works the mixed answer both ways |

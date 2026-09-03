@@ -34,7 +34,7 @@ from logger import get_logger
 from prompts.base import PromptFailure, call_prompt, load_prompt_file, register_prompt_version
 
 _PROMPT_NAME = "high_confidence_extraction"
-_VERSION = "0.36"
+_VERSION = "0.37"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 
 _REQUIRED_KEYS = frozenset({
@@ -52,6 +52,7 @@ _REQUIRED_KEYS = frozenset({
     "parent_acquirers",
     "sell_side_sponsors",
     "sellers",
+    "jv_partners",
     "reported_multiples",
     "model_confidence",
     "deal",
@@ -95,7 +96,6 @@ _RETIRED_ACQUIRER_TYPES: dict[str, str] = {
 _VALID_PERIOD_TYPES_V2 = frozenset({"LTM", "NTM", "ANNUAL", "QUARTERLY", "INTERIM_YTD"})
 _VALID_DATE_PRECISIONS = frozenset({"exact", "month", "quarter", "year"})
 _VALID_FINANCIALS_DISCLOSURE = frozenset({"DISCLOSED", "UNDISCLOSED", "UNKNOWN"})
-_VALID_CONSIDERATION_TYPES = frozenset({"cash", "stock", "cash_and_stock", "election", "other"})
 # V3 §T13 — subordinate to target_type = assets. Answers what kind of asset is being
 # transacted, NOT the target's sector: a pipeline is INFRASTRUCTURE because that is the
 # thing transacted, whoever buys it. Settled and extensible; do not widen speculatively.
@@ -239,11 +239,6 @@ def _validate(result: dict) -> str | None:
     if tds not in _VALID_FINANCIALS_DISCLOSURE:
         return f"invalid transaction_terms_disclosure_status: {tds!r}"
 
-    # consideration_type — optional but must be valid if present
-    ct = result.get("consideration_type")
-    if ct is not None and ct not in _VALID_CONSIDERATION_TYPES:
-        return f"invalid consideration_type: {ct!r}"
-
     stt = (result.get("deal") or {}).get("stake_transition_type")
     if stt is not None and stt not in _VALID_STAKE_TRANSITION_TYPES:
         return f"invalid deal.stake_transition_type: {stt!r}"
@@ -297,6 +292,7 @@ _REPORTED_MULTIPLE_KEYS = frozenset({
 _PARTY_ARRAY_KEYS = (
     "acquirers", "buy_side_sponsors", "parent_sellers",
     "parent_acquirers", "sell_side_sponsors", "sellers",
+    "jv_partners",
 )
 
 
@@ -627,6 +623,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             parent_acquirers_json = _parties_json(txn, "parent_acquirers", log, eid)
             sell_side_sponsors_json = _parties_json(txn, "sell_side_sponsors", log, eid)
             sellers_json = _parties_json(txn, "sellers", log, eid)
+            jv_partners_json = _parties_json(txn, "jv_partners", log, eid)
 
             nd = dict(base_nd)
             hc_notes = txn.get("notes")
@@ -647,6 +644,20 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                     row["source_raw_id"], asset_type, effective_target_type,
                 )
                 asset_type = None
+
+            # jv_partners is subordinate to a JOINT_VENTURE event, same enforcement
+            # pattern as asset_type above: the validator sees only the model response,
+            # while the resolved event type comes from Stage 3 on the row. A non-empty
+            # array supplied for any other event type is dropped and logged rather than
+            # promoted -- this is not a general-purpose "other parties" array.
+            effective_event_type = row["v2_event_type"] or row["deal_type"]
+            if jv_partners_json != "[]" and effective_event_type != "JOINT_VENTURE":
+                log.warning(
+                    "extraction_id/source_raw_id=%s jv_partners supplied for "
+                    "v2_event_type=%r — clearing; jv_partners is valid only for "
+                    "JOINT_VENTURE", row["source_raw_id"], effective_event_type,
+                )
+                jv_partners_json = "[]"
 
             # is_going_private_outcome is `true | null`, not a three-state boolean. The model
             # is never asked to establish that a target REMAINS publicly traded, so a `false`
@@ -702,6 +713,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 parent_acquirers_json,
                 sell_side_sponsors_json,
                 sellers_json,
+                jv_partners_json,
                 txn.get("round_size"),   # primary-capital capture (value fields null when set)
                 tf.get("revenue_amount"),
                 tf.get("revenue_period_type"),       # legacy column
@@ -721,7 +733,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 tf.get("balance_sheet_as_of_date"),
                 txn.get("financials_disclosure_status"),  # new
                 txn.get("transaction_terms_disclosure_status"),
-                txn.get("consideration_type"),            # new (direct from prompt)
                 txn.get("model_confidence"), _VERSION, json.dumps(nd) if nd else None,
             )
 
@@ -752,6 +763,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         acquirers = ?,  buy_side_sponsors = ?,  parent_sellers = ?,
                         parent_acquirers = ?,  sell_side_sponsors = ?,
                         sellers = ?,
+                        jv_partners = ?,
                         round_size = ?,
                         target_revenue = ?,
                         target_revenue_period_type = ?,  target_revenue_period_type_v2 = ?,
@@ -765,7 +777,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         balance_sheet_as_of_date = ?,
                         financials_disclosure_status = ?,
                         transaction_terms_disclosure_status = ?,
-                        consideration_type = COALESCE(consideration_type, ?),
                         model_confidence = ?,  hc_prompt_version = ?,  notes = ?,
                         multi_transaction_index = ?,  multi_transaction_total = ?,
                         updated_at = ?
@@ -812,6 +823,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         reported_multiples,
                         acquirers, buy_side_sponsors, parent_sellers,
                         parent_acquirers, sell_side_sponsors, sellers,
+                        jv_partners,
                         round_size,
                         target_revenue,
                         target_revenue_period_type, target_revenue_period_type_v2,
@@ -825,7 +837,6 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                         balance_sheet_as_of_date,
                         financials_disclosure_status,
                         transaction_terms_disclosure_status,
-                        consideration_type,
                         model_confidence, hc_prompt_version, notes,
                         dt_prompt_version,
                         multi_transaction_index, multi_transaction_total,

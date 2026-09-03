@@ -1,6 +1,6 @@
 # Low-Confidence Extraction Prompt
 
-**Version:** 0.13 (a financing provider, not a lender)
+**Version:** 0.14 (percentage is source-stated, never computed)
 **Repo path:** `prompts/low_confidence_extraction.md`
 
 ---
@@ -60,7 +60,7 @@ Both legacy and V2 field names are accepted during the migration window.
 ```json
 ```
 
-The `value_amount` and `value_type` from high-confidence extraction are passed so the model can sanity-check component sums and compute percentages against total deal value.
+The `value_amount` and `value_type` from high-confidence extraction are passed for context only -- e.g. to sanity-check that stated component amounts are consistent with the deal's own stated scale. They are never a basis for computing a component's `percentage`; that field is populated only from a percentage the source itself states.
 
 ---
 
@@ -163,7 +163,11 @@ Extract the forms of consideration in the deal as an array of components. For ea
 - form — enum: CASH, ACQUIRER_STOCK, TARGET_STOCK, EARNOUT, CVR, CONTINGENT_CONSIDERATION,
   DEBT_ASSUMED, RETAINED_EQUITY, OTHER
 - amount — dollar amount of this component (null if not stated or not calculable)
-- percentage — percentage of total deal value (null if not calculable)
+- percentage — percentage of total deal value, ONLY when the source states it directly
+  (e.g. "60% cash and 40% stock"). Never compute this from the component's amount and
+  the deal's total value, even when both are stated and the arithmetic is trivial. Null
+  is the ordinary answer; a source stating amounts but no percentage breakdown gets null
+  here, not a calculated one.
 - description — brief text describing the component (e.g., "$400M cash at closing," "contingent value right paying up to $5 per share")
 
 form enum semantics:
@@ -211,7 +215,7 @@ Source language signals:
 
 When an earnout is present, add a component with form=EARNOUT:
 - amount: the maximum if "up to $X" is stated, or the stated amount; null when amount not disclosed
-- percentage: percentage of total deal value if calculable; null otherwise
+- percentage: percentage of total deal value, ONLY when the source states it directly; null otherwise. Never compute it from the earnout amount and the deal's total value.
 - description: brief summary of what triggers the payment and measurement period if stated
 
 When earnout amount is not stated: set amount=null, description="earnout present but amount not disclosed".
@@ -228,7 +232,7 @@ Source language signals:
 
 When a CVR is present, add a component with form=CVR:
 - amount: total aggregate CVR value if stated; null if only per-share stated and share count not inferable
-- percentage: null in most cases (CVR value often not computable as % of deal)
+- percentage: only when the source states it directly; null otherwise, which is the ordinary case for a CVR
 - description: what milestone unlocks the CVR payment, expiration if stated, tradeable status if stated
 
 LEAVE OUT EARNOUT and CVR entries entirely when:
@@ -240,7 +244,13 @@ Notes:
 - The consideration_type field (orchestrator-derived: CASH / STOCK / CASH_AND_STOCK / ELECTION / OTHER) reflects the primary structure. Earnouts and CVRs do NOT change consideration_type — a cash + earnout deal stays consideration_type=CASH. The has_earnout and has_cvr flags are derived downstream from the components array.
 
 Rules:
-- Do not derive cash/stock percentages if the release doesn't provide them — leave percentage null.
+- NEVER COMPUTE A PERCENTAGE. `percentage` is populated only from a percentage the
+  release states directly (e.g. "60% cash and 40% stock"). Do not divide a component's
+  amount by the deal's total value to produce one, even when the release states both
+  numbers and the division is exact -- a component amount is not a stated percentage,
+  and computing one here is the same mistake this contract forbids for deal value
+  itself. Leave percentage null whenever the release does not state a percentage
+  breakdown; this is the ordinary case, not a gap to fill by arithmetic.
 - Amounts should sum approximately to the deal value; do not force reconciliation.
 - For all-cash deals, record a single CASH entry with amount equal to the deal value.
 - Empty array is valid (terms not disclosed, or release doesn't detail components).
@@ -318,13 +328,13 @@ Return a single JSON object with exactly these fields. No prose, no Markdown cod
     {
       "form": "CASH",
       "amount": 50000000,
-      "percentage": 92.6,
+      "percentage": null,
       "description": "$50M cash at closing"
     },
     {
       "form": "EARNOUT",
       "amount": 4000000,
-      "percentage": 7.4,
+      "percentage": null,
       "description": "up to $4M tied to revenue milestones in years 1-2 post-close"
     }
   ],
@@ -389,7 +399,7 @@ Extract advisors, consideration components, and deal characteristic flags.
     {
       "form": "CASH",
       "amount": 500000000,
-      "percentage": 100.0,
+      "percentage": null,
       "description": "All-cash consideration paid at closing"
     }
   ],
@@ -452,7 +462,7 @@ Output:
      "advised_party_name": "Beta Industries", "advised_side": "SELL_SIDE"}
   ],
   "consideration_components": [
-    {"form": "CASH", "amount": 500000000, "percentage": 100.0, "description": "All-cash at closing"}
+    {"form": "CASH", "amount": 500000000, "percentage": null, "description": "All-cash at closing"}
   ],
   "flags": {
     "deal_attitude": "FRIENDLY",
@@ -490,9 +500,9 @@ Output:
 {
   "advisors": [],
   "consideration_components": [
-    {"form": "CASH", "amount": 400000000, "percentage": 50.0, "description": "$400M cash at closing"},
-    {"form": "ACQUIRER_STOCK", "amount": 200000000, "percentage": 25.0, "description": "$200M in Acme common stock at closing"},
-    {"form": "EARNOUT", "amount": 200000000, "percentage": 25.0, "description": "Up to $200M earnout over 3 years based on revenue"}
+    {"form": "CASH", "amount": 400000000, "percentage": null, "description": "$400M cash at closing"},
+    {"form": "ACQUIRER_STOCK", "amount": 200000000, "percentage": null, "description": "$200M in Acme common stock at closing"},
+    {"form": "EARNOUT", "amount": 200000000, "percentage": null, "description": "Up to $200M earnout over 3 years based on revenue"}
   ],
   "flags": {
     "deal_attitude": null,
@@ -508,7 +518,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": "Percentages against $800M max deal value"
+  "notes": null
 }
 ```
 
@@ -530,7 +540,7 @@ Output:
 {
   "advisors": [],
   "consideration_components": [
-    {"form": "CASH", "amount": 4500000000, "percentage": 100.0, "description": "$45.00 per share cash aggregate equity consideration"}
+    {"form": "CASH", "amount": 4500000000, "percentage": null, "description": "$45.00 per share cash aggregate equity consideration"}
   ],
   "flags": {
     "deal_attitude": "FRIENDLY",
@@ -568,8 +578,8 @@ Output:
 {
   "advisors": [],
   "consideration_components": [
-    {"form": "CASH", "amount": 50000000, "percentage": 92.6, "description": "$50M cash at closing"},
-    {"form": "EARNOUT", "amount": 4000000, "percentage": 7.4, "description": "up to $4M tied to revenue performance years 1-2 post-close"}
+    {"form": "CASH", "amount": 50000000, "percentage": null, "description": "$50M cash at closing"},
+    {"form": "EARNOUT", "amount": 4000000, "percentage": null, "description": "up to $4M tied to revenue performance years 1-2 post-close"}
   ],
   "flags": {
     "deal_attitude": null,
@@ -585,7 +595,7 @@ Output:
     "acquirer_fee_percentage": null
   },
   "model_confidence": "HIGH",
-  "notes": "Percentages against $54M max deal value"
+  "notes": null
 }
 ```
 
@@ -705,7 +715,7 @@ Output:
 {
   "advisors": [],
   "consideration_components": [
-    {"form": "CASH", "amount": 657700000, "percentage": 100.0, "description": "$24.55 cash per share for 100% of the company"}
+    {"form": "CASH", "amount": 657700000, "percentage": null, "description": "$24.55 cash per share for 100% of the company"}
   ],
   "flags": {
     "deal_attitude": null,
@@ -845,6 +855,54 @@ initiated a process to find one.
 
 ---
 
+**Example 10 — Consideration split stated as a percentage:**
+
+Input:
+```
+V2 EVENT TYPE: ACQUISITION
+TARGET TYPE: standalone_company
+EVENT HISTORY TYPE: ANNOUNCED
+DEAL VALUE: 900000000 USD (TRANSACTION_VALUE)
+
+TITLE: Acme Corp to Acquire Beta Industries for $900 Million in Cash and Stock
+BODY: Acme Corp today announced a definitive agreement to acquire Beta Industries for
+$900 million, with the consideration comprised of 60% cash and 40% Acme common stock.
+```
+
+Output:
+```json
+{
+  "advisors": [],
+  "consideration_components": [
+    {"form": "CASH", "amount": null, "percentage": 60.0, "description": "60% of consideration in cash"},
+    {"form": "ACQUIRER_STOCK", "amount": null, "percentage": 40.0, "description": "40% of consideration in Acme common stock"}
+  ],
+  "flags": {
+    "deal_attitude": null,
+    "approach_type": null,
+    "competing_bid": false,
+    "regulatory_approvals_required": false
+  },
+  "go_shop": {"has_go_shop": false, "go_shop_period_days": null},
+  "termination_fees": {
+    "target_fee_amount": null,
+    "target_fee_percentage": null,
+    "acquirer_fee_amount": null,
+    "acquirer_fee_percentage": null
+  },
+  "model_confidence": "HIGH",
+  "notes": null
+}
+```
+
+`percentage` is populated here, and only here among these examples, because the release
+states the split directly. `amount` stays null for both components: the release states no
+per-component dollar figure, and $900M x 60% is not a figure the release stated — computing
+one would be exactly the arithmetic this contract forbids in the other direction (Example 2's
+`percentage`, correctly left null, is the mirror case).
+
+---
+
 ## 8. Failure Modes
 
 | Failure | Handling |
@@ -877,3 +935,4 @@ initiated a process to find one.
 | 0.11 | 2026-08-24 | **Advisor participation: specialty and the advised participant become source facts.** The old shape asked for `advisor_type` (`FINANCIAL`/`LEGAL`/`OTHER`) and `advised_party` (`TARGET`/`ACQUIRER`/`PARENT_SELLER`/`BOTH`/`UNKNOWN`), and compressed both. `OTHER` was lossy **by written instruction** — this prompt's own definition read "OTHER covers fairness opinion providers, proxy solicitors, info agents, and accounting/tax advisors", so four named specialties were collapsed into one bucket with the evidence sitting in the source text. `BOTH` was worse: one advisor serving two participants is two participations, and a single row cannot say which two. **Replaced by** `advisor_specialty` (`financial_advisory` · `legal` · `accounting` · `tax` · `fairness_opinion` · `proxy_solicitation` · `information_agent` · `regulatory` · `communications` · null), `advised_party_name` (the specific party, as stated) and `advised_side` (`BUY_SIDE`/`SELL_SIDE`/null). Five of those specialties already exist in Grata; `tax`, `proxy_solicitation` and `information_agent` were accepted on the strength of being named in the old `OTHER` definition; `communications` is a Product addition. `restructuring` and `capital_markets` remain deferred pending extraction evidence. **A LENDER is not an advisor specialty** — providing capital and advising are different participations, and a firm doing both appears twice. **Name and side are independent**: neither is ever inferred from the other, and each stays null unless established. `BOTH` is removed from the contract; two parties means two entries. **Nothing is lost on read** — `type` and `advised_party` are retained and still written, historical `OTHER` keeps its meaning as evidence that a non-financial, non-legal specialty was observed, and the legacy pair now carries a compatibility projection rather than the Product model. Participant *resolution* is not here; capture is, so the stated identity stops being discarded while resolution is pending. |
 | 0.12 | 2026-08-27 | **Financing gets two participations instead of none.** This contract already said "A LENDER is NOT an advisor specialty. Providing capital and advising on a transaction are different participations; a firm doing both appears twice" -- and had nowhere to put the lender, so a financing provider was correctly kept out of the advisor list and then dropped. `lenders` is a new array: one item per party the source states is PROVIDING financing, `{name}` only. `lender_role` exists in the target model with no published vocabulary, so none is invented. `financing_advisory` joins the advisor specialties for the firm that advises on, structures, arranges or places the financing -- advice ABOUT capital. Its deferred candidate name was `capital_markets`, deferred for want of extraction evidence rather than on the semantics. **Arranging is not providing, and that is the whole distinction**: "arranged the financing", "placed the notes", "lead arranger" are financing_advisory, never a lender, and the prompt forbids reasoning that an arranger must also be lending. Equally, providing financing does not make a firm an advisor. A firm the source establishes in both is recorded once in each -- the advisor table carries no uniqueness constraint on the name and this contract already emits one row per advisor-and-party pair. An acquirer funding a deal from its own balance sheet is not lending to itself. Empty array is the ordinary answer. |
 | 0.13 | 2026-08-27 | **`LENDER` becomes `FINANCING_PROVIDER`.** `lender` names an instrument and a technical capacity; the participation actually collected is a party that **provides, commits, or leads** the provision of transaction financing. A release naming a firm as a commitment party, or as leading a financing, describes that participation exactly, and the old name either under-described it or invited a judgement about capacity this collection deliberately does not make -- the prompt now says so: do not classify the instrument or the capacity. **A rename, not a redefinition**: the same parties qualify, no boundary moves, and every test outcome is unchanged. The distinction from `financing_advisory` is untouched and remains the point -- arranging, structuring or placing financing is advice about capital and does not alone establish a provider, while a firm the source establishes in both is recorded once in each. One rule is added because the wider name makes it reachable: **leading is not arranging**. "Led the financing" states a role in providing it; "lead arranger" states a role in arranging it, and stays an advisor however senior it sounds. The staging column is renamed by a forward migration; migration 017 is left as it shipped. Funding's `investor_type = lender` is untouched -- that classifies what kind of investor joined a round, a different dimension. |
+| 0.14 | 2026-09-03 | **`consideration_components[].percentage` is source-stated only; the model stops computing it.** `value_amount`/`value_type` from high-confidence extraction were documented as being passed "so the model can... compute percentages against total deal value" -- and the delivered §4 RESPONSE FORMAT skeleton and four of the five percentage-bearing worked examples showed exactly that: dividing a component's stated dollar amount by the deal's stated total to produce a percentage the release never stated (Example 2's 50.0/25.0/25.0 from $400M/$200M/$200M against an $800M value; Example 4's equivalent against $54M). This is the same arithmetic this contract has always forbidden in the other direction for deal value itself, applied to a field where nothing had said so. `percentage` is now populated only from a percentage the source states directly (e.g. "60% cash and 40% stock" -- new Example 10); every other worked example's `percentage` is corrected to `null`, since none of their sources ever states one. `amount` is unaffected and stays exactly as evidence-gated as before -- a stated form with an undisclosed amount is still `null`, not an invented figure. No change to advisor, financing-provider, attitude/approach, or termination-fee semantics. |

@@ -231,6 +231,7 @@ def _hc_result(stake_transition_type):
         "parent_sellers": [],
         "parent_acquirers": [],
         "sell_side_sponsors": [],
+        "jv_partners": [],
         "sellers": [],
         "value_observations": [],
         "features": {

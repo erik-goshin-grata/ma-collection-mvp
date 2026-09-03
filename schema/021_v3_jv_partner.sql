@@ -1,0 +1,22 @@
+-- 021 — JV_PARTNER: the parties forming a joint venture.
+--
+-- A real historical extraction (Wärtsilä / RCT Solutions, HC 0.12, pre-0.27) exposed
+-- the representational gap: a JOINT_VENTURE event has no buyer and no target, but the
+-- prompt had no party shape for co-forming partners, so the model invented a synthetic
+-- acquirer name ("Wärtsilä / RCT Solutions Joint Venture") and acquirer_type=consortium
+-- to force the event into the ordinary acquirer/target shape.
+--
+-- One JSON column, one item per forming/contributing/ownership-taking party, following
+-- the same shape every other party role already uses. Populated ONLY when the
+-- classified event is JOINT_VENTURE; never populated merely because an already-formed
+-- JV entity is the acquirer or target of a different, ordinary transaction.
+--
+-- NOT IN SCOPE. No entity resolution, no per-partner type or other attribute, no new
+-- canonical Stage 9 behaviour -- preservation-only, exactly like the six existing party
+-- arrays (acquirers, buy_side_sponsors, parent_sellers, parent_acquirers, sell_side_
+-- sponsors, sellers), all of which are deliberately absent from aggregate.py's _FIELDS.
+--
+-- Sentinel-guarded and hand-registered in db.py::_apply_migrations. This directory is
+-- NOT globbed: a migration without a block in db.py never runs.
+
+ALTER TABLE staging_extraction ADD COLUMN jv_partners TEXT;
