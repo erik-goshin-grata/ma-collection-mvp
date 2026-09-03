@@ -18,12 +18,20 @@ relevancy result is nested under "relevancy":
         "reason_code": "ACQUISITION_ANNOUNCEMENT",
         "model_confidence": "HIGH",
         "notes": null,
-        "prompt_version": "relevancy_filter:0.8"
+        "prompt_version": "relevancy_filter:0.10"
       }
     }
 
 Stage 3 reads reason_code from notes["relevancy"]["reason_code"].
 RELEVANCY_FAILED rows are not retried automatically; use --mode=rerun-prompt.
+
+Also resolves source_raw.source_character / source_raw.source_tier (see
+lib/source_authority.py) for rows whose source character an acquisition path
+does not already know at ingestion. A row that arrives with source_character
+already set (e.g. a PR Newswire feed row, stamped FIRST_PARTY_ANNOUNCEMENT by
+adapters/pr_newswire.py at insert) is left untouched here: the model's answer
+for that row is computed but never applied, so a known classification is
+never subordinated to an unnecessary inference.
 
 Spec references: prompts/relevancy_filter.md, specs/pipeline.md §2 (Stage 2)
 """
@@ -36,6 +44,7 @@ import time
 from datetime import datetime, timezone
 
 from config import Config
+from lib.source_authority import SOURCE_CHARACTER_VALUES, resolve_tier
 from logger import get_logger
 from prompts.base import (
     PromptFailure, call_prompt, load_prompt_file, log_prompt_failure,
@@ -43,7 +52,7 @@ from prompts.base import (
 )
 
 _PROMPT_NAME = "relevancy_filter"
-_VERSION = "0.9"
+_VERSION = "0.10"
 _FULL_VERSION = f"{_PROMPT_NAME}:{_VERSION}"
 _VALID_CLASSIFICATIONS = frozenset({"RELEVANT", "NOT_RELEVANT"})
 _VALID_REASON_CODES = frozenset({
@@ -108,6 +117,18 @@ _REASON_CODE_ALIASES = {
 }
 
 
+def _normalize_source_character(source_character) -> str:
+    """Map an off-enum source_character to a valid value.
+
+    Never returns an invalid value: an unrecognized or missing answer
+    normalizes to UNKNOWN -- the same conservative floor
+    lib.source_authority.resolve_tier applies. It never invents authority
+    the model did not establish.
+    """
+    sc = (source_character or "").strip().upper()
+    return sc if sc in SOURCE_CHARACTER_VALUES else "UNKNOWN"
+
+
 def _normalize_reason_code(reason_code, classification: str) -> str:
     """Map a non-canonical reason_code to a valid enum value.
 
@@ -144,7 +165,7 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
 
     rows = conn.execute(
         """
-        SELECT source_raw_id, title, clean_text, notes
+        SELECT source_raw_id, title, clean_text, notes, source_character
         FROM source_raw
         WHERE source_status = 'FETCHED'
           AND source_type IN ('PR_NEWSWIRE', 'WEB_URL')
@@ -182,7 +203,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             )
         except PromptFailure as exc:
             log.warning("source_raw_id=%d prompt failed: %s", sid, exc)
-            _write(conn, sid, "RELEVANCY_FAILED", row["notes"], None)
+            _write(conn, sid, "RELEVANCY_FAILED", row["notes"], None,
+                   existing_character=row["source_character"])
             failed += 1
             time.sleep(_SLEEP)
             continue
@@ -199,7 +221,8 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 error_message=f"unexpected classification: {classification!r}",
                 prompt_version=_FULL_VERSION, run_id=run_id,
             )
-            _write(conn, sid, "RELEVANCY_FAILED", row["notes"], result)
+            _write(conn, sid, "RELEVANCY_FAILED", row["notes"], result,
+                   existing_character=row["source_character"])
             failed += 1
             time.sleep(_SLEEP)
             continue
@@ -217,8 +240,24 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             result["reason_code"] = normalized
             reason_code = normalized
 
+        # source_character/source_tier: only resolved from the model's answer
+        # when no acquisition path already established it at ingestion. A row
+        # that arrives already known (existing_character set) skips inference
+        # entirely -- the model's answer is neither requested nor needed, and
+        # is not consulted even if present.
+        resolved_character = None
+        if row["source_character"] is None:
+            resolved_character = _normalize_source_character(result.get("source_character"))
+            if resolved_character != result.get("source_character"):
+                log.info(
+                    "source_raw_id=%d normalized off-enum source_character %r → %r",
+                    sid, result.get("source_character"), resolved_character,
+                )
+            result["source_character"] = resolved_character
+
         new_status = "RELEVANT" if classification == "RELEVANT" else "NOT_RELEVANT"
-        _write(conn, sid, new_status, row["notes"], result)
+        _write(conn, sid, new_status, row["notes"], result,
+               existing_character=row["source_character"], resolved_character=resolved_character)
 
         if new_status == "RELEVANT":
             relevant += 1
@@ -251,8 +290,18 @@ def _write(
     status: str,
     existing_notes: str | None,
     result: dict | None,
+    *,
+    existing_character: str | None = None,
+    resolved_character: str | None = None,
 ) -> None:
-    """Update source_status and merge relevancy data into source_raw.notes."""
+    """Update source_status and merge relevancy data into source_raw.notes.
+
+    source_character/source_tier are written only when `existing_character`
+    is None (no acquisition path already established it) and
+    `resolved_character` is given (a successful classification produced
+    one). A row that arrived already known, or one that failed
+    classification, is left exactly as it was.
+    """
     if existing_notes:
         try:
             nd = json.loads(existing_notes)
@@ -272,8 +321,14 @@ def _write(
             "prompt_version": _FULL_VERSION,
         }
 
-    conn.execute(
-        "UPDATE source_raw SET source_status=?, notes=?, updated_at=? WHERE source_raw_id=?",
-        (status, json.dumps(nd), datetime.now(timezone.utc).isoformat(), source_raw_id),
-    )
+    sql = "UPDATE source_raw SET source_status=?, notes=?, updated_at=?"
+    params = [status, json.dumps(nd), datetime.now(timezone.utc).isoformat()]
+    if existing_character is None and resolved_character is not None:
+        sql += ", source_character=?, source_tier=?"
+        params.append(resolved_character)
+        params.append(resolve_tier(source_character=resolved_character))
+    sql += " WHERE source_raw_id=?"
+    params.append(source_raw_id)
+
+    conn.execute(sql, params)
     conn.commit()

@@ -2,7 +2,7 @@
 Stage 9: aggregate
 
 For each transaction cluster (CLUSTERED staging_extraction rows sharing a
-transaction_cluster_id), applies deterministic tier rules (T1 > T2 > T3) to
+transaction_cluster_id), applies deterministic tier rules (T1 > T2 > T3 > T4) to
 resolve field values from all cluster members into a single canonical value.
 
 When two sources of equal tier disagree on the same field, the aggregation
@@ -20,10 +20,17 @@ After field resolution:
   - transaction_source rows are inserted linking the transaction to its sources
   - All cluster members transition to status = AGGREGATED
 
-Tier mapping (from source_raw.source_tier):
-  T1: SEC filings (SEC_8K_ITEM_*. SEC_EXHIBIT_*)  — most authoritative
-  T2: PR_NEWSWIRE                                  — standard
-  T3: (future sources)                             — advisory only
+Tier mapping (from source_raw.source_tier -- see lib/source_authority.py):
+  T1: known regulatory/operative transaction evidence (SEC 8-K item narrative,
+      EX-2.x operative agreements)                          — most authoritative
+  T2: substantive first-party transaction disclosure (a PR Newswire /
+      Business Wire / GlobeNewswire issuer feed; a company/sponsor/investor's
+      own substantive announcement; an EX-99.x that is the company's own
+      press release)
+  T3: credible original third-party reporting, or thin firsthand evidence
+      (a portfolio page, an advisor tombstone)
+  T4: derivative/secondary/lower-authority reporting (rewrites, aggregation,
+      syndication), or a source whose character could not be established
 
 Spec references: prompts/aggregation.md, specs/pipeline.md §2 (Stage 9)
 """

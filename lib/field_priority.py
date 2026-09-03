@@ -5,7 +5,11 @@ Both stages reference the same priority tables to prevent drift.
 """
 
 # Source-tier ordering. Index 0 = highest priority.
-TIER_ORDER: tuple[str, ...] = ("T1", "T2", "T3")
+# T4 (derivative/secondary/lower-authority reporting) added for the
+# source-authority model in lib/source_authority.py -- resolution logic in
+# stages/aggregate.py that walks this tuple or ranks by its .index() needs
+# no other change; T4 simply sorts last among recognized tiers.
+TIER_ORDER: tuple[str, ...] = ("T1", "T2", "T3", "T4")
 
 # Per-field filing-type priority for fields where agreement text is authoritative.
 # Index 0 = highest priority. Fields absent from this dict default to
@@ -18,10 +22,8 @@ FIELD_FILING_TYPE_PRIORITY: dict[str, list[str]] = {
     "acquirer_fee_percentage":          ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A", "S4"],
     "has_go_shop":                      ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A"],
     "go_shop_period_days":              ["8K_EXHIBIT_21", "DEFM14A", "DEFA14A"],
-    # Closing conditions: agreement is legal source
-    "has_mac_clause":                   ["8K_EXHIBIT_21", "DEFM14A", "S4"],
-    "requires_target_shareholder_vote": ["8K_EXHIBIT_21", "DEFM14A"],
-    "target_vote_threshold":            ["8K_EXHIBIT_21", "DEFM14A"],
+    # regulatory_approvals_required: no explicit rule = default (most-recent wins),
+    # same as closing_conditions_summary had before it (V3 alignment, 2026-09-02)
     # Merger structure: agreement establishes
     "merger_structure":                 ["8K_EXHIBIT_21", "DEFM14A", "S4"],
     # per_share_price / consideration_components: most-recent wins (DEFA14A captures bumps)

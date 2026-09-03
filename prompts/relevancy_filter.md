@@ -1,6 +1,6 @@
 # Relevancy Filter Prompt
 
-**Version:** 0.9 (a sale process is not a transaction)
+**Version:** 0.10 (source character, for sources whose character ingestion does not already know)
 **Repo path:** `prompts/relevancy_filter.md`
 
 ---
@@ -153,15 +153,30 @@ Note on suffixes: Do NOT append _ANNOUNCEMENT, _CLOSING, _COMPLETION, _AMENDMENT
 
 Precision is not the goal — enum discipline is. The reason_code is for categorical filtering, not descriptive tagging.
 
+SOURCE CHARACTER
+
+In addition to classifying relevance, classify the source's character — whose voice this content is in. This is independent of the classification above: judge it the same way whether the release turns out to be RELEVANT or NOT_RELEVANT. Choose exactly one of five values:
+
+- FIRST_PARTY_ANNOUNCEMENT — a transaction participant (the company, target, acquirer, sponsor, or investor) is substantively announcing its OWN transaction. The company's own release, in its own voice, about its own deal.
+- THIN_FIRST_PARTY_RECORD — firsthand, but a sparse record or reference rather than a substantive transaction announcement — e.g. a listing or brief mention on a participant's own page, not a release written to disclose the deal.
+- ORIGINAL_REPORTING — third-party reporting that appears to be independently reporting the transaction, not merely republishing or rephrasing another party's announcement.
+- DERIVATIVE_REPORTING — a rewrite, aggregation, syndicated copy, or otherwise derivative secondary coverage of a transaction someone else already reported or announced.
+- UNKNOWN — source character cannot be established confidently from the text.
+
+Judge this from the text's own voice and framing — who is speaking, and in what capacity — not from the domain, feed, or distribution channel it arrived through. The same wire can carry both an issuer's own release and a third party's syndicated rewrite; the words on the page decide, not where they were fetched from.
+
+This field does not determine relevance and does not replace reason_code. It answers a different question — whose voice, not what kind of event.
+
 RESPONSE FORMAT
 
-Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 24 enum values listed above — no exceptions.
+Return a single JSON object with exactly these fields. No prose, no Markdown code fences, no preamble. The reason_code field must be one of the 24 enum values listed above — no exceptions. The source_character field must be one of the five values listed above — no exceptions.
 
 {
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
-  "notes": null
+  "notes": null,
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 
 All fields are required. Use null for optional fields that have no value.
@@ -189,7 +204,8 @@ Classify this release.
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
-  "notes": null
+  "notes": null,
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 ```
 
@@ -201,6 +217,7 @@ Classify this release.
 | `reason_code` | enum | See the REASON CODES lists in §4 |
 | `model_confidence` | enum | `HIGH`, `MEDIUM`, `LOW` |
 | `notes` | string or null | Brief explanation if notable |
+| `source_character` | enum | `FIRST_PARTY_ANNOUNCEMENT`, `THIN_FIRST_PARTY_RECORD`, `ORIGINAL_REPORTING`, `DERIVATIVE_REPORTING`, `UNKNOWN` — see SOURCE CHARACTER in §4. Ignored by the stage when an acquisition path already established this at ingestion (`source_raw.source_character` already set); resolved into `source_tier` via `lib/source_authority.py` otherwise. |
 
 ---
 
@@ -220,7 +237,8 @@ Output:
   "classification": "RELEVANT",
   "reason_code": "ACQUISITION_ANNOUNCEMENT",
   "model_confidence": "HIGH",
-  "notes": null
+  "notes": null,
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 ```
 
@@ -238,7 +256,8 @@ Output:
   "classification": "NOT_RELEVANT",
   "reason_code": "PRODUCT_OR_COMMERCIAL",
   "model_confidence": "HIGH",
-  "notes": "Commercial partnership, no equity or M&A component mentioned"
+  "notes": "Commercial partnership, no equity or M&A component mentioned",
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 ```
 
@@ -256,7 +275,8 @@ Output:
   "classification": "NOT_RELEVANT",
   "reason_code": "RUMOR_OR_SPECULATION",
   "model_confidence": "HIGH",
-  "notes": "No definitive agreement; rumor coverage is out of scope"
+  "notes": "No definitive agreement; rumor coverage is out of scope",
+  "source_character": "ORIGINAL_REPORTING"
 }
 ```
 
@@ -277,7 +297,8 @@ Output:
   "classification": "RELEVANT",
   "reason_code": "VC_ROUND_OR_FUNDING",
   "model_confidence": "HIGH",
-  "notes": null
+  "notes": null,
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 ```
 
@@ -295,7 +316,8 @@ Output:
   "classification": "RELEVANT",
   "reason_code": "DEAL_AMENDMENT_OR_TERMINATION",
   "model_confidence": "HIGH",
-  "notes": "Termination of a previously announced deal — in scope for completeness"
+  "notes": "Termination of a previously announced deal — in scope for completeness",
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 ```
 
@@ -313,7 +335,8 @@ Output:
   "classification": "NOT_RELEVANT",
   "reason_code": "OTHER_NOT_RELEVANT",
   "model_confidence": "HIGH",
-  "notes": "Court-supervised sale process with advisors engaged and interested parties, but no established transaction counterparty — seeking a buyer is not a transaction"
+  "notes": "Court-supervised sale process with advisors engaged and interested parties, but no established transaction counterparty — seeking a buyer is not a transaction",
+  "source_character": "FIRST_PARTY_ANNOUNCEMENT"
 }
 ```
 
@@ -325,6 +348,7 @@ Output:
 | :--- | :--- | :--- |
 | Model returns explanation + JSON | Rare at temp 0.0, but possible | Parser extracts the first valid JSON object and logs the preamble |
 | Model returns invalid enum value | Possible if prompt updates expand enums | Parser rejects, marks row `PROMPT_FAILED`, logs for review |
+| Model returns invalid `source_character` | Possible, same class of failure as an off-enum `reason_code` | `_normalize_source_character` maps it to `UNKNOWN` rather than failing the row — the classification/reason_code gate is unaffected, and `UNKNOWN` resolves to the conservative T4 floor, never inventing authority |
 | Model refuses ("I cannot classify this") | Very rare; possible on releases with sensitive content | Parser treats refusal as `PROMPT_FAILED`, logs |
 | Empty response | API timeout or overload | Orchestrator retries once with 5s backoff, then marks `PROMPT_FAILED` |
 | Borderline cases (LOW confidence on either side) | Model returns `LOW` confidence | Orchestrator accepts classification but flags for QA sampling at a higher rate than HIGH/MEDIUM rows |
@@ -344,3 +368,4 @@ Output:
 | 0.7 | 2026-08-21 | **Prompt provenance is caller-owned (no response contract change beyond this).** `prompt_version` is removed from the response schema, the worked examples. The stage passes the authoritative version to `call_prompt` and stamps it on the row; the model was never told which version ran, so its answer could only come from a worked example — which is how `aggregation_conflict_log.prompt_version` recorded a version that had not run. See `prompts/prompt_conventions.md` 0.5. |
 | 0.8 | 2026-08-21 | **The reason_code vocabulary is now delivered to the model.** The authoritative 24-code list moved from §6 into the §4 system prompt; §4 and §5 are the only sections `load_prompt_file` sends, so the list previously reached nothing. The prompt asserted the codes were "listed in the in-scope and out-of-scope enumerations above" — prose category descriptions containing no enum values — so the model saw codes only incidentally, as the right-hand side of the invented-value correction list. Ten codes, including the in-scope `MERGER_ANNOUNCEMENT`, `SPIN_OFF_OR_SPLIT`, `REVERSE_MERGER` and `JOINT_VENTURE`, were never delivered at all; eight of those have no alias path and folded into the catch-alls. Taxonomy, side assignments, glosses, alias table and relevancy semantics are unchanged — this delivers the existing vocabulary, it does not redefine it. |
 | 0.9 | 2026-08-25 | **A sale process is not a transaction.** One EDGE CASES bullet: where a source describes only a process for seeking a buyer — formal sale process, court-supervised or bankruptcy auction, strategic-alternatives review, stated intention to sell, solicitation of bids, or advisors engaged to pursue a sale — and no counterparty to a specific acquisition or divestiture has been announced or agreed, classify NOT_RELEVANT with OTHER_NOT_RELEVANT. The counterparty test is scoped to this boundary and is not a general transaction requirement. A later source naming a stalking-horse bidder, winning bidder, definitive sale agreement or completed sale may be RELEVANT on its own terms. No reason code added (24 unchanged); the in-scope asset-sale/divestiture line and the rumor bullet are untouched. §7 Example 6 added as documentation (outside the delivered fence). |
+| 0.10 | 2026-09-03 | **`source_character` added — the one signal a known acquisition path cannot supply itself.** Source-authority tier (T1-T4) is deterministic policy (`lib/source_authority.py`), never a model output. Most sources already carry their authority classification from ingestion — a SEC filing's regulatory/operative identity, a subscribed PR Newswire/Business Wire/GlobeNewswire feed's own first-party-announcement character — and this stage never touches `source_tier` for those rows. `source_character` exists only for the residual case: a generically discovered source (`WEB_URL`) whose character no acquisition path established at ingestion. New SOURCE CHARACTER block (§4) and `source_character` response field, both delivered; five values (`FIRST_PARTY_ANNOUNCEMENT`, `THIN_FIRST_PARTY_RECORD`, `ORIGINAL_REPORTING`, `DERIVATIVE_REPORTING`, `UNKNOWN`), judged from the text's own voice, independent of RELEVANT/NOT_RELEVANT. The stage computes the model's answer for every row but only applies it — writing `source_raw.source_character` and the tier it resolves to — when the row did not already carry a known `source_character`; a known classification is never overwritten. Classification/reason_code semantics, the 24-code enum, and every existing example's relevance verdict are unchanged. |

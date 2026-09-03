@@ -22,6 +22,7 @@ import trafilatura
 from bs4 import BeautifulSoup
 
 from config import Config
+from lib.source_authority import resolve_tier
 from logger import get_logger
 from utils import content_hash as _content_hash
 
@@ -241,16 +242,23 @@ def insert_source_raw(
     fetched_at: str,
 ) -> int:
     """Insert a PR_NEWSWIRE row into source_raw.  Returns the new source_raw_id."""
+    # A subscribed PR Newswire feed is a known first-party announcement source
+    # (see lib/source_authority.py) -- resolved and stamped at ingestion, not
+    # left for Relevancy to (re)infer. Relevancy still runs for relevance, but
+    # skips source_character/tier inference once it sees this already set.
+    source_character = "FIRST_PARTY_ANNOUNCEMENT"
+    source_tier = resolve_tier(source_character=source_character)
     cur = conn.execute(
         """
         INSERT INTO source_raw
-            (source_type, source_tier, url, title, published_date,
+            (source_type, source_tier, source_character, url, title, published_date,
              raw_html, clean_text, content_hash, source_status, notes, fetched_at)
         VALUES
-            ('PR_NEWSWIRE', 'T2', ?, ?, ?,
+            ('PR_NEWSWIRE', ?, ?, ?, ?, ?,
              ?, ?, ?, 'FETCHED', ?, ?)
         """,
-        (url, title, published_date, raw_html, clean_text, c_hash, notes, fetched_at),
+        (source_tier, source_character, url, title, published_date,
+         raw_html, clean_text, c_hash, notes, fetched_at),
     )
     conn.commit()
     return cur.lastrowid

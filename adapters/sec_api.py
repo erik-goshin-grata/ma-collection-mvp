@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from config import Config
+from lib.source_authority import resolve_tier
 from logger import get_logger
 from utils import content_hash as _content_hash
 
@@ -642,19 +643,29 @@ def insert_source_raw(
     notes: str | None,
     fetched_at: str,
     source_status: str = "FETCHED",
+    source_tier: str = "T1",
+    source_character: str | None = None,
 ) -> int:
-    """Insert a SEC row into source_raw.  Returns the new source_raw_id."""
+    """Insert a SEC row into source_raw.  Returns the new source_raw_id.
+
+    `source_tier` defaults to T1 -- the SEC adapter's known-provenance path is
+    regulatory/operative transaction evidence for every current call site
+    except the EX-99.x press-release case, which passes T2/FIRST_PARTY_
+    ANNOUNCEMENT explicitly (see the Exhibit 99.x insert below and
+    lib/source_authority.py: SEC provenance alone does not make every
+    SEC-hosted component T1).
+    """
     cur = conn.execute(
         """
         INSERT INTO source_raw
-            (source_type, source_tier, url, title, published_date,
+            (source_type, source_tier, source_character, url, title, published_date,
              raw_html, clean_text, content_hash, source_status, notes, fetched_at)
         VALUES
-            (?, 'T1', ?, ?, ?,
+            (?, ?, ?, ?, ?, ?,
              ?, ?, ?, ?, ?, ?)
         """,
         (
-            source_type, url, title, published_date,
+            source_type, source_tier, source_character, url, title, published_date,
             raw_html, clean_text, c_hash, source_status, notes, fetched_at,
         ),
     )
@@ -1265,10 +1276,11 @@ def run_per_transaction(
                         None,
                         {
                             "sec_document_subtype": "ITEM_NARRATIVE",
-                            "process_as_attached_source": False,
+                            "process_as_attached_source": True,
                         },
                     ),
                     fetched_at=fetched_at,
+                    source_status="RELEVANT",
                 )
                 result["rows_inserted"] += 1
                 log.info(
@@ -1280,7 +1292,31 @@ def run_per_transaction(
                 sec_source_raw_id = _find_source_raw_id(
                     conn, c_hash, f"{filing_url}#item={selected_item}"
                 )
+                if sec_source_raw_id:
+                    conn.execute(
+                        "UPDATE source_raw SET source_status='RELEVANT', updated_at=? WHERE source_raw_id=?",
+                        (datetime.now(timezone.utc).isoformat(), sec_source_raw_id),
+                    )
+                    conn.commit()
             result["item_extracted"] = selected_item
+
+            # Route the item narrative through the same contextual-attached-source
+            # path already used for processable SEC EX-99.x exhibits, so it gets its
+            # own independent staging_extraction row and flows through the existing
+            # HC/4b/LC extraction stages unmodified. It inherits the parent
+            # extraction's classification context (same as EX-99.x) rather than
+            # proving standalone relevancy — the item text is, by construction,
+            # about the same triggered deal. No change to HC/LC prompts,
+            # reconciliation, Stage 8/9, or Agreement (Stage 10/11) routing.
+            if sec_source_raw_id and _queue_contextual_extraction(
+                conn,
+                parent_extraction_id=extraction_id,
+                sec_source_raw_id=sec_source_raw_id,
+                sec_source_type=source_type,
+                sec_document_subtype="ITEM_NARRATIVE",
+                log=log,
+            ):
+                result["attached_sources_queued"] += 1
         else:
             # Extractor returned empty body — insert row with clean_text=NULL per spec §6
             log.warning(
@@ -1380,6 +1416,17 @@ def run_per_transaction(
             c_hash = _content_hash(ex_text)
             subtype = _classify_exhibit_99(label, ex_text)
             process_as_attached = subtype in _PROCESSABLE_EXHIBIT_99_SUBTYPES
+            # SEC provenance alone does not make every SEC-hosted component
+            # T1: a PRESS_RELEASE exhibit is the company's own first-party
+            # announcement, not operative evidence. DEAL_NARRATIVE/
+            # INVESTOR_PRESENTATION/OTHER are unaffected -- they stay T1
+            # (insert_source_raw's default), unchanged from prior behavior.
+            if subtype == "PRESS_RELEASE":
+                exhibit_character = "FIRST_PARTY_ANNOUNCEMENT"
+                exhibit_tier = resolve_tier(source_character=exhibit_character)
+            else:
+                exhibit_character = None
+                exhibit_tier = resolve_tier(known_tier="T1")
             sec_source_raw_id = None
             if not conn.execute(
                 "SELECT 1 FROM source_raw WHERE content_hash=?", (c_hash,)
@@ -1403,6 +1450,8 @@ def run_per_transaction(
                     ),
                     fetched_at=fetched_at,
                     source_status="RELEVANT" if process_as_attached else "FETCHED",
+                    source_tier=exhibit_tier,
+                    source_character=exhibit_character,
                 )
                 result["rows_inserted"] += 1
                 result["exhibit_99_fetched_count"] += 1

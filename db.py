@@ -309,6 +309,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     # the pipeline crashed at classify. Apply each once, guarded by a sentinel
     # column so this is idempotent on already-migrated DBs.
     _mig_dir = Path(__file__).parent / "schema"
+    # 022 (source_character: whose voice a source is in). Column sentinel.
+    if "source_character" not in _existing("source_raw"):
+        conn.executescript((_mig_dir / "022_v3_source_character.sql").read_text(encoding="utf-8"))
+
     if "v2_event_type" not in _existing("staging_extraction"):
         conn.executescript((_mig_dir / "002_v2_prompt_alignment.sql").read_text(encoding="utf-8"))
     if "round_size" not in _existing("staging_extraction"):
