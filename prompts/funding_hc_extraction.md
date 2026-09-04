@@ -1,6 +1,6 @@
 # Funding High-Confidence Extraction Prompt
 
-**Version:** 0.7 (the terms axis reaches funding)
+**Version:** 0.8 (investors[] is membership in this financing, not appearance in the source)
 **Repo path:** `prompts/funding_hc_extraction.md`
 
 ---
@@ -94,8 +94,43 @@ company:
 
 INVESTORS
 
-investors: Array of investor objects. One element per named investor.
-Extract ALL named investors, not just the lead.
+investors: Array of investor objects. One element per named investor or
+lender participating IN THE PROFILED FINANCING TRANSACTION — the round or
+facility this response describes, not every capital source or supporter the
+source mentions. Extract ALL named investors participating in that round or
+facility, not just the lead.
+
+MEMBERSHIP: PARTICIPATING IN THIS FINANCING, NOT MERELY NAMED NEARBY
+
+A named party belongs in investors[] only when the source establishes it as
+a participant in the round or facility being profiled:
+- Named investors, co-investors, and lead investors in the round.
+- A named lender in a VENTURE_DEBT facility (investor_type = "lender") is
+  still a valid investors[] member — this membership rule narrows WHO
+  counts as a participant, it does not remove lenders from that group.
+
+The following are NOT investors[] members, even when named in the same
+source:
+- Grants, non-dilutive funding, awards, subsidies, philanthropic support, or
+  research funding are not investment. A named grantor, foundation, or
+  awarding body is not an investor, even when the release discusses the
+  grant alongside the financing round.
+- Language that explicitly sets a source of support apart from the
+  financing round — "complemented by," "in addition to," "separately,"
+  "alongside" — states that it is NOT part of the round; do not merge it
+  in. A $30M Series B "complemented by" non-dilutive funding from two named
+  foundations is a $30M round with the round's own named investors, not a
+  round with those foundations added as investors.
+- Unnamed groups — "existing and new investors," "other investors," "a
+  group of undisclosed backers" — do not license a synthetic investor
+  record. An unnamed group is not a named investor: do not invent an entry
+  to represent it, and do not count it toward is_lead or
+  lead_investor_rank.
+
+The test is participation in THIS financing, not appearance in the same
+source. A named party doing something else adjacent to the round (a grant,
+an unrelated partnership, a passing mention) does not become an investor by
+being mentioned nearby.
 
 For each investor:
 - name: Investor name as stated
@@ -970,6 +1005,102 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 
 ---
 
+**Example 7 — Named non-dilutive funders are not investors:**
+
+Input:
+```
+SOURCE TYPE: PR_NEWSWIRE
+SOURCE TIER: T2
+V2 EVENT TYPE: VC_ROUND
+EVENT HISTORY TYPE: ANNOUNCED
+PUBLISHED DATE: 2026-08-30
+TITLE: NovaGo Therapeutics Announces CHF 24M / USD 30M Series B
+BODY: NovaGo Therapeutics today announced a CHF 24 million (USD 30 million)
+Series B financing led by Neurimmune and Pureos Bioventures, with
+participation from existing and new investors. The equity financing was
+complemented by non-dilutive funding from the Swiss Paraplegic Foundation
+and Wings for Life.
+```
+
+Output:
+```json
+{
+  "transactions": [
+    {
+      "company": {
+        "name": "NovaGo Therapeutics",
+        "domain": null,
+        "ticker": null,
+        "description": null
+      },
+      "investors": [
+        {
+          "name": "Neurimmune",
+          "domain": null,
+          "investor_type": "vc_firm",
+          "is_lead": true,
+          "lead_investor_rank": 1,
+          "investment_amount": null,
+          "investment_currency": null,
+          "is_new_investor": null,
+          "is_existing_investor": null
+        },
+        {
+          "name": "Pureos Bioventures",
+          "domain": null,
+          "investor_type": "vc_firm",
+          "is_lead": true,
+          "lead_investor_rank": 1,
+          "investment_amount": null,
+          "investment_currency": null,
+          "is_new_investor": null,
+          "is_existing_investor": null
+        }
+      ],
+      "round": {
+        "label": "Series B",
+        "size": 30000000,
+        "currency": "USD",
+        "pre_money_valuation": null,
+        "post_money_valuation": null,
+        "valuation_currency": null,
+        "facility_size": null,
+        "total_raised_to_date": null,
+        "is_extension_round": false,
+        "round_price_direction": null,
+        "is_bridge_round": false
+      },
+      "dates": {
+        "announced_date": "2026-08-30",
+        "announced_date_precision": "exact",
+        "closed_date": "2026-08-30",
+        "closed_date_precision": "exact"
+      },
+      "financials_disclosure_status": "UNKNOWN",
+      "transaction_terms_disclosure_status": "DISCLOSED",
+      "consideration_type": "equity",
+      "pct_acquired": null,
+      "model_confidence": "HIGH",
+      "notes": "Swiss Paraplegic Foundation and Wings for Life provide non-dilutive funding explicitly described as complementing, not part of, the Series B -- not investors[] members. 'Existing and new investors' is an unnamed group and does not license a synthetic investor entry."
+    }
+  ]
+}
+```
+
+**Two co-leads, not a synthetic third.** The source names two lead investors and no
+ranking between them; both take `lead_investor_rank: 1` rather than inventing an order
+the source did not state. "Existing and new investors" describes unnamed participants
+in the same round and still does not become an investors[] entry -- membership requires
+a name, whether the party is an investor or not.
+
+**Why the foundations are absent.** Both are named, and both appear in the same
+release as the financing -- exactly the case where naming alone might look like enough.
+It is not. "Complemented by" is the source's own language separating the non-dilutive
+funding from the Series B, and grants/awards/non-dilutive funding are not investment
+regardless of separation language. Both tests independently exclude them here.
+
+---
+
 ## 8. Failure Modes
 
 | Failure | Handling |
@@ -986,6 +1117,8 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | Legacy uppercase investor_type (VC_FIRM etc.) | Parser normalizes to lowercase; logs warning |
 | `financials_disclosure_status` or `transaction_terms_disclosure_status` missing | Parser rejects — both axes are required |
 | Model reports a stated round size as `financials_disclosure_status = DISCLOSED` | Round size is the TERMS axis; the prompt says so and works the mixed answer both ways |
+| Model includes a named grantor/foundation, or a source of non-dilutive funding stated as separate from the round, in `investors[]` | §4's MEMBERSHIP block and Example 7 (NovaGo) address; the acceptance defect this version fixes |
+| Model invents a synthetic entry for an unnamed group ("existing and new investors") | §4's MEMBERSHIP block and Example 7 explicitly forbid; an unnamed group is not a named investor |
 
 ---
 
@@ -999,4 +1132,5 @@ direction, and it is a different fact from `FLAT`, which asserts the valuation i
 | 0.4 | 2026-08-24 | **`pct_acquired` added to the funding contract.** The funding path had no author for it: Stage 4 excludes funding event types and Stage 4b never asked, so an explicitly stated stake — routine in growth equity — was lost even though the staging column, the observation group and the canonical column all already carried it. The field is **stated or null**: majority/control framing, acquisition framing, and any computation from round size and valuation are all explicitly forbidden, and an unstated percentage is never rounded to 100. Example 2 already described a stated 65% in prose because the response had nowhere to put it; it now carries the value. |
 | 0.5 | 2026-08-26 | **`use_of_proceeds` added to the funding contract.** A V3 §7 `ADD` field — "source-stated intended use of the capital raised" — with a staging column, a place in the funding observation group, a canonical column Stage 9 owns and a slot on the funding review sheet, and no author anywhere. It was drafted in full for a **Funding LC** stage the design never called for; that prompt was archived to `docs/` and the columns outlived it. Both of this prompt's own worked examples contain the sentence — "the proceeds will be used to expand the company's sales team and accelerate product development" — in a contract that never asked for it. **Field-like, not prose**, by Product ruling: explicitly stated uses only, each a one- or two-word noun phrase with the verb, possessive and promotional wording stripped, every distinct use preserved comma-separated in the order stated, and null when unstated. The scalar `TEXT` datatype is preserved — V3 types it `DATA POINT`, not a repeating relationship — so multiple uses share one field, following the comma-delimit convention this repository already uses for co-sponsors. Growth, strategy and momentum framing states no use and yields null; a stated-but-broad use like "general corporate purposes" is captured as stated, because the test is whether the source states a use, not whether the use is specific. `has_board_seat` and `board_seat_notes` were drafted alongside it and are deliberately NOT added: V3 lists a flat board-representation flag and note as residue, superseded by a participant relationship with the named representative. |
 | 0.6 | 2026-08-27 | **`use_of_proceeds` becomes a bounded vocabulary.** 0.5 asked for one- or two-word noun phrases in the source's own words, and a review of seven fresh funding rows showed the predictable result: the model normalized honestly but had no bound, so one release produced ten items including five separate "...capabilities" and both "customer deliveries" and "customer deployments", while others ran to four words. Free text cannot be aggregated, compared across rows, or conflict-resolved. The fix is not a length rule. Eleven categories plus `OTHER` are **enumerated from the vocabulary the sources actually use** -- the method `advisor_specialty` established -- and every one is evidenced by real phrasing in the funding corpus except `ACQUISITIONS`, `DEBT_REPAYMENT` and `WORKING_CAPITAL`, added on Product ruling as common and materially distinct uses that should not route through `OTHER`. Designed on the `strategic_rationale` pattern: bounded taxonomy, source-stated evidence only, `OTHER` as the honest fallback -- but **flat rather than primary-plus-secondary**, because a round's proceeds genuinely split several ways with no ranking stated. Two boundaries are written out because the corpus turns on them: headcount is `HIRING` whatever the department, and building is `PRODUCT_AND_TECHNOLOGY` while selling is `GO_TO_MARKET`, with sources spanning both returning both. **Unchanged:** the source-stated-only gate, null when unstated, the scalar `TEXT` datatype and its comma-delimited representation, and V3's `DATA POINT` typing. No schema change. |
+| 0.8 | 2026-09-04 | **`investors[]` is membership in the profiled financing, not appearance in the source.** A fresh acceptance case (NovaGo Therapeutics: a Series B "complemented by" non-dilutive funding from two named foundations) showed the prompt correctly explained in `notes` that the foundations were not equity investors and were separate from the round, yet still placed them in structured `investors[]` -- the explanation and the structured answer disagreed, and only the structured answer reaches canonical. §4 INVESTORS gains a MEMBERSHIP block: grants, non-dilutive funding, awards, subsidies, philanthropic support and research funding are never investment regardless of naming; language separating a support source from the round ("complemented by," "in addition to," "separately," "alongside") is the source stating it is NOT part of the round; unnamed groups ("existing and new investors") do not license a synthetic entry. A named `VENTURE_DEBT` lender remains a valid member -- this narrows who counts as a participant, it does not remove lenders from that group. No response-schema change; no change to per-field extraction rules (`is_lead`, `investment_amount`, etc.), which were never in question. Example 7 added. |
 | 0.7 | 2026-08-27 | **The second disclosure axis reaches the funding path too.** `transaction_terms_disclosure_status` joins `financials_disclosure_status` with the same vocabulary and the same required-ness, so a round whose size was withheld is distinguishable from one whose company financials were. **`financials_disclosure_status` narrows on this path**: it was defined here as "at least one financial value (round size, valuation) is stated", which is the round's terms and not the company's numbers at all. It now means the company's own operating financials -- ARR, revenue, EBITDA -- and the round's economics move to the new field. The §4 worked example moves with the definition. The most common funding release states a round size and no company financials, which is DISCLOSED terms and UNKNOWN financials, and the prompt works that case explicitly because copying one answer into the other field is the failure this correction exists to prevent. Both write paths carry it -- this stage keeps two separate parameter tuples by design, and a field added to one and not the other vanishes from every multi-transaction source. |
