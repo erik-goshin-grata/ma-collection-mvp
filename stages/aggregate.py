@@ -46,6 +46,7 @@ from typing import Any
 
 from config import DEFAULT_AGGREGATION_READ_SOURCE, Config
 from lib.field_priority import TIER_ORDER
+from lib.investor_participant import materialize_investor_participants
 from lib.observation_writer import (
     MULTIPLE_FIELD_PREFIX as _MULTIPLE_FIELD_PREFIX,
     reported_multiple_field_name,
@@ -2599,6 +2600,13 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
                 conn, cluster_id, field_values, flagged_multiple_keys,
                 bundle["field_observations"], log,
             )
+
+            # Bridge structured funding investors (staging_investor, written by
+            # Stage 4b) into the canonical participant model now that a
+            # transaction_id exists. Must follow the transaction_record INSERT
+            # above for the FK. No-op (0 rows) for non-funding clusters, since
+            # only stages/funding_hc_extract.py ever writes staging_investor.
+            materialize_investor_participants(conn, cluster_id, log)
 
             # Insert transaction_source rows for each cluster member's source
             for source in bundle["sources"]:

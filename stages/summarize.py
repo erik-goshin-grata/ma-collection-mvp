@@ -109,6 +109,42 @@ def _validate(result: dict) -> str | None:
     return None
 
 
+def _build_investors_summary(conn: sqlite3.Connection, transaction_id: str) -> list[dict]:
+    """Named canonical funding investors for this transaction, lead first.
+
+    Reads the canonical transaction_participant / entity rows materialized by
+    lib.investor_participant (called from Stage 9, after transaction_record
+    exists) -- not staging_investor directly, so this reflects the same
+    deduplicated-across-sources record Stage 9 wrote. [] when the transaction
+    has no materialized investors (an M&A transaction, or a funding round
+    that named none), not None: a real, meaningful state, not "unknown".
+    """
+    rows = conn.execute(
+        """
+        SELECT e.canonical_name AS name, tp.is_lead,
+               tp.is_new_investor, tp.is_existing_investor
+        FROM transaction_participant tp
+        JOIN entity e ON e.entity_id = tp.entity_id
+        WHERE tp.transaction_id = ?
+          AND tp.participant_role = 'INVESTOR'
+          AND tp.is_current = 1
+        ORDER BY tp.is_lead DESC, e.canonical_name
+        """,
+        (transaction_id,),
+    ).fetchall()
+    return [
+        {
+            "name": r["name"],
+            "is_lead": bool(r["is_lead"]),
+            "is_new_investor": (bool(r["is_new_investor"])
+                                 if r["is_new_investor"] is not None else None),
+            "is_existing_investor": (bool(r["is_existing_investor"])
+                                      if r["is_existing_investor"] is not None else None),
+        }
+        for r in rows
+    ]
+
+
 def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
     """Generate deal summaries for current transaction records.
 
@@ -204,6 +240,10 @@ def run(conn: sqlite3.Connection, cfg: Config, run_id: str) -> dict:
             "is_extension_round": tr["is_extension_round"],
             "is_bridge_round": tr["is_bridge_round"],
             "use_of_proceeds": tr["use_of_proceeds"],
+            # Canonical, deduplicated-across-sources named investors (see
+            # lib.investor_participant). [] when none were named -- plumbing
+            # only; the prompt is not yet updated to narrate this (deferred).
+            "investors": _build_investors_summary(conn, tid),
         })
 
         def _f(v) -> str:
